@@ -81,11 +81,13 @@ jobs:
             LOCALVERSION=+ \
             olddefconfig
 
-          echo "=== Verifying KSU, SUSFS, NoMount & fgetpriority Kconfig state ==="
-          grep -E "^CONFIG_(KSU|NOMOUNT|FGETPRIORITY|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
+          echo "=== Verifying KSU, SUSFS, KALLSYMS_ALL, NoMount & fgetpriority Kconfig state ==="
+          grep -E "^CONFIG_(KSU|KALLSYMS|NOMOUNT|FGETPRIORITY|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
           grep -q "^CONFIG_KSU=y$" out/.config
           grep -q "^CONFIG_KSU_MANUAL_HOOK=y$" out/.config
           grep -q "^CONFIG_KSU_SUSFS=y$" out/.config
+          grep -q "^CONFIG_KALLSYMS=y$" out/.config
+          grep -q "^CONFIG_KALLSYMS_ALL=y$" out/.config
           grep -q "^CONFIG_NOMOUNT=m$" out/.config
           grep -q "^CONFIG_FGETPRIORITY=m$" out/.config
           grep -q "^CONFIG_TMPFS_XATTR=y$" out/.config
@@ -402,17 +404,20 @@ jobs:
           cat dist/SHA256SUMS.txt
           ls -lh dist/
 
+          AK3_SIZE="$(stat -c '%s' "dist/${ZIP_NAME}")"
+          AK3_SHA="$(sha256sum "dist/${ZIP_NAME}" | awk '{print $1}')"
           FGP_KO_SIZE="$(stat -c '%s' dist/fgetpriority.ko)"
           FGP_KO_SHA="$(sha256sum dist/fgetpriority.ko | awk '{print $1}')"
           FGP_ZIP_SIZE="$(stat -c '%s' "dist/${FGP_ZIP}")"
           FGP_ZIP_SHA="$(sha256sum "dist/${FGP_ZIP}" | awk '{print $1}')"
           FGP_VM="$(/sbin/modinfo -F vermagic dist/fgetpriority.ko)"
           FGP_VER="$(/sbin/modinfo -F version dist/fgetpriority.ko)"
-          echo "::notice title=FgetpriorityLKMVerified::fgetpriority.ko (${FGP_KO_SIZE} B, sha256=${FGP_KO_SHA}, version='${FGP_VER}', vermagic='${FGP_VM}') | ${FGP_ZIP} (${FGP_ZIP_SIZE} B, sha256=${FGP_ZIP_SHA})"
+          echo "::notice title=BuildVerified::${ZIP_NAME} (${AK3_SIZE} B, sha256=${AK3_SHA}, CONFIG_KALLSYMS_ALL=y) | fgetpriority.ko (${FGP_KO_SIZE} B, sha256=${FGP_KO_SHA}, version='${FGP_VER}', vermagic='${FGP_VM}') | ${FGP_ZIP} (${FGP_ZIP_SIZE} B, sha256=${FGP_ZIP_SHA})"
 
           {
             echo "## Moto G41 (\`corfu\`) 4.19.191+ Build Summary"
-            echo "- **Kernel**: Linux \`4.19.191+\` | KernelSU-Next \`v3.4.2\` (\`33355\`) + SUSFS \`v2.3.0\`"
+            echo "- **Kernel**: Linux \`4.19.191+\` (\`CONFIG_KALLSYMS_ALL=y\`) | KernelSU-Next \`v3.4.2\` (\`33355\`) + SUSFS \`v2.3.0\`"
+            echo "- **AnyKernel3 (\`${ZIP_NAME}\`)**: \`${AK3_SIZE}\` bytes, SHA-256: \`${AK3_SHA}\`"
             echo "- **fgetpriority LKM**: \`v0.0.4\` (\`version=${FGP_VER}\`, \`vermagic=${FGP_VM}\`, \`${FGP_KO_SIZE}\` bytes, SHA-256: \`${FGP_KO_SHA}\`)"
             echo "- **\`${FGP_ZIP}\` SHA-256**: \`${FGP_ZIP_SHA}\`"
             echo "- **NoMount LKM**: \`v2.2.0\` (\`22 (605)\`)"
