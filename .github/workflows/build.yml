@@ -1,4 +1,4 @@
-name: Build Moto G41 (corfu) KernelSU-Next + SUSFS
+name: Build Moto G41 (corfu) KernelSU-Next + SUSFS + NoMount LKM
 
 on:
   push:
@@ -16,7 +16,7 @@ env:
 
 jobs:
   build:
-    name: Build corfu 4.19.191+ (KernelSU-Next v3.4.2 + SUSFS v2.3.0)
+    name: Build corfu 4.19.191+ (KernelSU-Next v3.4.2 + SUSFS v2.3.0 + NoMount v2.2.0 LKM)
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
@@ -81,15 +81,16 @@ jobs:
             LOCALVERSION=+ \
             olddefconfig
 
-          echo "=== Verifying KSU & SUSFS Kconfig state ==="
-          grep -E "^CONFIG_(KSU|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
+          echo "=== Verifying KSU, SUSFS & NoMount LKM Kconfig state ==="
+          grep -E "^CONFIG_(KSU|NOMOUNT|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
           grep -q "^CONFIG_KSU=y$" out/.config
           grep -q "^CONFIG_KSU_MANUAL_HOOK=y$" out/.config
           grep -q "^CONFIG_KSU_SUSFS=y$" out/.config
+          grep -q "^CONFIG_NOMOUNT=m$" out/.config
           grep -q "^CONFIG_TMPFS_XATTR=y$" out/.config
           grep -q "^CONFIG_MODVERSIONS=y$" out/.config
 
-      - name: Compile Kernel (Image.gz), Modules, and MT6768 DTB
+      - name: Compile Kernel (Image.gz), Modules (incl. NoMount v2.2.0 LKM), and MT6768 DTB
         run: |
           set -o pipefail
           CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
@@ -120,7 +121,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify vermagic, KernelSU-Next & SUSFS symbols, and build dtb.img
+      - name: Verify vermagic, KernelSU-Next, SUSFS, NoMount v2.2.0 LKM, and build dtb.img
         run: |
           CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
           export PATH="${CLANG_DIR}/bin:${PATH}"
@@ -141,6 +142,10 @@ jobs:
             echo "::error title=MissingDtb::out/arch/arm64/boot/dts/mediatek/mt6768.dtb not found"
             exit 1
           fi
+          if [ ! -f out/fs/nomount/nomount.ko ]; then
+            echo "::error title=MissingNoMountKo::out/fs/nomount/nomount.ko not found"
+            exit 1
+          fi
 
           echo "=== Verifying linked KernelSU-Next & SUSFS symbols in vmlinux ==="
           llvm-nm out/vmlinux > out/vmlinux.syms
@@ -151,6 +156,42 @@ jobs:
             fi
           done
           grep -E " (kernelsu_init|susfs_init|ksu_handle_sys_reboot|is_ksu_transition|ksu_adb_root_handle_execve_manual)([.$].*)?$" out/vmlinux.syms
+
+          echo "=== Preparing & verifying NoMount v2.2.0 LKM (nomount-4.19.ko) ==="
+          mkdir -p dist
+          cp out/fs/nomount/nomount.ko dist/nomount-4.19.ko
+          if [ -x "${CLANG_DIR}/bin/llvm-strip" ]; then
+            "${CLANG_DIR}/bin/llvm-strip" --strip-debug dist/nomount-4.19.ko
+          else
+            aarch64-linux-gnu-strip --strip-debug dist/nomount-4.19.ko
+          fi
+          if grep -q "^CONFIG_MODULE_SIG=y$" out/.config && [ -x out/scripts/sign-file ]; then
+            SIG_HASH="$(sed -n 's/^CONFIG_MODULE_SIG_HASH="\(.*\)"$/\1/p' out/.config)"
+            SIG_KEY="$(sed -n 's/^CONFIG_MODULE_SIG_KEY="\(.*\)"$/\1/p' out/.config)"
+            out/scripts/sign-file "${SIG_HASH}" "out/${SIG_KEY}" out/certs/signing_key.x509 dist/nomount-4.19.ko
+          fi
+          cp dist/nomount-4.19.ko dist/nomount.ko
+
+          file dist/nomount-4.19.ko
+          /sbin/modinfo dist/nomount-4.19.ko | tee dist/nomount-modinfo.txt
+          echo "--- MODVERSIONS CRCs ---" >> dist/nomount-modinfo.txt
+          /sbin/modprobe --dump-modversions dist/nomount-4.19.ko >> dist/nomount-modinfo.txt 2>&1 || true
+
+          KO_VERMAGIC="$(/sbin/modinfo -F vermagic dist/nomount-4.19.ko)"
+          KO_VERSION="$(/sbin/modinfo -F version dist/nomount-4.19.ko)"
+          case "${KO_VERMAGIC}" in
+            "4.19.191+ "*modversions*aarch64*)
+              echo "Verified NoMount LKM vermagic: ${KO_VERMAGIC}"
+              ;;
+            *)
+              echo "::error title=NoMountVermagicMismatch::Unexpected vermagic '${KO_VERMAGIC}'"
+              exit 1
+              ;;
+          esac
+          if [ "${KO_VERSION}" != "22 (605)" ]; then
+            echo "::error title=NoMountVersionMismatch::Expected version '22 (605)', got '${KO_VERSION}'"
+            exit 1
+          fi
 
           echo "=== Wrapping mt6768.dtb into Android dt_table dtb.img ==="
           python3 - << 'PY'
@@ -164,7 +205,7 @@ jobs:
           print(f"Created out/arch/arm64/boot/dtb.img ({total_size} bytes)")
           PY
 
-      - name: Package Flashable AnyKernel3 Zip
+      - name: Package AnyKernel3 Zip & NoMount v2.2.0 Metamodule Zip (with corfu LKM)
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "${RUNNER_TEMP}/AnyKernel3"
           rm -rf "${RUNNER_TEMP}/AnyKernel3/.git" "${RUNNER_TEMP}/AnyKernel3/modules" "${RUNNER_TEMP}/AnyKernel3/patch" "${RUNNER_TEMP}/AnyKernel3/ramdisk"
@@ -206,22 +247,84 @@ jobs:
 
           SHORT_SHA="$(git rev-parse --short=7 HEAD)"
           ZIP_NAME="KernelSU-Next-v3.4.2-SUSFS-v2.3.0-corfu-4.19.191-${SHORT_SHA}.zip"
-          mkdir -p dist
           (
             cd "${RUNNER_TEMP}/AnyKernel3"
             zip -r9 "${GITHUB_WORKSPACE}/dist/${ZIP_NAME}" . -x "*.git*" "README.md" "*placeholder"
           )
+
+          echo "=== Bundling NoMount v2.2.0 Metamodule with corfu 4.19.191+ LKM ==="
+          curl -fL --retry 3 \
+            "https://github.com/maxsteeel/nomount/releases/download/v2.2.0/NoMount-v2.2.0-release-605.zip" \
+            -o "${RUNNER_TEMP}/NoMount-v2.2.0-release-605.zip"
+          mkdir -p "${RUNNER_TEMP}/nomount-metamodule"
+          unzip -q "${RUNNER_TEMP}/NoMount-v2.2.0-release-605.zip" -d "${RUNNER_TEMP}/nomount-metamodule"
+          mkdir -p "${RUNNER_TEMP}/nomount-metamodule/lkm"
+          install -m 0644 dist/nomount-4.19.ko "${RUNNER_TEMP}/nomount-metamodule/lkm/nomount-4.19.ko"
+
+          for req in lkm/nomount-4.19.ko bin/nm-arm64 bin/lkmloader-arm64 customize.sh common.sh module.prop; do
+            if [ ! -f "${RUNNER_TEMP}/nomount-metamodule/${req}" ]; then
+              echo "::error title=MissingNoMountFile::Missing ${req} in NoMount metamodule bundle"
+              exit 1
+            fi
+          done
+
+          NM_ZIP="NoMount-v2.2.0-release-605-corfu-4.19.191.zip"
+          (
+            cd "${RUNNER_TEMP}/nomount-metamodule"
+            zip -qr9 "${GITHUB_WORKSPACE}/dist/${NM_ZIP}" .
+          )
+
           cp out/arch/arm64/boot/Image.gz dist/Image.gz
           cp out/arch/arm64/boot/dtb.img dist/dtb.img
           cp out/.config dist/corfu_kernel.config
           cp out/Module.symvers dist/Module.symvers
+
+          (
+            cd dist
+            sha256sum nomount-4.19.ko nomount.ko "${NM_ZIP}" "${ZIP_NAME}" > nomount-SHA256SUMS.txt
+          )
+          cat dist/nomount-SHA256SUMS.txt
           ls -lh dist/
+
+          KO_SIZE="$(stat -c '%s' dist/nomount-4.19.ko)"
+          KO_SHA="$(sha256sum dist/nomount-4.19.ko | awk '{print $1}')"
+          NM_SIZE="$(stat -c '%s' "dist/${NM_ZIP}")"
+          NM_SHA="$(sha256sum "dist/${NM_ZIP}" | awk '{print $1}')"
+          KO_VM="$(/sbin/modinfo -F vermagic dist/nomount-4.19.ko)"
+          KO_VER="$(/sbin/modinfo -F version dist/nomount-4.19.ko)"
+          echo "::notice title=NoMountLKMVerified::nomount-4.19.ko (${KO_SIZE} B, sha256=${KO_SHA}, version='${KO_VER}', vermagic='${KO_VM}') | ${NM_ZIP} (${NM_SIZE} B, sha256=${NM_SHA})"
+
+          {
+            echo "## Moto G41 (\`corfu\`) 4.19.191+ Build Summary"
+            echo "- **Kernel**: Linux \`4.19.191+\` | KernelSU-Next \`v3.4.2\` (\`33355\`) + SUSFS \`v2.3.0\`"
+            echo "- **NoMount LKM**: \`v2.2.0\` (Driver Protocol \`${KO_VER}\`, \`vermagic=${KO_VM}\`, \`${KO_SIZE}\` bytes)"
+            echo "- **\`nomount-4.19.ko\` SHA-256**: \`${KO_SHA}\`"
+            echo "- **\`${NM_ZIP}\` SHA-256**: \`${NM_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload NoMount v2.2.0 Standalone LKM (corfu 4.19.191+)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoMount-v2.2.0-corfu-4.19.191-LKM
+          path: |
+            dist/nomount-4.19.ko
+            dist/nomount.ko
+            dist/nomount-modinfo.txt
+            dist/nomount-SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Upload NoMount v2.2.0 Metamodule Zip (corfu LKM pre-bundled)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoMount-v2.2.0-corfu-Metamodule
+          path: dist/NoMount-v2.2.0-release-605-corfu-4.19.191.zip
+          if-no-files-found: error
 
       - name: Upload AnyKernel3 Flashable Zip
         uses: actions/upload-artifact@v4
         with:
           name: KernelSU-Next-v3.4.2-SUSFS-v2.3.0-corfu-AnyKernel3
-          path: dist/*.zip
+          path: dist/KernelSU-Next-*.zip
           if-no-files-found: error
 
       - name: Upload Raw Kernel Images & Build Metadata
@@ -233,4 +336,5 @@ jobs:
             dist/dtb.img
             dist/corfu_kernel.config
             dist/Module.symvers
+            dist/nomount-4.19.ko
           if-no-files-found: error
