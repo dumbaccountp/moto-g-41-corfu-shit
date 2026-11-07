@@ -1,0 +1,236 @@
+name: Build Moto G41 (corfu) KernelSU-Next + SUSFS
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: kernel-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: Build corfu 4.19.191+ (KernelSU-Next v3.4.2 + SUSFS v2.3.0)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Maximize runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates cpio curl \
+            device-tree-compiler file flex gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi git kmod \
+            libelf-dev libncurses-dev libssl-dev lz4 openssl perl \
+            python2 python3 python-is-python3 rsync unzip xz-utils zip zstd
+
+      - name: Fetch AOSP Clang r383902 (11.0.1 - stock corfu toolchain)
+        run: |
+          git clone --depth=1 -b 10.0 \
+            https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078.git \
+            "${RUNNER_TEMP}/clang-r383902"
+          "${RUNNER_TEMP}/clang-r383902/bin/clang" --version
+          "${RUNNER_TEMP}/clang-r383902/bin/ld.lld" --version
+
+      - name: Configure Moto G41 (corfu) defconfig + fragments
+        run: |
+          mkdir -p out
+          cat \
+            arch/arm64/configs/k69v1_64_k419_defconfig \
+            arch/arm64/configs/ext_config/moto-k69v1_64.config \
+            arch/arm64/configs/ext_config/moto-mt6768.config \
+            arch/arm64/configs/ext_config/mt6768_defconfig.config \
+            arch/arm64/configs/ext_config/moto-k69v1_64-corfu.config \
+            > out/.config
+
+          CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
+          export PATH="${CLANG_DIR}/bin:${PATH}"
+          export LD_LIBRARY_PATH="${CLANG_DIR}/lib64:${LD_LIBRARY_PATH:-}"
+          export TARGET_PRODUCT=corfu_g
+          export TARGET_BUILD_VARIANT=user
+          export LOCALVERSION=+
+
+          make -j"$(nproc)" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            LD=ld.lld \
+            HOSTCC=clang \
+            HOSTLD=ld.lld \
+            HOSTLDFLAGS=-fuse-ld=lld \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            LOCALVERSION=+ \
+            olddefconfig
+
+          echo "=== Verifying KSU & SUSFS Kconfig state ==="
+          grep -E "^CONFIG_(KSU|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
+          grep -q "^CONFIG_KSU=y$" out/.config
+          grep -q "^CONFIG_KSU_MANUAL_HOOK=y$" out/.config
+          grep -q "^CONFIG_KSU_SUSFS=y$" out/.config
+          grep -q "^CONFIG_TMPFS_XATTR=y$" out/.config
+          grep -q "^CONFIG_MODVERSIONS=y$" out/.config
+
+      - name: Compile Kernel (Image.gz), Modules, and MT6768 DTB
+        run: |
+          set -o pipefail
+          CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
+          export PATH="${CLANG_DIR}/bin:${PATH}"
+          export LD_LIBRARY_PATH="${CLANG_DIR}/lib64:${LD_LIBRARY_PATH:-}"
+          export TARGET_PRODUCT=corfu_g
+          export TARGET_BUILD_VARIANT=user
+          export LOCALVERSION=+
+
+          if ! make -j"$(nproc)" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            LD=ld.lld \
+            HOSTCC=clang \
+            HOSTLD=ld.lld \
+            HOSTLDFLAGS=-fuse-ld=lld \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            LOCALVERSION=+ \
+            Image.gz modules dtbs 2>&1 | tee build.log; then
+            echo "=== COMPILER / LINKER ERRORS ==="
+            ERR_SUMMARY="$(grep -E "error:|undefined|No rule to make|Error " build.log | tail -n 40 | tr '\n' '|' | cut -c1-3500)"
+            echo "::error title=KernelBuildFailed::${ERR_SUMMARY}"
+            TAIL_LOG="$(tail -n 50 build.log | tr '\n' '|' | cut -c1-3500)"
+            echo "::error title=BuildLogTail::${TAIL_LOG}"
+            exit 1
+          fi
+
+      - name: Verify vermagic, KernelSU-Next & SUSFS symbols, and build dtb.img
+        run: |
+          CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
+          export PATH="${CLANG_DIR}/bin:${PATH}"
+          export LD_LIBRARY_PATH="${CLANG_DIR}/lib64:${LD_LIBRARY_PATH:-}"
+
+          RELEASE="$(cat out/include/config/kernel.release)"
+          echo "Kernel release (vermagic): ${RELEASE}"
+          if [ "${RELEASE}" != "4.19.191+" ]; then
+            echo "::error title=VermagicMismatch::Expected 4.19.191+, got '${RELEASE}'"
+            exit 1
+          fi
+
+          if [ ! -f out/arch/arm64/boot/Image.gz ]; then
+            echo "::error title=MissingImageGz::out/arch/arm64/boot/Image.gz not found"
+            exit 1
+          fi
+          if [ ! -f out/arch/arm64/boot/dts/mediatek/mt6768.dtb ]; then
+            echo "::error title=MissingDtb::out/arch/arm64/boot/dts/mediatek/mt6768.dtb not found"
+            exit 1
+          fi
+
+          echo "=== Verifying linked KernelSU-Next & SUSFS symbols in vmlinux ==="
+          llvm-nm out/vmlinux > out/vmlinux.syms
+          for sym in kernelsu_init susfs_init ksu_handle_sys_reboot is_ksu_transition ksu_adb_root_handle_execve_manual; do
+            if ! grep -Eq " ${sym}([.$].*)?$" out/vmlinux.syms; then
+              echo "::error title=MissingSymbol::Symbol ${sym} not found in vmlinux"
+              exit 1
+            fi
+          done
+          grep -E " (kernelsu_init|susfs_init|ksu_handle_sys_reboot|is_ksu_transition|ksu_adb_root_handle_execve_manual)([.$].*)?$" out/vmlinux.syms
+
+          echo "=== Wrapping mt6768.dtb into Android dt_table dtb.img ==="
+          python3 - << 'PY'
+          import struct
+          dtb = open("out/arch/arm64/boot/dts/mediatek/mt6768.dtb", "rb").read()
+          total_size = 64 + len(dtb)
+          hdr = struct.pack(">8I", 0xd7b7ab1e, total_size, 32, 32, 1, 64, 2048, 0)
+          ent = struct.pack(">8I", len(dtb), 64, 0, 0, 0, 0, 0, 0)
+          with open("out/arch/arm64/boot/dtb.img", "wb") as f:
+              f.write(hdr + ent + dtb)
+          print(f"Created out/arch/arm64/boot/dtb.img ({total_size} bytes)")
+          PY
+
+      - name: Package Flashable AnyKernel3 Zip
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "${RUNNER_TEMP}/AnyKernel3"
+          rm -rf "${RUNNER_TEMP}/AnyKernel3/.git" "${RUNNER_TEMP}/AnyKernel3/modules" "${RUNNER_TEMP}/AnyKernel3/patch" "${RUNNER_TEMP}/AnyKernel3/ramdisk"
+
+          cat > "${RUNNER_TEMP}/AnyKernel3/anykernel.sh" << 'AK3'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          properties() { '
+          kernel.string=Moto G41 (corfu) 4.19.191+ | KernelSU-Next v3.4.2 + SUSFS v2.3.0
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=corfu
+          device.name2=corfud
+          device.name3=corful
+          device.name4=corfu_g
+          device.name5=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          split_boot;
+          flash_boot;
+          AK3
+
+          sed -i 's/^          //' "${RUNNER_TEMP}/AnyKernel3/anykernel.sh"
+          cp out/arch/arm64/boot/Image.gz "${RUNNER_TEMP}/AnyKernel3/Image.gz"
+
+          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          ZIP_NAME="KernelSU-Next-v3.4.2-SUSFS-v2.3.0-corfu-4.19.191-${SHORT_SHA}.zip"
+          mkdir -p dist
+          (
+            cd "${RUNNER_TEMP}/AnyKernel3"
+            zip -r9 "${GITHUB_WORKSPACE}/dist/${ZIP_NAME}" . -x "*.git*" "README.md" "*placeholder"
+          )
+          cp out/arch/arm64/boot/Image.gz dist/Image.gz
+          cp out/arch/arm64/boot/dtb.img dist/dtb.img
+          cp out/.config dist/corfu_kernel.config
+          cp out/Module.symvers dist/Module.symvers
+          ls -lh dist/
+
+      - name: Upload AnyKernel3 Flashable Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: KernelSU-Next-v3.4.2-SUSFS-v2.3.0-corfu-AnyKernel3
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload Raw Kernel Images & Build Metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: corfu-raw-images-and-symvers
+          path: |
+            dist/Image.gz
+            dist/dtb.img
+            dist/corfu_kernel.config
+            dist/Module.symvers
+          if-no-files-found: error
