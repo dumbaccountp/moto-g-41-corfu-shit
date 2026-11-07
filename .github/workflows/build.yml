@@ -1,4 +1,4 @@
-name: Build Moto G41 (corfu) KernelSU-Next + SUSFS + NoMount LKM
+name: Build Moto G41 (corfu) KernelSU-Next + SUSFS + LKMs
 
 on:
   push:
@@ -16,7 +16,7 @@ env:
 
 jobs:
   build:
-    name: Build corfu 4.19.191+ (KernelSU-Next v3.4.2 + SUSFS v2.3.0 + NoMount v2.2.0 LKM)
+    name: Build corfu 4.19.191+ (KSU-Next v3.4.2 + SUSFS v2.3.0 + NoMount v2.2.0 + fgetpriority v0.0.4)
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
@@ -81,16 +81,17 @@ jobs:
             LOCALVERSION=+ \
             olddefconfig
 
-          echo "=== Verifying KSU, SUSFS & NoMount LKM Kconfig state ==="
-          grep -E "^CONFIG_(KSU|NOMOUNT|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
+          echo "=== Verifying KSU, SUSFS, NoMount & fgetpriority Kconfig state ==="
+          grep -E "^CONFIG_(KSU|NOMOUNT|FGETPRIORITY|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
           grep -q "^CONFIG_KSU=y$" out/.config
           grep -q "^CONFIG_KSU_MANUAL_HOOK=y$" out/.config
           grep -q "^CONFIG_KSU_SUSFS=y$" out/.config
           grep -q "^CONFIG_NOMOUNT=m$" out/.config
+          grep -q "^CONFIG_FGETPRIORITY=m$" out/.config
           grep -q "^CONFIG_TMPFS_XATTR=y$" out/.config
           grep -q "^CONFIG_MODVERSIONS=y$" out/.config
 
-      - name: Compile Kernel (Image.gz), Modules (incl. NoMount v2.2.0 LKM), and MT6768 DTB
+      - name: Compile Kernel (Image.gz), Modules (NoMount + fgetpriority LKMs), and MT6768 DTB
         run: |
           set -o pipefail
           CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
@@ -121,7 +122,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify vermagic, KernelSU-Next, SUSFS, NoMount v2.2.0 LKM, and build dtb.img
+      - name: Verify vermagic, symbols, NoMount v2.2.0 LKM, fgetpriority v0.0.4 LKM, and build dtb.img
         run: |
           CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
           export PATH="${CLANG_DIR}/bin:${PATH}"
@@ -134,62 +135,149 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f out/arch/arm64/boot/Image.gz ]; then
-            echo "::error title=MissingImageGz::out/arch/arm64/boot/Image.gz not found"
-            exit 1
-          fi
-          if [ ! -f out/arch/arm64/boot/dts/mediatek/mt6768.dtb ]; then
-            echo "::error title=MissingDtb::out/arch/arm64/boot/dts/mediatek/mt6768.dtb not found"
-            exit 1
-          fi
-          if [ ! -f out/fs/nomount/nomount.ko ]; then
-            echo "::error title=MissingNoMountKo::out/fs/nomount/nomount.ko not found"
-            exit 1
-          fi
+          for required_out in \
+            out/arch/arm64/boot/Image.gz \
+            out/arch/arm64/boot/dts/mediatek/mt6768.dtb \
+            out/fs/nomount/nomount.ko \
+            out/drivers/fgetpriority/fgetpriority.ko; do
+            if [ ! -f "${required_out}" ]; then
+              echo "::error title=MissingBuildOutput::${required_out} not found"
+              exit 1
+            fi
+          done
 
           echo "=== Verifying linked KernelSU-Next & SUSFS symbols in vmlinux ==="
-          llvm-nm out/vmlinux > out/vmlinux.syms
+          llvm-nm -S out/vmlinux > out/vmlinux.syms
           for sym in kernelsu_init susfs_init ksu_handle_sys_reboot is_ksu_transition ksu_adb_root_handle_execve_manual; do
             if ! grep -Eq " ${sym}([.$].*)?$" out/vmlinux.syms; then
               echo "::error title=MissingSymbol::Symbol ${sym} not found in vmlinux"
               exit 1
             fi
           done
-          grep -E " (kernelsu_init|susfs_init|ksu_handle_sys_reboot|is_ksu_transition|ksu_adb_root_handle_execve_manual)([.$].*)?$" out/vmlinux.syms
+
+          echo "=== Verifying fgetpriority target symbols & BL find_user callsites in vmlinux ==="
+          python3 - << 'PY'
+          import struct, subprocess, sys
+
+          syms = {}
+          with open("out/vmlinux.syms") as f:
+              for line in f:
+                  parts = line.strip().split()
+                  if len(parts) == 4:
+                      addr, size, stype, name = int(parts[0], 16), int(parts[1], 16), parts[2], parts[3]
+                  elif len(parts) == 3 and parts[0][0] in "0123456789abcdefABCDEF":
+                      addr, size, stype, name = int(parts[0], 16), 1024, parts[1], parts[2]
+                  else:
+                      continue
+                  base = name.split(".")[0]
+                  if name == base or base not in syms:
+                      syms[base] = (addr, size, stype)
+
+          for req in ["find_user", "free_uid", "aarch64_insn_gen_branch_imm", "aarch64_insn_patch_text", "__vmalloc_node_range"]:
+              if req not in syms:
+                  print(f"::error title=MissingFgpTarget::{req} missing from vmlinux")
+                  sys.exit(1)
+              print(f"  {req}: 0x{syms[req][0]:x} (size={syms[req][1]})")
+
+          # Map .text virtual address to file offset in out/vmlinux
+          sec_out = subprocess.check_output(["aarch64-linux-gnu-readelf", "-S", "-W", "out/vmlinux"], text=True)
+          text_vma = text_off = text_sz = None
+          for line in sec_out.splitlines():
+              cols = line.strip().split()
+              if ".text" in cols:
+                  idx = cols.index(".text")
+                  if cols[idx] == ".text" and idx + 4 < len(cols):
+                      text_vma = int(cols[idx + 2], 16)
+                      text_off = int(cols[idx + 3], 16)
+                      text_sz  = int(cols[idx + 4], 16)
+                      break
+          assert text_vma is not None, "Could not locate .text in vmlinux"
+
+          find_user_addr = syms["find_user"][0]
+          with open("out/vmlinux", "rb") as vf:
+              for arm_s, se_s in [
+                  ("__arm64_sys_getpriority", "__se_sys_getpriority"),
+                  ("__arm64_sys_setpriority", "__se_sys_setpriority"),
+                  ("__arm64_sys_ioprio_set",  "__se_sys_ioprio_set"),
+                  ("__arm64_sys_ioprio_get",  "__se_sys_ioprio_get"),
+              ]:
+                  matched = None
+                  for cand in (arm_s, se_s):
+                      if cand not in syms:
+                          continue
+                      c_addr, c_sz, _ = syms[cand]
+                      scan_len = c_sz if c_sz > 0 else 1024
+                      vf.seek(text_off + (c_addr - text_vma))
+                      blob = vf.read(scan_len)
+                      for off in range(0, len(blob) - 3, 4):
+                          insn = struct.unpack_from("<I", blob, off)[0]
+                          if (insn & 0x7C000000) == 0x14000000:
+                              imm26 = insn & 0x03FFFFFF
+                              if imm26 & 0x02000000:
+                                  imm26 -= 0x04000000
+                              dest = (c_addr + off) + imm26 * 4
+                              if dest == find_user_addr:
+                                  matched = (cand, c_addr + off, insn)
+                                  break
+                      if matched:
+                          break
+                  if not matched:
+                      print(f"::error title=MissingFindUserBranch::No B/BL find_user found in {arm_s} or {se_s}")
+                      sys.exit(1)
+                  print(f"  Verified callsite in {matched[0]} @ 0x{matched[1]:x} (insn=0x{matched[2]:08x} -> find_user 0x{find_user_addr:x})")
+          PY
+
+          mkdir -p dist
+          strip_ko() {
+            if [ -x "${CLANG_DIR}/bin/llvm-strip" ]; then
+              "${CLANG_DIR}/bin/llvm-strip" --strip-debug "$1"
+            else
+              aarch64-linux-gnu-strip --strip-debug "$1"
+            fi
+            if grep -q "^CONFIG_MODULE_SIG=y$" out/.config && [ -x out/scripts/sign-file ]; then
+              SIG_HASH="$(sed -n 's/^CONFIG_MODULE_SIG_HASH="\(.*\)"$/\1/p' out/.config)"
+              SIG_KEY="$(sed -n 's/^CONFIG_MODULE_SIG_KEY="\(.*\)"$/\1/p' out/.config)"
+              out/scripts/sign-file "${SIG_HASH}" "out/${SIG_KEY}" out/certs/signing_key.x509 "$1"
+            fi
+          }
 
           echo "=== Preparing & verifying NoMount v2.2.0 LKM (nomount-4.19.ko) ==="
-          mkdir -p dist
           cp out/fs/nomount/nomount.ko dist/nomount-4.19.ko
-          if [ -x "${CLANG_DIR}/bin/llvm-strip" ]; then
-            "${CLANG_DIR}/bin/llvm-strip" --strip-debug dist/nomount-4.19.ko
-          else
-            aarch64-linux-gnu-strip --strip-debug dist/nomount-4.19.ko
-          fi
-          if grep -q "^CONFIG_MODULE_SIG=y$" out/.config && [ -x out/scripts/sign-file ]; then
-            SIG_HASH="$(sed -n 's/^CONFIG_MODULE_SIG_HASH="\(.*\)"$/\1/p' out/.config)"
-            SIG_KEY="$(sed -n 's/^CONFIG_MODULE_SIG_KEY="\(.*\)"$/\1/p' out/.config)"
-            out/scripts/sign-file "${SIG_HASH}" "out/${SIG_KEY}" out/certs/signing_key.x509 dist/nomount-4.19.ko
-          fi
+          strip_ko dist/nomount-4.19.ko
           cp dist/nomount-4.19.ko dist/nomount.ko
-
           file dist/nomount-4.19.ko
           /sbin/modinfo dist/nomount-4.19.ko | tee dist/nomount-modinfo.txt
           echo "--- MODVERSIONS CRCs ---" >> dist/nomount-modinfo.txt
           /sbin/modprobe --dump-modversions dist/nomount-4.19.ko >> dist/nomount-modinfo.txt 2>&1 || true
 
-          KO_VERMAGIC="$(/sbin/modinfo -F vermagic dist/nomount-4.19.ko)"
-          KO_VERSION="$(/sbin/modinfo -F version dist/nomount-4.19.ko)"
-          case "${KO_VERMAGIC}" in
-            "4.19.191+ "*modversions*aarch64*)
-              echo "Verified NoMount LKM vermagic: ${KO_VERMAGIC}"
-              ;;
-            *)
-              echo "::error title=NoMountVermagicMismatch::Unexpected vermagic '${KO_VERMAGIC}'"
-              exit 1
-              ;;
+          NM_VERMAGIC="$(/sbin/modinfo -F vermagic dist/nomount-4.19.ko)"
+          NM_VERSION="$(/sbin/modinfo -F version dist/nomount-4.19.ko)"
+          case "${NM_VERMAGIC}" in
+            "4.19.191+ "*modversions*aarch64*) ;;
+            *) echo "::error title=NoMountVermagicMismatch::Unexpected vermagic '${NM_VERMAGIC}'"; exit 1 ;;
           esac
-          if [ "${KO_VERSION}" != "22 (605)" ]; then
-            echo "::error title=NoMountVersionMismatch::Expected version '22 (605)', got '${KO_VERSION}'"
+          if [ "${NM_VERSION}" != "22 (605)" ]; then
+            echo "::error title=NoMountVersionMismatch::Expected version '22 (605)', got '${NM_VERSION}'"
+            exit 1
+          fi
+
+          echo "=== Preparing & verifying fgetpriority v0.0.4 LKM (corfu-4.19_arm64_fgetpriority.ko) ==="
+          cp out/drivers/fgetpriority/fgetpriority.ko dist/corfu-4.19_arm64_fgetpriority.ko
+          strip_ko dist/corfu-4.19_arm64_fgetpriority.ko
+          cp dist/corfu-4.19_arm64_fgetpriority.ko dist/fgetpriority.ko
+          file dist/fgetpriority.ko
+          /sbin/modinfo dist/fgetpriority.ko | tee dist/fgetpriority-modinfo.txt
+          echo "--- MODVERSIONS CRCs ---" >> dist/fgetpriority-modinfo.txt
+          /sbin/modprobe --dump-modversions dist/fgetpriority.ko >> dist/fgetpriority-modinfo.txt 2>&1 || true
+
+          FGP_VERMAGIC="$(/sbin/modinfo -F vermagic dist/fgetpriority.ko)"
+          FGP_VERSION="$(/sbin/modinfo -F version dist/fgetpriority.ko)"
+          case "${FGP_VERMAGIC}" in
+            "4.19.191+ "*modversions*aarch64*) ;;
+            *) echo "::error title=FgpVermagicMismatch::Unexpected vermagic '${FGP_VERMAGIC}'"; exit 1 ;;
+          esac
+          if [ "${FGP_VERSION}" != "0.0.4" ]; then
+            echo "::error title=FgpVersionMismatch::Expected version '0.0.4', got '${FGP_VERSION}'"
             exit 1
           fi
 
@@ -205,7 +293,7 @@ jobs:
           print(f"Created out/arch/arm64/boot/dtb.img ({total_size} bytes)")
           PY
 
-      - name: Package AnyKernel3 Zip & NoMount v2.2.0 Metamodule Zip (with corfu LKM)
+      - name: Package AnyKernel3, NoMount v2.2.0 Metamodule, & fgetpriority v0.0.4 Module Zips
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "${RUNNER_TEMP}/AnyKernel3"
           rm -rf "${RUNNER_TEMP}/AnyKernel3/.git" "${RUNNER_TEMP}/AnyKernel3/modules" "${RUNNER_TEMP}/AnyKernel3/patch" "${RUNNER_TEMP}/AnyKernel3/ramdisk"
@@ -274,6 +362,29 @@ jobs:
             zip -qr9 "${GITHUB_WORKSPACE}/dist/${NM_ZIP}" .
           )
 
+          echo "=== Bundling fgetpriority v0.0.4 Module with corfu 4.19.191+ LKM ==="
+          curl -fL --retry 3 \
+            "https://github.com/aerath-stuff/fgetpriority/releases/download/v0.0.4/fgetpriority_v0.0.4.zip" \
+            -o "${RUNNER_TEMP}/fgetpriority_v0.0.4.zip"
+          mkdir -p "${RUNNER_TEMP}/fgetpriority-module"
+          unzip -q "${RUNNER_TEMP}/fgetpriority_v0.0.4.zip" -d "${RUNNER_TEMP}/fgetpriority-module"
+          mkdir -p "${RUNNER_TEMP}/fgetpriority-module/ko"
+          install -m 0644 dist/corfu-4.19_arm64_fgetpriority.ko \
+            "${RUNNER_TEMP}/fgetpriority-module/ko/corfu-4.19_arm64_fgetpriority.ko"
+
+          for req in ko/corfu-4.19_arm64_fgetpriority.ko customize.sh service.sh uninstall.sh module.prop; do
+            if [ ! -f "${RUNNER_TEMP}/fgetpriority-module/${req}" ]; then
+              echo "::error title=MissingFgpFile::Missing ${req} in fgetpriority module bundle"
+              exit 1
+            fi
+          done
+
+          FGP_ZIP="fgetpriority_v0.0.4-corfu-4.19.191.zip"
+          (
+            cd "${RUNNER_TEMP}/fgetpriority-module"
+            zip -qr9 "${GITHUB_WORKSPACE}/dist/${FGP_ZIP}" .
+          )
+
           cp out/arch/arm64/boot/Image.gz dist/Image.gz
           cp out/arch/arm64/boot/dtb.img dist/dtb.img
           cp out/.config dist/corfu_kernel.config
@@ -281,26 +392,49 @@ jobs:
 
           (
             cd dist
-            sha256sum nomount-4.19.ko nomount.ko "${NM_ZIP}" "${ZIP_NAME}" > nomount-SHA256SUMS.txt
+            sha256sum \
+              fgetpriority.ko corfu-4.19_arm64_fgetpriority.ko "${FGP_ZIP}" \
+              nomount-4.19.ko nomount.ko "${NM_ZIP}" \
+              "${ZIP_NAME}" > SHA256SUMS.txt
           )
-          cat dist/nomount-SHA256SUMS.txt
+          cp dist/SHA256SUMS.txt dist/nomount-SHA256SUMS.txt
+          cp dist/SHA256SUMS.txt dist/fgetpriority-SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
           ls -lh dist/
 
-          KO_SIZE="$(stat -c '%s' dist/nomount-4.19.ko)"
-          KO_SHA="$(sha256sum dist/nomount-4.19.ko | awk '{print $1}')"
-          NM_SIZE="$(stat -c '%s' "dist/${NM_ZIP}")"
-          NM_SHA="$(sha256sum "dist/${NM_ZIP}" | awk '{print $1}')"
-          KO_VM="$(/sbin/modinfo -F vermagic dist/nomount-4.19.ko)"
-          KO_VER="$(/sbin/modinfo -F version dist/nomount-4.19.ko)"
-          echo "::notice title=NoMountLKMVerified::nomount-4.19.ko (${KO_SIZE} B, sha256=${KO_SHA}, version='${KO_VER}', vermagic='${KO_VM}') | ${NM_ZIP} (${NM_SIZE} B, sha256=${NM_SHA})"
+          FGP_KO_SIZE="$(stat -c '%s' dist/fgetpriority.ko)"
+          FGP_KO_SHA="$(sha256sum dist/fgetpriority.ko | awk '{print $1}')"
+          FGP_ZIP_SIZE="$(stat -c '%s' "dist/${FGP_ZIP}")"
+          FGP_ZIP_SHA="$(sha256sum "dist/${FGP_ZIP}" | awk '{print $1}')"
+          FGP_VM="$(/sbin/modinfo -F vermagic dist/fgetpriority.ko)"
+          FGP_VER="$(/sbin/modinfo -F version dist/fgetpriority.ko)"
+          echo "::notice title=FgetpriorityLKMVerified::fgetpriority.ko (${FGP_KO_SIZE} B, sha256=${FGP_KO_SHA}, version='${FGP_VER}', vermagic='${FGP_VM}') | ${FGP_ZIP} (${FGP_ZIP_SIZE} B, sha256=${FGP_ZIP_SHA})"
 
           {
             echo "## Moto G41 (\`corfu\`) 4.19.191+ Build Summary"
             echo "- **Kernel**: Linux \`4.19.191+\` | KernelSU-Next \`v3.4.2\` (\`33355\`) + SUSFS \`v2.3.0\`"
-            echo "- **NoMount LKM**: \`v2.2.0\` (Driver Protocol \`${KO_VER}\`, \`vermagic=${KO_VM}\`, \`${KO_SIZE}\` bytes)"
-            echo "- **\`nomount-4.19.ko\` SHA-256**: \`${KO_SHA}\`"
-            echo "- **\`${NM_ZIP}\` SHA-256**: \`${NM_SHA}\`"
+            echo "- **fgetpriority LKM**: \`v0.0.4\` (\`version=${FGP_VER}\`, \`vermagic=${FGP_VM}\`, \`${FGP_KO_SIZE}\` bytes, SHA-256: \`${FGP_KO_SHA}\`)"
+            echo "- **\`${FGP_ZIP}\` SHA-256**: \`${FGP_ZIP_SHA}\`"
+            echo "- **NoMount LKM**: \`v2.2.0\` (\`22 (605)\`)"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload fgetpriority v0.0.4 Standalone LKM (corfu 4.19.191+)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fgetpriority-v0.0.4-corfu-4.19.191-LKM
+          path: |
+            dist/fgetpriority.ko
+            dist/corfu-4.19_arm64_fgetpriority.ko
+            dist/fgetpriority-modinfo.txt
+            dist/fgetpriority-SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Upload fgetpriority v0.0.4 KernelSU Module Zip (corfu LKM pre-bundled)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fgetpriority-v0.0.4-corfu-Module
+          path: dist/fgetpriority_v0.0.4-corfu-4.19.191.zip
+          if-no-files-found: error
 
       - name: Upload NoMount v2.2.0 Standalone LKM (corfu 4.19.191+)
         uses: actions/upload-artifact@v4
@@ -337,4 +471,5 @@ jobs:
             dist/corfu_kernel.config
             dist/Module.symvers
             dist/nomount-4.19.ko
+            dist/fgetpriority.ko
           if-no-files-found: error
