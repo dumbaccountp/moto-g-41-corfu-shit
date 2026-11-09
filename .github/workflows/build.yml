@@ -16,7 +16,7 @@ env:
 
 jobs:
   build:
-    name: Build corfu 4.19.191+ (KSU-Next v3.4.2 + SUSFS v2.3.0 + NoMount v2.2.0 + fgetpriority v0.0.4)
+    name: Build corfu 4.19.191+ (KSU-Next v3.4.2 + SUSFS v2.3.0 + Hybrid-Mount v6.2.5 LKMs + NoMount v2.2.0 + fgetpriority v0.0.4)
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
@@ -81,19 +81,27 @@ jobs:
             LOCALVERSION=+ \
             olddefconfig
 
-          echo "=== Verifying KSU, SUSFS, KALLSYMS_ALL, NoMount & fgetpriority Kconfig state ==="
-          grep -E "^CONFIG_(KSU|KALLSYMS|NOMOUNT|FGETPRIORITY|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
+          echo "=== Verifying KSU, SUSFS, KALLSYMS_ALL, Hybrid-Mount LKMs, NoMount & fgetpriority Kconfig state ==="
+          grep -E "^CONFIG_(KSU|KALLSYMS|OVERLAY_FS|EXPORTFS|HYBRIDMOUNT|KEYS|EXT4_FS|BLK_DEV_LOOP|NOMOUNT|FGETPRIORITY|TMPFS_XATTR|TMPFS_POSIX_ACL|MODVERSIONS)" out/.config
           grep -q "^CONFIG_KSU=y$" out/.config
           grep -q "^CONFIG_KSU_MANUAL_HOOK=y$" out/.config
           grep -q "^CONFIG_KSU_SUSFS=y$" out/.config
           grep -q "^CONFIG_KALLSYMS=y$" out/.config
           grep -q "^CONFIG_KALLSYMS_ALL=y$" out/.config
+          grep -q "^CONFIG_OVERLAY_FS=y$" out/.config
+          grep -q "^CONFIG_HYBRIDMOUNT=m$" out/.config
+          grep -q "^CONFIG_HYBRIDMOUNT_NUKE=m$" out/.config
+          grep -q "^CONFIG_KEYS=y$" out/.config
+          grep -q "^CONFIG_EXT4_FS=y$" out/.config
+          grep -q "^CONFIG_EXT4_FS_SECURITY=y$" out/.config
+          grep -q "^CONFIG_BLK_DEV_LOOP=y$" out/.config
           grep -q "^CONFIG_NOMOUNT=m$" out/.config
           grep -q "^CONFIG_FGETPRIORITY=m$" out/.config
           grep -q "^CONFIG_TMPFS_XATTR=y$" out/.config
+          grep -q "^CONFIG_TMPFS_POSIX_ACL=y$" out/.config
           grep -q "^CONFIG_MODVERSIONS=y$" out/.config
 
-      - name: Compile Kernel (Image.gz), Modules (NoMount + fgetpriority LKMs), and MT6768 DTB
+      - name: Compile Kernel (Image.gz), Modules (Hybrid-Mount + NoMount + fgetpriority LKMs), and MT6768 DTB
         run: |
           set -o pipefail
           CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
@@ -140,6 +148,8 @@ jobs:
           for required_out in \
             out/arch/arm64/boot/Image.gz \
             out/arch/arm64/boot/dts/mediatek/mt6768.dtb \
+            out/fs/hybridmount/hybridmount.ko \
+            out/fs/hybridmount/nuke.ko \
             out/fs/nomount/nomount.ko \
             out/drivers/fgetpriority/fgetpriority.ko; do
             if [ ! -f "${required_out}" ]; then
@@ -283,6 +293,70 @@ jobs:
             exit 1
           fi
 
+          echo "=== Preparing & verifying Hybrid-Mount v6.2.5 LKMs (hybridmount.ko & nuke.ko) ==="
+          cp out/fs/hybridmount/hybridmount.ko dist/hybridmount-android12-4.19.ko
+          strip_ko dist/hybridmount-android12-4.19.ko
+          cp dist/hybridmount-android12-4.19.ko dist/hybridmount.ko
+
+          cp out/fs/hybridmount/nuke.ko dist/nuke-android12-4.19.ko
+          strip_ko dist/nuke-android12-4.19.ko
+          cp dist/nuke-android12-4.19.ko dist/nuke.ko
+
+          : > dist/hybridmount-modinfo.txt
+          for ko in dist/hybridmount-android12-4.19.ko dist/nuke-android12-4.19.ko; do
+            echo "=== ${ko} ===" | tee -a dist/hybridmount-modinfo.txt
+            file "${ko}" | tee -a dist/hybridmount-modinfo.txt
+            /sbin/modinfo "${ko}" | tee -a dist/hybridmount-modinfo.txt
+            echo "--- MODVERSIONS CRCs ---" >> dist/hybridmount-modinfo.txt
+            /sbin/modprobe --dump-modversions "${ko}" >> dist/hybridmount-modinfo.txt 2>&1 || true
+            KO_VM="$(/sbin/modinfo -F vermagic "${ko}")"
+            case "${KO_VM}" in
+              "4.19.191+ "*modversions*aarch64*) ;;
+              *) echo "::error title=HmVermagicMismatch::Unexpected vermagic '${KO_VM}' on ${ko}"; exit 1 ;;
+            esac
+          done
+
+          HM_VERSION="$(/sbin/modinfo -F version dist/hybridmount-android12-4.19.ko)"
+          HM_MODNAME="$(/sbin/modinfo -F name dist/hybridmount-android12-4.19.ko)"
+          NUKE_MODNAME="$(/sbin/modinfo -F name dist/nuke-android12-4.19.ko)"
+          if [ "${HM_VERSION}" != "hm1" ] || [ "${HM_MODNAME}" != "hybridmount" ]; then
+            echo "::error title=HmMetaMismatch::Expected name=hybridmount version=hm1, got name='${HM_MODNAME}' version='${HM_VERSION}'"
+            exit 1
+          fi
+          if [ "${NUKE_MODNAME}" != "nuke" ]; then
+            echo "::error title=NukeMetaMismatch::Expected name=nuke, got name='${NUKE_MODNAME}'"
+            exit 1
+          fi
+
+          python3 - << 'PY'
+          import subprocess, sys
+
+          symvers = {}
+          with open("out/Module.symvers") as f:
+              for line in f:
+                  parts = line.split()
+                  if len(parts) >= 4:
+                      symvers[parts[1]] = (parts[0], parts[2])
+
+          for ko in [
+              "dist/hybridmount-android12-4.19.ko",
+              "dist/nuke-android12-4.19.ko",
+          ]:
+              undef = subprocess.check_output(["llvm-nm", "-u", ko], text=True).splitlines()
+              missing = []
+              for line in undef:
+                  parts = line.split()
+                  if not parts:
+                      continue
+                  sym = parts[-1]
+                  if sym not in symvers:
+                      missing.append(sym)
+              if missing:
+                  print(f"::error title=UnresolvedKoSymbol::{ko} has unresolved symbols not in Module.symvers: {missing}")
+                  sys.exit(1)
+              print(f"  {ko}: all {len(undef)} imported symbols verified against Module.symvers")
+          PY
+
           echo "=== Wrapping mt6768.dtb into Android dt_table dtb.img ==="
           python3 - << 'PY'
           import struct
@@ -387,6 +461,107 @@ jobs:
             zip -qr9 "${GITHUB_WORKSPACE}/dist/${FGP_ZIP}" .
           )
 
+          echo "=== Bundling Hybrid-Mount v6.2.5 Metamodule with corfu 4.19.191+ LKMs ==="
+          curl -fL --retry 3 \
+            "https://github.com/Hybrid-Mount/meta-hybrid_mount/releases/download/v6.2.5/Hybrid-Mount-6.2.5-2118.zip" \
+            -o "${RUNNER_TEMP}/Hybrid-Mount-6.2.5-2118.zip"
+          mkdir -p "${RUNNER_TEMP}/hybridmount-metamodule"
+          unzip -q "${RUNNER_TEMP}/Hybrid-Mount-6.2.5-2118.zip" -d "${RUNNER_TEMP}/hybridmount-metamodule"
+
+          mkdir -p "${RUNNER_TEMP}/hybridmount-metamodule/vfs/binaries" \
+                   "${RUNNER_TEMP}/hybridmount-metamodule/lkm/binaries"
+          install -m 0644 dist/hybridmount-android12-4.19.ko \
+            "${RUNNER_TEMP}/hybridmount-metamodule/vfs/binaries/hybridmount-android12-4.19.ko"
+          install -m 0644 dist/nuke-android12-4.19.ko \
+            "${RUNNER_TEMP}/hybridmount-metamodule/lkm/binaries/nuke-android12-4.19.ko"
+
+          (
+            cd "${RUNNER_TEMP}/hybridmount-metamodule/vfs/binaries"
+            sha256sum hybridmount-android12-4.19.ko >> list.txt
+          )
+          (
+            cd "${RUNNER_TEMP}/hybridmount-metamodule/lkm/binaries"
+            sha256sum nuke-android12-4.19.ko >> list.txt
+          )
+
+          python3 - "${RUNNER_TEMP}/hybridmount-metamodule" << 'PY'
+          import pathlib, sys
+
+          mod_root = pathlib.Path(sys.argv[1])
+          wrapper_text = """#!/system/bin/sh
+          # SPDX-License-Identifier: GPL-3.0-only
+          # Moto G41 (corfu, 4.19.191+) LKM path hook for Hybrid-Mount v6.2.5
+          case "$0" in
+            */*) MODDIR="${0%/*}" ;;
+            *)   MODDIR="/data/adb/modules/hybrid_mount" ;;
+          esac
+
+          if [ -f "$MODDIR/vfs/binaries/hybridmount-android12-4.19.ko" ]; then
+            export HYBRID_MOUNT_VFS_LKM_PATH="${HYBRID_MOUNT_VFS_LKM_PATH:-$MODDIR/vfs/binaries/hybridmount-android12-4.19.ko}"
+          fi
+          if [ -f "$MODDIR/lkm/binaries/nuke-android12-4.19.ko" ]; then
+            export HYBRID_MOUNT_LKM_PATH="${HYBRID_MOUNT_LKM_PATH:-$MODDIR/lkm/binaries/nuke-android12-4.19.ko}"
+          fi
+
+          exec "$MODDIR/hybrid-mount.bin" "$@"
+          """
+          wrapper_lines = [line[10:] if line.startswith("          ") else line for line in wrapper_text.splitlines()]
+          (mod_root / "corfu-wrapper.sh").write_text("\n".join(wrapper_lines) + "\n")
+
+          cust_path = mod_root / "customize.sh"
+          cust = cust_path.read_text()
+
+          old_install = """ui_print "- Installing binary..."
+          cp -f "$BIN_SOURCE" "$BIN_TARGET"
+          set_perm "$BIN_TARGET" 0 0 0755
+          rm -rf "$MODPATH/binaries\""""
+          old_install = "\n".join(line[10:] if line.startswith("          ") else line for line in old_install.splitlines())
+
+          new_install = """ui_print "- Installing binary & corfu 4.19.191+ LKM wrapper..."
+          if [ "$ARCH" = "arm64" ]; then
+            cp -f "$BIN_SOURCE" "$MODPATH/hybrid-mount.bin"
+            cp -f "$MODPATH/corfu-wrapper.sh" "$BIN_TARGET"
+            set_perm "$MODPATH/hybrid-mount.bin" 0 0 0755
+          else
+            cp -f "$BIN_SOURCE" "$BIN_TARGET"
+          fi
+          rm -f "$MODPATH/corfu-wrapper.sh"
+          set_perm "$BIN_TARGET" 0 0 0755
+          rm -rf "$MODPATH/binaries\""""
+          new_install = "\n".join(line[10:] if line.startswith("          ") else line for line in new_install.splitlines())
+
+          assert old_install in cust, "Expected install block not found in customize.sh"
+          cust = cust.replace(old_install, new_install, 1)
+
+          old_perm = 'set_perm "$BIN_TARGET" 0 0 0755'
+          new_perm = 'set_perm "$BIN_TARGET" 0 0 0755\n[ -f "$MODPATH/hybrid-mount.bin" ] && set_perm "$MODPATH/hybrid-mount.bin" 0 0 0755'
+          idx = cust.rfind(old_perm)
+          assert idx != -1, "Expected final set_perm not found in customize.sh"
+          cust = cust[:idx] + new_perm + cust[idx + len(old_perm):]
+          cust_path.write_text(cust)
+          PY
+
+          sh -n "${RUNNER_TEMP}/hybridmount-metamodule/corfu-wrapper.sh"
+          sh -n "${RUNNER_TEMP}/hybridmount-metamodule/customize.sh"
+
+          for req in \
+            vfs/binaries/hybridmount-android12-4.19.ko \
+            lkm/binaries/nuke-android12-4.19.ko \
+            corfu-wrapper.sh \
+            binaries/hybrid-mount-arm64 \
+            customize.sh metamount.sh post-mount.sh config.toml module.prop; do
+            if [ ! -f "${RUNNER_TEMP}/hybridmount-metamodule/${req}" ]; then
+              echo "::error title=MissingHybridMountFile::Missing ${req} in Hybrid-Mount bundle"
+              exit 1
+            fi
+          done
+
+          HM_ZIP="Hybrid-Mount-6.2.5-2118-corfu-4.19.191.zip"
+          (
+            cd "${RUNNER_TEMP}/hybridmount-metamodule"
+            zip -qr9 "${GITHUB_WORKSPACE}/dist/${HM_ZIP}" .
+          )
+
           cp out/arch/arm64/boot/Image.gz dist/Image.gz
           cp out/arch/arm64/boot/dtb.img dist/dtb.img
           cp out/.config dist/corfu_kernel.config
@@ -395,9 +570,16 @@ jobs:
           (
             cd dist
             sha256sum \
+              hybridmount-android12-4.19.ko hybridmount.ko \
+              nuke-android12-4.19.ko nuke.ko \
+              "${HM_ZIP}" \
               fgetpriority.ko corfu-4.19_arm64_fgetpriority.ko "${FGP_ZIP}" \
               nomount-4.19.ko nomount.ko "${NM_ZIP}" \
               "${ZIP_NAME}" > SHA256SUMS.txt
+            sha256sum \
+              hybridmount-android12-4.19.ko hybridmount.ko \
+              nuke-android12-4.19.ko nuke.ko \
+              "${HM_ZIP}" > hybridmount-SHA256SUMS.txt
           )
           cp dist/SHA256SUMS.txt dist/nomount-SHA256SUMS.txt
           cp dist/SHA256SUMS.txt dist/fgetpriority-SHA256SUMS.txt
@@ -406,22 +588,47 @@ jobs:
 
           AK3_SIZE="$(stat -c '%s' "dist/${ZIP_NAME}")"
           AK3_SHA="$(sha256sum "dist/${ZIP_NAME}" | awk '{print $1}')"
+          HM_KO_SIZE="$(stat -c '%s' dist/hybridmount-android12-4.19.ko)"
+          HM_KO_SHA="$(sha256sum dist/hybridmount-android12-4.19.ko | awk '{print $1}')"
+          NUKE_KO_SIZE="$(stat -c '%s' dist/nuke-android12-4.19.ko)"
+          NUKE_KO_SHA="$(sha256sum dist/nuke-android12-4.19.ko | awk '{print $1}')"
+          HM_ZIP_SIZE="$(stat -c '%s' "dist/${HM_ZIP}")"
+          HM_ZIP_SHA="$(sha256sum "dist/${HM_ZIP}" | awk '{print $1}')"
+          HM_VM="$(/sbin/modinfo -F vermagic dist/hybridmount-android12-4.19.ko)"
           FGP_KO_SIZE="$(stat -c '%s' dist/fgetpriority.ko)"
           FGP_KO_SHA="$(sha256sum dist/fgetpriority.ko | awk '{print $1}')"
-          FGP_ZIP_SIZE="$(stat -c '%s' "dist/${FGP_ZIP}")"
-          FGP_ZIP_SHA="$(sha256sum "dist/${FGP_ZIP}" | awk '{print $1}')"
-          FGP_VM="$(/sbin/modinfo -F vermagic dist/fgetpriority.ko)"
-          FGP_VER="$(/sbin/modinfo -F version dist/fgetpriority.ko)"
-          echo "::notice title=BuildVerified::${ZIP_NAME} (${AK3_SIZE} B, sha256=${AK3_SHA}, CONFIG_KALLSYMS_ALL=y) | fgetpriority.ko (${FGP_KO_SIZE} B, sha256=${FGP_KO_SHA}, version='${FGP_VER}', vermagic='${FGP_VM}') | ${FGP_ZIP} (${FGP_ZIP_SIZE} B, sha256=${FGP_ZIP_SHA})"
+          echo "::notice title=BuildVerified::hybridmount.ko (${HM_KO_SIZE} B, sha256=${HM_KO_SHA}, version='hm1', vermagic='${HM_VM}') | nuke.ko (${NUKE_KO_SIZE} B, sha256=${NUKE_KO_SHA}) | ${HM_ZIP} (${HM_ZIP_SIZE} B, sha256=${HM_ZIP_SHA}) | ${ZIP_NAME} (${AK3_SIZE} B, sha256=${AK3_SHA})"
 
           {
             echo "## Moto G41 (\`corfu\`) 4.19.191+ Build Summary"
-            echo "- **Kernel**: Linux \`4.19.191+\` (\`CONFIG_KALLSYMS_ALL=y\`) | KernelSU-Next \`v3.4.2\` (\`33355\`) + SUSFS \`v2.3.0\`"
+            echo "- **Kernel**: Linux \`4.19.191+\` (\`CONFIG_OVERLAY_FS=y\`, \`CONFIG_KALLSYMS_ALL=y\`) | KernelSU-Next \`v3.4.2\` (\`33355\`) + SUSFS \`v2.3.0\`"
+            echo "- **Hybrid-Mount v6.2.5 LKMs (\`vermagic=${HM_VM}\`)**:"
+            echo "  - \`hybridmount-android12-4.19.ko\` (\`hm1\`): \`${HM_KO_SIZE}\` bytes, SHA-256: \`${HM_KO_SHA}\`"
+            echo "  - \`nuke-android12-4.19.ko\`: \`${NUKE_KO_SIZE}\` bytes, SHA-256: \`${NUKE_KO_SHA}\`"
+            echo "- **Hybrid-Mount v6.2.5 Metamodule (\`${HM_ZIP}\`)**: \`${HM_ZIP_SIZE}\` bytes, SHA-256: \`${HM_ZIP_SHA}\`"
             echo "- **AnyKernel3 (\`${ZIP_NAME}\`)**: \`${AK3_SIZE}\` bytes, SHA-256: \`${AK3_SHA}\`"
-            echo "- **fgetpriority LKM**: \`v0.0.4\` (\`version=${FGP_VER}\`, \`vermagic=${FGP_VM}\`, \`${FGP_KO_SIZE}\` bytes, SHA-256: \`${FGP_KO_SHA}\`)"
-            echo "- **\`${FGP_ZIP}\` SHA-256**: \`${FGP_ZIP_SHA}\`"
-            echo "- **NoMount LKM**: \`v2.2.0\` (\`22 (605)\`)"
+            echo "- **fgetpriority LKM**: \`v0.0.4\` (\`${FGP_KO_SIZE}\` bytes, SHA-256: \`${FGP_KO_SHA}\`)"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Hybrid-Mount v6.2.5 Standalone LKMs (corfu 4.19.191+)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hybrid-Mount-v6.2.5-corfu-4.19.191-LKMs
+          path: |
+            dist/hybridmount-android12-4.19.ko
+            dist/hybridmount.ko
+            dist/nuke-android12-4.19.ko
+            dist/nuke.ko
+            dist/hybridmount-modinfo.txt
+            dist/hybridmount-SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Upload Hybrid-Mount v6.2.5 Metamodule Zip (corfu LKMs pre-bundled)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hybrid-Mount-v6.2.5-corfu-Metamodule
+          path: dist/Hybrid-Mount-6.2.5-2118-corfu-4.19.191.zip
+          if-no-files-found: error
 
       - name: Upload fgetpriority v0.0.4 Standalone LKM (corfu 4.19.191+)
         uses: actions/upload-artifact@v4
@@ -475,6 +682,8 @@ jobs:
             dist/dtb.img
             dist/corfu_kernel.config
             dist/Module.symvers
+            dist/hybridmount-android12-4.19.ko
+            dist/nuke-android12-4.19.ko
             dist/nomount-4.19.ko
             dist/fgetpriority.ko
           if-no-files-found: error

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Kconfig for Hybrid-Mount v6.2.5 LKMs (`hybridmount.ko` and `nuke.ko`)
+
+config HYBRIDMOUNT
+	tristate "Hybrid Mount VFS Path Redirection Subsystem (LKM)"
+	default m
+	depends on KEYS
+	help
+	  Hybrid Mount's VFS path redirection subsystem (`hybridmount.ko`,
+	  protocol `hm1`). Injects, hides and redirects paths without mounting
+	  filesystems, driven by the Hybrid Mount metamodule over the keyring.
+
+config HYBRIDMOUNT_NUKE
+	tristate "Hybrid Mount ext4 sysfs nuke LKM"
+	default m
+	depends on m && EXT4_FS && KALLSYMS
+	help
+	  Loadable kernel module (`nuke.ko`) shipped by Hybrid Mount for
+	  unregistering an ext4 volume's /proc/fs/ext4/<dev> and
+	  /sys/fs/ext4/<dev> nodes on non-KernelSU environments.

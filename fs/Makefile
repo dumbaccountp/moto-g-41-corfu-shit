@@ -135,3 +135,6 @@ obj-$(CONFIG_CEPH_FS)		+= ceph/
 obj-$(CONFIG_PSTORE)		+= pstore/
 obj-$(CONFIG_EFIVAR_FS)		+= efivarfs/
 obj-$(CONFIG_NOMOUNT)		+= nomount/
+obj-$(CONFIG_HYBRIDMOUNT)	+= hybridmount/
+obj-$(CONFIG_HYBRIDMOUNT_NUKE)	+= hybridmount/
+
