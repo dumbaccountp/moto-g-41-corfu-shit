@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Cast6 Cipher 8-way parallel algorithm (AVX/x86_64)
  *
@@ -6,6 +5,22 @@
  *     <Johannes.Goetzfried@informatik.stud.uni-erlangen.de>
  *
  * Copyright © 2012-2013 Jussi Kivilinna <jussi.kivilinna@iki.fi>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
+ * USA
+ *
  */
 
 #include <linux/linkage.h>
@@ -247,7 +262,7 @@
 .text
 
 .align 8
-SYM_FUNC_START_LOCAL(__cast6_enc_blk8)
+__cast6_enc_blk8:
 	/* input:
 	 *	%rdi: ctx
 	 *	RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2: blocks
@@ -291,11 +306,11 @@ SYM_FUNC_START_LOCAL(__cast6_enc_blk8)
 	outunpack_blocks(RA1, RB1, RC1, RD1, RTMP, RX, RKRF, RKM);
 	outunpack_blocks(RA2, RB2, RC2, RD2, RTMP, RX, RKRF, RKM);
 
-	RET;
-SYM_FUNC_END(__cast6_enc_blk8)
+	ret;
+ENDPROC(__cast6_enc_blk8)
 
 .align 8
-SYM_FUNC_START_LOCAL(__cast6_dec_blk8)
+__cast6_dec_blk8:
 	/* input:
 	 *	%rdi: ctx
 	 *	RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2: encrypted blocks
@@ -338,10 +353,10 @@ SYM_FUNC_START_LOCAL(__cast6_dec_blk8)
 	outunpack_blocks(RA1, RB1, RC1, RD1, RTMP, RX, RKRF, RKM);
 	outunpack_blocks(RA2, RB2, RC2, RD2, RTMP, RX, RKRF, RKM);
 
-	RET;
-SYM_FUNC_END(__cast6_dec_blk8)
+	ret;
+ENDPROC(__cast6_dec_blk8)
 
-SYM_FUNC_START(cast6_ecb_enc_8way)
+ENTRY(cast6_ecb_enc_8way)
 	/* input:
 	 *	%rdi: ctx
 	 *	%rsi: dst
@@ -361,10 +376,10 @@ SYM_FUNC_START(cast6_ecb_enc_8way)
 
 	popq %r15;
 	FRAME_END
-	RET;
-SYM_FUNC_END(cast6_ecb_enc_8way)
+	ret;
+ENDPROC(cast6_ecb_enc_8way)
 
-SYM_FUNC_START(cast6_ecb_dec_8way)
+ENTRY(cast6_ecb_dec_8way)
 	/* input:
 	 *	%rdi: ctx
 	 *	%rsi: dst
@@ -384,10 +399,10 @@ SYM_FUNC_START(cast6_ecb_dec_8way)
 
 	popq %r15;
 	FRAME_END
-	RET;
-SYM_FUNC_END(cast6_ecb_dec_8way)
+	ret;
+ENDPROC(cast6_ecb_dec_8way)
 
-SYM_FUNC_START(cast6_cbc_dec_8way)
+ENTRY(cast6_cbc_dec_8way)
 	/* input:
 	 *	%rdi: ctx
 	 *	%rsi: dst
@@ -410,10 +425,10 @@ SYM_FUNC_START(cast6_cbc_dec_8way)
 	popq %r15;
 	popq %r12;
 	FRAME_END
-	RET;
-SYM_FUNC_END(cast6_cbc_dec_8way)
+	ret;
+ENDPROC(cast6_cbc_dec_8way)
 
-SYM_FUNC_START(cast6_ctr_8way)
+ENTRY(cast6_ctr_8way)
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -438,10 +453,10 @@ SYM_FUNC_START(cast6_ctr_8way)
 	popq %r15;
 	popq %r12;
 	FRAME_END
-	RET;
-SYM_FUNC_END(cast6_ctr_8way)
+	ret;
+ENDPROC(cast6_ctr_8way)
 
-SYM_FUNC_START(cast6_xts_enc_8way)
+ENTRY(cast6_xts_enc_8way)
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -465,10 +480,10 @@ SYM_FUNC_START(cast6_xts_enc_8way)
 
 	popq %r15;
 	FRAME_END
-	RET;
-SYM_FUNC_END(cast6_xts_enc_8way)
+	ret;
+ENDPROC(cast6_xts_enc_8way)
 
-SYM_FUNC_START(cast6_xts_dec_8way)
+ENTRY(cast6_xts_dec_8way)
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -492,5 +507,5 @@ SYM_FUNC_START(cast6_xts_dec_8way)
 
 	popq %r15;
 	FRAME_END
-	RET;
-SYM_FUNC_END(cast6_xts_dec_8way)
+	ret;
+ENDPROC(cast6_xts_dec_8way)

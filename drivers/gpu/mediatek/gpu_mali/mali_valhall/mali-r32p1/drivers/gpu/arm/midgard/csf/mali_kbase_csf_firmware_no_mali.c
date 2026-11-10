@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
  * (C) COPYRIGHT 2018-2021 ARM Limited. All rights reserved.
@@ -115,15 +115,6 @@ static inline void input_page_write(u32 *const input, const u32 offset,
 	WARN_ON(offset % sizeof(u32));
 
 	input[offset / sizeof(u32)] = value;
-}
-
-static inline void input_page_partial_write(u32 *const input, const u32 offset,
-			u32 value, u32 mask)
-{
-	WARN_ON(offset % sizeof(u32));
-
-	input[offset / sizeof(u32)] =
-		(input_page_read(input, offset) & ~mask) | (value & mask);
 }
 
 static inline u32 output_page_read(const u32 *const output, const u32 offset)
@@ -1298,7 +1289,7 @@ int kbase_csf_firmware_mcu_shared_mapping_init(
 
 	ret = kbase_mem_pool_alloc_pages(
 		&kbdev->mem_pools.small[KBASE_MEM_GROUP_CSF_FW],
-		num_pages, phys, false);
+		num_pages, phys, false, NULL);
 	if (ret <= 0)
 		goto phys_mem_pool_alloc_error;
 
@@ -1340,7 +1331,7 @@ int kbase_csf_firmware_mcu_shared_mapping_init(
 
 mmu_insert_pages_error:
 	mutex_lock(&kbdev->csf.reg_lock);
-	kbase_remove_va_region(va_reg);
+	kbase_remove_va_region(kbdev, va_reg);
 va_region_add_error:
 	kbase_free_alloced_region(va_reg);
 	mutex_unlock(&kbdev->csf.reg_lock);
@@ -1372,7 +1363,7 @@ void kbase_csf_firmware_mcu_shared_mapping_term(
 {
 	if (csf_mapping->va_reg) {
 		mutex_lock(&kbdev->csf.reg_lock);
-		kbase_remove_va_region(csf_mapping->va_reg);
+		kbase_remove_va_region(kbdev, csf_mapping->va_reg);
 		kbase_free_alloced_region(csf_mapping->va_reg);
 		mutex_unlock(&kbdev->csf.reg_lock);
 	}

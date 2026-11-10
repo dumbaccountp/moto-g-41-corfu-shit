@@ -1,10 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * Procedures for interfacing to the RTAS on CHRP machines.
  *
  * Peter Bergner, IBM	March 2001.
  * Copyright (C) 2001 IBM.
+ *
+ *      This program is free software; you can redistribute it and/or
+ *      modify it under the terms of the GNU General Public License
+ *      as published by the Free Software Foundation; either version
+ *      2 of the License, or (at your option) any later version.
  */
 
 #include <stdarg.h>
@@ -16,7 +20,6 @@
 #include <linux/capability.h>
 #include <linux/delay.h>
 #include <linux/cpu.h>
-#include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/completion.h>
 #include <linux/cpumask.h>
@@ -41,7 +44,6 @@
 #include <asm/time.h>
 #include <asm/mmu.h>
 #include <asm/topology.h>
-#include <asm/paca.h>
 
 /* This is here deliberately so it's only used in this file */
 void enter_rtas(unsigned long);
@@ -715,7 +717,6 @@ void __noreturn rtas_halt(void)
 
 /* Must be in the RMO region, so we place it here */
 static char rtas_os_term_buf[2048];
-static s32 ibm_os_term_token = RTAS_UNKNOWN_SERVICE;
 
 void rtas_os_term(char *str)
 {
@@ -727,20 +728,16 @@ void rtas_os_term(char *str)
 	 * this property may terminate the partition which we want to avoid
 	 * since it interferes with panic_timeout.
 	 */
-	if (ibm_os_term_token == RTAS_UNKNOWN_SERVICE)
+	if (RTAS_UNKNOWN_SERVICE == rtas_token("ibm,os-term") ||
+	    RTAS_UNKNOWN_SERVICE == rtas_token("ibm,extended-os-term"))
 		return;
 
 	snprintf(rtas_os_term_buf, 2048, "OS panic: %s", str);
 
-	/*
-	 * Keep calling as long as RTAS returns a "try again" status,
-	 * but don't use rtas_busy_delay(), which potentially
-	 * schedules.
-	 */
 	do {
-		status = rtas_call(ibm_os_term_token, 1, 1, NULL,
+		status = rtas_call(rtas_token("ibm,os-term"), 1, 1, NULL,
 				   __pa(rtas_os_term_buf));
-	} while (rtas_busy_delay_time(status));
+	} while (rtas_busy_delay(status));
 
 	if (status != 0)
 		printk(KERN_EMERG "ibm,os-term call failed %d\n", status);
@@ -848,6 +845,97 @@ static void rtas_percpu_suspend_me(void *info)
 	__rtas_suspend_cpu((struct rtas_suspend_me_data *)info, 1);
 }
 
+enum rtas_cpu_state {
+	DOWN,
+	UP,
+};
+
+#ifndef CONFIG_SMP
+static int rtas_cpu_state_change_mask(enum rtas_cpu_state state,
+				cpumask_var_t cpus)
+{
+	if (!cpumask_empty(cpus)) {
+		cpumask_clear(cpus);
+		return -EINVAL;
+	} else
+		return 0;
+}
+#else
+/* On return cpumask will be altered to indicate CPUs changed.
+ * CPUs with states changed will be set in the mask,
+ * CPUs with status unchanged will be unset in the mask. */
+static int rtas_cpu_state_change_mask(enum rtas_cpu_state state,
+				cpumask_var_t cpus)
+{
+	int cpu;
+	int cpuret = 0;
+	int ret = 0;
+
+	if (cpumask_empty(cpus))
+		return 0;
+
+	for_each_cpu(cpu, cpus) {
+		struct device *dev = get_cpu_device(cpu);
+
+		switch (state) {
+		case DOWN:
+			cpuret = device_offline(dev);
+			break;
+		case UP:
+			cpuret = device_online(dev);
+			break;
+		}
+		if (cpuret < 0) {
+			pr_debug("%s: cpu_%s for cpu#%d returned %d.\n",
+					__func__,
+					((state == UP) ? "up" : "down"),
+					cpu, cpuret);
+			if (!ret)
+				ret = cpuret;
+			if (state == UP) {
+				/* clear bits for unchanged cpus, return */
+				cpumask_shift_right(cpus, cpus, cpu);
+				cpumask_shift_left(cpus, cpus, cpu);
+				break;
+			} else {
+				/* clear bit for unchanged cpu, continue */
+				cpumask_clear_cpu(cpu, cpus);
+			}
+		}
+	}
+
+	return ret;
+}
+#endif
+
+int rtas_online_cpus_mask(cpumask_var_t cpus)
+{
+	int ret;
+
+	ret = rtas_cpu_state_change_mask(UP, cpus);
+
+	if (ret) {
+		cpumask_var_t tmp_mask;
+
+		if (!alloc_cpumask_var(&tmp_mask, GFP_KERNEL))
+			return ret;
+
+		/* Use tmp_mask to preserve cpus mask from first failure */
+		cpumask_copy(tmp_mask, cpus);
+		rtas_offline_cpus_mask(tmp_mask);
+		free_cpumask_var(tmp_mask);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(rtas_online_cpus_mask);
+
+int rtas_offline_cpus_mask(cpumask_var_t cpus)
+{
+	return rtas_cpu_state_change_mask(DOWN, cpus);
+}
+EXPORT_SYMBOL(rtas_offline_cpus_mask);
+
 int rtas_ibm_suspend_me(u64 handle)
 {
 	long state;
@@ -855,6 +943,8 @@ int rtas_ibm_suspend_me(u64 handle)
 	unsigned long retbuf[PLPAR_HCALL_BUFSIZE];
 	struct rtas_suspend_me_data data;
 	DECLARE_COMPLETION_ONSTACK(done);
+	cpumask_var_t offline_mask;
+	int cpuret;
 
 	if (!rtas_service_present("ibm,suspend-me"))
 		return -ENOSYS;
@@ -875,6 +965,9 @@ int rtas_ibm_suspend_me(u64 handle)
 		return -EIO;
 	}
 
+	if (!alloc_cpumask_var(&offline_mask, GFP_KERNEL))
+		return -ENOMEM;
+
 	atomic_set(&data.working, 0);
 	atomic_set(&data.done, 0);
 	atomic_set(&data.error, 0);
@@ -883,76 +976,43 @@ int rtas_ibm_suspend_me(u64 handle)
 
 	lock_device_hotplug();
 
+	/* All present CPUs must be online */
+	cpumask_andnot(offline_mask, cpu_present_mask, cpu_online_mask);
+	cpuret = rtas_online_cpus_mask(offline_mask);
+	if (cpuret) {
+		pr_err("%s: Could not bring present CPUs online.\n", __func__);
+		atomic_set(&data.error, cpuret);
+		goto out;
+	}
+
 	cpu_hotplug_disable();
+	stop_topology_update();
 
 	/* Call function on all CPUs.  One of us will make the
 	 * rtas call
 	 */
-	on_each_cpu(rtas_percpu_suspend_me, &data, 0);
+	if (on_each_cpu(rtas_percpu_suspend_me, &data, 0))
+		atomic_set(&data.error, -EINVAL);
 
 	wait_for_completion(&done);
 
 	if (atomic_read(&data.error) != 0)
 		printk(KERN_ERR "Error doing global join\n");
 
-
+	start_topology_update();
 	cpu_hotplug_enable();
 
-	unlock_device_hotplug();
+	/* Take down CPUs not online prior to suspend */
+	cpuret = rtas_offline_cpus_mask(offline_mask);
+	if (cpuret)
+		pr_warn("%s: Could not restore CPUs to offline state.\n",
+				__func__);
 
+out:
+	unlock_device_hotplug();
+	free_cpumask_var(offline_mask);
 	return atomic_read(&data.error);
 }
-
-/**
- * rtas_call_reentrant() - Used for reentrant rtas calls
- * @token:	Token for desired reentrant RTAS call
- * @nargs:	Number of Input Parameters
- * @nret:	Number of Output Parameters
- * @outputs:	Array of outputs
- * @...:	Inputs for desired RTAS call
- *
- * According to LoPAR documentation, only "ibm,int-on", "ibm,int-off",
- * "ibm,get-xive" and "ibm,set-xive" are currently reentrant.
- * Reentrant calls need their own rtas_args buffer, so not using rtas.args, but
- * PACA one instead.
- *
- * Return:	-1 on error,
- *		First output value of RTAS call if (nret > 0),
- *		0 otherwise,
- */
-int rtas_call_reentrant(int token, int nargs, int nret, int *outputs, ...)
-{
-	va_list list;
-	struct rtas_args *args;
-	unsigned long flags;
-	int i, ret = 0;
-
-	if (!rtas.entry || token == RTAS_UNKNOWN_SERVICE)
-		return -1;
-
-	local_irq_save(flags);
-	preempt_disable();
-
-	/* We use the per-cpu (PACA) rtas args buffer */
-	args = local_paca->rtas_args_reentrant;
-
-	va_start(list, outputs);
-	va_rtas_call_unlocked(args, token, nargs, nret, list);
-	va_end(list);
-
-	if (nret > 1 && outputs)
-		for (i = 0; i < nret - 1; ++i)
-			outputs[i] = be32_to_cpu(args->rets[i + 1]);
-
-	if (nret > 0)
-		ret = be32_to_cpu(args->rets[0]);
-
-	local_irq_restore(flags);
-	preempt_enable();
-
-	return ret;
-}
-
 #else /* CONFIG_PPC_PSERIES */
 int rtas_ibm_suspend_me(u64 handle)
 {
@@ -1045,7 +1105,7 @@ static struct rtas_filter rtas_filters[] __ro_after_init = {
 	{ "get-time-of-day", -1, -1, -1, -1, -1 },
 	{ "ibm,get-vpd", -1, 0, -1, 1, 2 },
 	{ "ibm,lpar-perftools", -1, 2, 3, -1, -1 },
-	{ "ibm,platform-dump", -1, 4, 5, -1, -1 },		/* Special cased */
+	{ "ibm,platform-dump", -1, 4, 5, -1, -1 },
 	{ "ibm,read-slot-reset-state", -1, -1, -1, -1, -1 },
 	{ "ibm,scan-log-dump", -1, 0, 1, -1, -1 },
 	{ "ibm,set-dynamic-indicator", -1, 2, -1, -1, -1 },
@@ -1092,15 +1152,6 @@ static bool block_rtas_call(int token, int nargs,
 				size = 1;
 
 			end = base + size - 1;
-
-			/*
-			 * Special case for ibm,platform-dump - NULL buffer
-			 * address is used to indicate end of dump processing
-			 */
-			if (!strcmp(f->name, "ibm,platform-dump") &&
-			    base == 0)
-				return false;
-
 			if (!in_rmo_buf(base, end))
 				goto err;
 		}
@@ -1272,13 +1323,6 @@ void __init rtas_initialize(void)
 	no_entry = of_property_read_u32(rtas.dev, "linux,rtas-entry", &entry);
 	rtas.entry = no_entry ? rtas.base : entry;
 
-	/*
-	 * Discover these now to avoid device tree lookups in the
-	 * panic path.
-	 */
-	if (of_property_read_bool(rtas.dev, "ibm,extended-os-term"))
-		ibm_os_term_token = rtas_token("ibm,os-term");
-
 	/* If RTAS was found, allocate the RMO buffer for it and look for
 	 * the stop-self token if any
 	 */
@@ -1288,11 +1332,7 @@ void __init rtas_initialize(void)
 		ibm_suspend_me_token = rtas_token("ibm,suspend-me");
 	}
 #endif
-	rtas_rmo_buf = memblock_phys_alloc_range(RTAS_RMOBUF_MAX, PAGE_SIZE,
-						 0, rtas_region);
-	if (!rtas_rmo_buf)
-		panic("ERROR: RTAS: Failed to allocate %lx bytes below %pa\n",
-		      PAGE_SIZE, &rtas_region);
+	rtas_rmo_buf = memblock_alloc_base(RTAS_RMOBUF_MAX, PAGE_SIZE, rtas_region);
 
 #ifdef CONFIG_RTAS_ERROR_LOGGING
 	rtas_last_error_token = rtas_token("rtas-last-error");
@@ -1316,12 +1356,6 @@ int __init early_init_dt_scan_rtas(unsigned long node,
 	basep  = of_get_flat_dt_prop(node, "linux,rtas-base", NULL);
 	entryp = of_get_flat_dt_prop(node, "linux,rtas-entry", NULL);
 	sizep  = of_get_flat_dt_prop(node, "rtas-size", NULL);
-
-#ifdef CONFIG_PPC64
-	/* need this feature to decide the crashkernel offset */
-	if (of_get_flat_dt_prop(node, "ibm,hypertas-functions", NULL))
-		powerpc_firmware_features |= FW_FEATURE_LPAR;
-#endif
 
 	if (basep && entryp && sizep) {
 		rtas.base = *basep;

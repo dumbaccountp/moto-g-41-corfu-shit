@@ -14,7 +14,6 @@
  */
 
 #include <linux/uio.h>
-#include <linux/blkdev.h>
 #include "affs.h"
 
 static struct buffer_head *affs_get_extblock_slow(struct inode *inode, u32 ext);
@@ -879,7 +878,7 @@ affs_truncate(struct inode *inode)
 	if (inode->i_size > AFFS_I(inode)->mmu_private) {
 		struct address_space *mapping = inode->i_mapping;
 		struct page *page;
-		void *fsdata = NULL;
+		void *fsdata;
 		loff_t isize = inode->i_size;
 		int res;
 

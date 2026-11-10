@@ -8,29 +8,47 @@
 
 /* PROCFS */
 #define PROC_FOPS_RW(name) \
-static const struct proc_ops perfmgr_ ## name ## _proc_fops = { \
-	.proc_read	= perfmgr_ ## name ## _proc_show, \
-	.proc_write	= perfmgr_ ## name ## _proc_write,\
-	.proc_open	= perfmgr_proc_open, \
+static int perfmgr_ ## name ## _proc_open(\
+	struct inode *inode, struct file *file) \
+{ \
+	return single_open(file,\
+	 perfmgr_ ## name ## _proc_show, PDE_DATA(inode));\
+} \
+static const struct file_operations perfmgr_ ## name ## _proc_fops = { \
+	.owner	= THIS_MODULE, \
+	.open	= perfmgr_ ## name ## _proc_open, \
+	.read	= seq_read, \
+	.llseek	= seq_lseek,\
+	.release = single_release,\
+	.write	= perfmgr_ ## name ## _proc_write,\
 }
 
 #define PROC_FOPS_RO(name) \
-static const struct proc_ops perfmgr_ ## name ## _proc_fops = { \
-	.proc_read	= perfmgr_ ## name ## _proc_show, \
-	.proc_open	= perfmgr_proc_open, \
+static int perfmgr_ ## name ## _proc_open(\
+	struct inode *inode, struct file *file) \
+{  \
+	return single_open(file,\
+	 perfmgr_ ## name ## _proc_show, PDE_DATA(inode));\
+}  \
+static const struct file_operations perfmgr_ ## name ## _proc_fops = { \
+	.owner	= THIS_MODULE, \
+	.open	= perfmgr_ ## name ## _proc_open, \
+	.read	= seq_read, \
+	.llseek	= seq_lseek,\
+	.release = single_release, \
 }
 
 #define PROC_ENTRY(name) {__stringify(name), &perfmgr_ ## name ## _proc_fops}
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define for_each_perfmgr_clusters(i)	\
-	for (i = 0; i < clstr_num; i++)
+	for (i = 0; i < topo_cluster_num; i++)
 
-#define perfmgr_clusters clstr_num
+#define perfmgr_clusters topo_cluster_num
 
 #define LOG_BUF_SIZE (128)
 
-extern int clstr_num;
+extern int topo_cluster_num;
 extern int powerhal_tid;
 extern char *perfmgr_copy_from_user_for_proc(const char __user *buffer,
 					size_t count);

@@ -40,6 +40,8 @@ struct dc_state;
  *
  */
 
+void dc_conn_log_hex_linux(const uint8_t *hex_data, int hex_data_count);
+
 void pre_surface_trace(
 		struct dc *dc,
 		const struct dc_plane_state *const *plane_states,
@@ -100,12 +102,14 @@ void context_clock_trace(
 #define CONN_DATA_DETECT(link, hex_data, hex_len, ...) \
 		do { \
 			(void)(link); \
+			dc_conn_log_hex_linux(hex_data, hex_len); \
 			DC_LOG_EVENT_DETECTION(__VA_ARGS__); \
 		} while (0)
 
 #define CONN_DATA_LINK_LOSS(link, hex_data, hex_len, ...) \
 		do { \
 			(void)(link); \
+			dc_conn_log_hex_linux(hex_data, hex_len); \
 			DC_LOG_EVENT_LINK_LOSS(__VA_ARGS__); \
 		} while (0)
 
@@ -125,13 +129,13 @@ void context_clock_trace(
  * Display Test Next logging
  */
 #define DTN_INFO_BEGIN() \
-	dm_dtn_log_begin(dc_ctx, log_ctx)
+	dm_dtn_log_begin(dc_ctx)
 
 #define DTN_INFO(msg, ...) \
-	dm_dtn_log_append_v(dc_ctx, log_ctx, msg, ##__VA_ARGS__)
+	dm_dtn_log_append_v(dc_ctx, msg, ##__VA_ARGS__)
 
 #define DTN_INFO_END() \
-	dm_dtn_log_end(dc_ctx, log_ctx)
+	dm_dtn_log_end(dc_ctx)
 
 #define PERFORMANCE_TRACE_START() \
 	unsigned long long perf_trc_start_stmp = dm_get_timestamp(dc->ctx)
@@ -150,7 +154,5 @@ void context_clock_trace(
 #define DISPLAY_STATS(msg, ...) DC_LOG_PERF_TRACE(msg, __VA_ARGS__)
 
 #define DISPLAY_STATS_END(entry) (void)(entry)
-
-#define LOG_GAMMA_WRITE(msg, ...)
 
 #endif /* __DAL_LOGGER_INTERFACE_H__ */

@@ -6,7 +6,7 @@
 #ifndef _MUSB_QMU_H_
 #define _MUSB_QMU_H_
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 #include "musb_core.h"		/* for struct musb */
 
 extern int musb_qmu_init(struct musb *musb);

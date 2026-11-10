@@ -8,12 +8,19 @@
 
 #ifndef __ASM_SH_PROCESSOR_32_H
 #define __ASM_SH_PROCESSOR_32_H
+#ifdef __KERNEL__
 
 #include <linux/compiler.h>
 #include <linux/linkage.h>
 #include <asm/page.h>
 #include <asm/types.h>
 #include <asm/hw_breakpoint.h>
+
+/*
+ * Default implementation of macro that returns current
+ * instruction pointer ("program counter").
+ */
+#define current_text_addr() ({ void *pc; __asm__("mova	1f, %0\n.align 2\n1:":"=z" (pc)); pc; })
 
 /* Core Processor Version Register */
 #define CCN_PVR		0xff000030
@@ -170,7 +177,7 @@ static __inline__ void enable_fpu(void)
 #define thread_saved_pc(tsk)	(tsk->thread.pc)
 
 void show_trace(struct task_struct *tsk, unsigned long *sp,
-		struct pt_regs *regs, const char *loglvl);
+		struct pt_regs *regs);
 
 #ifdef CONFIG_DUMP_CODE
 void show_code(struct pt_regs *regs);
@@ -202,4 +209,5 @@ static inline void prefetchw(const void *x)
 }
 #endif
 
+#endif /* __KERNEL__ */
 #endif /* __ASM_SH_PROCESSOR_32_H */

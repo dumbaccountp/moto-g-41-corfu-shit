@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * File: pep.c
  *
@@ -7,6 +6,20 @@
  * Copyright (C) 2008 Nokia Corporation.
  *
  * Author: Rémi Denis-Courmont
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ * 02110-1301 USA
  */
 
 #include <linux/kernel.h>
@@ -368,7 +381,7 @@ static int pipe_do_rcv(struct sock *sk, struct sk_buff *skb)
 			err = -EINVAL;
 			goto out;
 		}
-		fallthrough;
+		/* fall through */
 	case PNS_PEP_DISABLE_REQ:
 		atomic_set(&pn->tx_credits, 0);
 		pep_reply(sk, skb, PN_PIPE_NO_ERROR, NULL, 0, GFP_ATOMIC);
@@ -385,7 +398,7 @@ static int pipe_do_rcv(struct sock *sk, struct sk_buff *skb)
 
 	case PNS_PIPE_ALIGNED_DATA:
 		__skb_pull(skb, 1);
-		fallthrough;
+		/* fall through */
 	case PNS_PIPE_DATA:
 		__skb_pull(skb, 3); /* Pipe data header */
 		if (!pn_flow_safe(pn->rx_fc)) {
@@ -417,11 +430,11 @@ static int pipe_do_rcv(struct sock *sk, struct sk_buff *skb)
 		err = pipe_rcv_created(sk, skb);
 		if (err)
 			break;
-		fallthrough;
+		/* fall through */
 	case PNS_PIPE_RESET_IND:
 		if (!pn->init_enable)
 			break;
-		fallthrough;
+		/* fall through */
 	case PNS_PIPE_ENABLED_IND:
 		if (!pn_flow_safe(pn->tx_fc)) {
 			atomic_set(&pn->tx_credits, 1);
@@ -555,7 +568,7 @@ static int pipe_handler_do_rcv(struct sock *sk, struct sk_buff *skb)
 	switch (hdr->message_id) {
 	case PNS_PIPE_ALIGNED_DATA:
 		__skb_pull(skb, 1);
-		fallthrough;
+		/* fall through */
 	case PNS_PIPE_DATA:
 		__skb_pull(skb, 3); /* Pipe data header */
 		if (!pn_flow_safe(pn->rx_fc)) {
@@ -868,7 +881,6 @@ static struct sock *pep_sock_accept(struct sock *sk, int flags, int *errp,
 
 	err = pep_accept_conn(newsk, skb);
 	if (err) {
-		__sock_put(sk);
 		sock_put(newsk);
 		newsk = NULL;
 		goto drop;
@@ -947,8 +959,6 @@ static int pep_ioctl(struct sock *sk, int cmd, unsigned long arg)
 			ret =  -EBUSY;
 		else if (sk->sk_state == TCP_ESTABLISHED)
 			ret = -EISCONN;
-		else if (!pn->pn_sk.sobject)
-			ret = -EADDRNOTAVAIL;
 		else
 			ret = pep_sock_enable(sk, NULL, 0);
 		release_sock(sk);
@@ -978,7 +988,7 @@ static int pep_init(struct sock *sk)
 }
 
 static int pep_setsockopt(struct sock *sk, int level, int optname,
-			  sockptr_t optval, unsigned int optlen)
+				char __user *optval, unsigned int optlen)
 {
 	struct pep_sock *pn = pep_sk(sk);
 	int val = 0, err = 0;
@@ -986,7 +996,7 @@ static int pep_setsockopt(struct sock *sk, int level, int optname,
 	if (level != SOL_PNPIPE)
 		return -ENOPROTOOPT;
 	if (optlen >= sizeof(int)) {
-		if (copy_from_sockptr(&val, optval, sizeof(int)))
+		if (get_user(val, (int __user *) optval))
 			return -EFAULT;
 	}
 

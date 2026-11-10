@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2021 MediaTek Inc.
+# Copyright (C) 2015 MediaTek Inc.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License version 2 as
@@ -11,8 +11,11 @@
 # GNU General Public License for more details.
 #
 
-obj-$(CONFIG_MTK_JPEG) += jpeg-driver.o
+# drivers/image/jpeg/Makefile
 
-jpeg-driver-$(CONFIG_MTK_JPEG) += jpeg_drv.o \
-				jpeg_dma_buf.o \
+# use common driver
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6757" "mt6799" "kiboplus" "mt6759" "mt6763" "mt6758" "mt6739" "mt6765" "mt6761" "mt8163" "mt8173" "mt6779" "mt6768" "mt6767" "mt6771" "mt6785" "mt8168" "mt6885" "mt6893"))
+  # new chip use v2 driver
+  obj-y += v2/
+endif
 # EOF

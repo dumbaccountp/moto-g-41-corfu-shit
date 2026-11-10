@@ -11,7 +11,6 @@
 #include <linux/string.h>
 
 /* Let's reuse optee's message format */
-#include <imsg_log.h>
 #include "optee_msg.h"
 
 enum {

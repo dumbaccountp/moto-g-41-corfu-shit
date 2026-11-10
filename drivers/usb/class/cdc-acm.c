@@ -185,7 +185,7 @@ static int acm_wb_alloc(struct acm *acm)
 	for (;;) {
 		wb = &acm->wb[wbn];
 		if (!wb->use) {
-			wb->use = true;
+			wb->use = 1;
 			wb->len = 0;
 			return wbn;
 		}
@@ -203,8 +203,7 @@ static int acm_wb_is_avail(struct acm *acm)
 	n = ACM_NW;
 	spin_lock_irqsave(&acm->write_lock, flags);
 	for (i = 0; i < ACM_NW; i++)
-		if(acm->wb[i].use)
-			n--;
+		n -= acm->wb[i].use;
 	spin_unlock_irqrestore(&acm->write_lock, flags);
 	return n;
 }
@@ -214,7 +213,7 @@ static int acm_wb_is_avail(struct acm *acm)
  */
 static void acm_write_done(struct acm *acm, struct acm_wb *wb)
 {
-	wb->use = false;
+	wb->use = 0;
 	acm->transmitting--;
 	usb_autopm_put_interface_async(acm->control);
 }
@@ -339,9 +338,6 @@ static void acm_process_notification(struct acm *acm, unsigned char *buf)
 		if (newctrl & ACM_CTRL_OVERRUN)
 			acm->iocount.overrun++;
 		spin_unlock_irqrestore(&acm->read_lock, flags);
-
-		if (newctrl & ACM_CTRL_BRK)
-			tty_flip_buffer_push(&acm->port);
 
 		if (difference)
 			wake_up_all(&acm->wioctl);
@@ -478,16 +474,11 @@ static int acm_submit_read_urbs(struct acm *acm, gfp_t mem_flags)
 
 static void acm_process_read_urb(struct acm *acm, struct urb *urb)
 {
-	unsigned long flags;
-
 	if (!urb->actual_length)
 		return;
 
-	spin_lock_irqsave(&acm->read_lock, flags);
 	tty_insert_flip_string(&acm->port, urb->transfer_buffer,
 			urb->actual_length);
-	spin_unlock_irqrestore(&acm->read_lock, flags);
-
 	tty_flip_buffer_push(&acm->port);
 }
 
@@ -495,6 +486,7 @@ static void acm_read_bulk_callback(struct urb *urb)
 {
 	struct acm_rb *rb = urb->context;
 	struct acm *acm = rb->instance;
+	unsigned long flags;
 	int status = urb->status;
 	bool stopped = false;
 	bool stalled = false;
@@ -558,10 +550,15 @@ static void acm_read_bulk_callback(struct urb *urb)
 		return;
 	}
 
-	if (test_bit(ACM_THROTTLED, &acm->flags))
-		return;
-
-	acm_submit_read_urb(acm, rb->index, GFP_ATOMIC);
+	/* throttle device if requested by tty */
+	spin_lock_irqsave(&acm->read_lock, flags);
+	acm->throttled = acm->throttle_req;
+	if (!acm->throttled) {
+		spin_unlock_irqrestore(&acm->read_lock, flags);
+		acm_submit_read_urb(acm, rb->index, GFP_ATOMIC);
+	} else {
+		spin_unlock_irqrestore(&acm->read_lock, flags);
+	}
 }
 
 /* data interface wrote those outgoing bytes */
@@ -705,7 +702,10 @@ static int acm_port_activate(struct tty_port *port, struct tty_struct *tty)
 	/*
 	 * Unthrottle device in case the TTY was closed while throttled.
 	 */
-	clear_bit(ACM_THROTTLED, &acm->flags);
+	spin_lock_irq(&acm->read_lock);
+	acm->throttled = 0;
+	acm->throttle_req = 0;
+	spin_unlock_irq(&acm->read_lock);
 
 	retval = acm_submit_read_urbs(acm, GFP_KERNEL);
 	if (retval)
@@ -734,8 +734,7 @@ static void acm_port_destruct(struct tty_port *port)
 {
 	struct acm *acm = container_of(port, struct acm, port);
 
-	if (acm->minor != ACM_MINOR_INVALID)
-		acm_release_minor(acm);
+	acm_release_minor(acm);
 	usb_put_intf(acm->control);
 	kfree(acm->country_codes);
 	kfree(acm);
@@ -764,7 +763,7 @@ static void acm_port_shutdown(struct tty_port *port)
 		if (!urb)
 			break;
 		wb = urb->context;
-		wb->use = false;
+		wb->use = 0;
 		usb_autopm_put_interface_async(acm->control);
 	}
 
@@ -816,7 +815,7 @@ static int acm_tty_write(struct tty_struct *tty,
 	wb = &acm->wb[wbn];
 
 	if (!acm->dev) {
-		wb->use = false;
+		wb->use = 0;
 		spin_unlock_irqrestore(&acm->write_lock, flags);
 		return -ENODEV;
 	}
@@ -828,7 +827,7 @@ static int acm_tty_write(struct tty_struct *tty,
 
 	stat = usb_autopm_get_interface_async(acm->control);
 	if (stat) {
-		wb->use = false;
+		wb->use = 0;
 		spin_unlock_irqrestore(&acm->write_lock, flags);
 		return stat;
 	}
@@ -876,19 +875,27 @@ static void acm_tty_throttle(struct tty_struct *tty)
 {
 	struct acm *acm = tty->driver_data;
 
-	set_bit(ACM_THROTTLED, &acm->flags);
+	spin_lock_irq(&acm->read_lock);
+	acm->throttle_req = 1;
+	spin_unlock_irq(&acm->read_lock);
 }
 
 static void acm_tty_unthrottle(struct tty_struct *tty)
 {
 	struct acm *acm = tty->driver_data;
+	unsigned int was_throttled;
 
-	clear_bit(ACM_THROTTLED, &acm->flags);
+	spin_lock_irq(&acm->read_lock);
+	was_throttled = acm->throttled;
+	acm->throttled = 0;
+	acm->throttle_req = 0;
+	spin_unlock_irq(&acm->read_lock);
 
 	/* Matches the smp_mb__after_atomic() in acm_read_bulk_callback(). */
 	smp_mb();
 
-	acm_submit_read_urbs(acm, GFP_KERNEL);
+	if (was_throttled)
+		acm_submit_read_urbs(acm, GFP_KERNEL);
 }
 
 static int acm_tty_break_ctl(struct tty_struct *tty, int state)
@@ -934,34 +941,51 @@ static int acm_tty_tiocmset(struct tty_struct *tty,
 	return acm_set_control(acm, acm->ctrlout = newctrl);
 }
 
-static int get_serial_info(struct tty_struct *tty, struct serial_struct *ss)
+static int get_serial_info(struct acm *acm, struct serial_struct __user *info)
 {
-	struct acm *acm = tty->driver_data;
+	struct serial_struct tmp;
 
-	ss->line = acm->minor;
-	ss->close_delay	= jiffies_to_msecs(acm->port.close_delay) / 10;
-	ss->closing_wait = acm->port.closing_wait == ASYNC_CLOSING_WAIT_NONE ?
+	memset(&tmp, 0, sizeof(tmp));
+	tmp.xmit_fifo_size = acm->writesize;
+	tmp.baud_base = le32_to_cpu(acm->line.dwDTERate);
+	tmp.close_delay	= jiffies_to_msecs(acm->port.close_delay) / 10;
+	tmp.closing_wait = acm->port.closing_wait == ASYNC_CLOSING_WAIT_NONE ?
 				ASYNC_CLOSING_WAIT_NONE :
 				jiffies_to_msecs(acm->port.closing_wait) / 10;
-	return 0;
+
+	if (copy_to_user(info, &tmp, sizeof(tmp)))
+		return -EFAULT;
+	else
+		return 0;
 }
 
-static int set_serial_info(struct tty_struct *tty, struct serial_struct *ss)
+static int set_serial_info(struct acm *acm,
+				struct serial_struct __user *newinfo)
 {
-	struct acm *acm = tty->driver_data;
+	struct serial_struct new_serial;
 	unsigned int closing_wait, close_delay;
+	unsigned int old_closing_wait, old_close_delay;
 	int retval = 0;
 
-	close_delay = msecs_to_jiffies(ss->close_delay * 10);
-	closing_wait = ss->closing_wait == ASYNC_CLOSING_WAIT_NONE ?
+	if (copy_from_user(&new_serial, newinfo, sizeof(new_serial)))
+		return -EFAULT;
+
+	close_delay = msecs_to_jiffies(new_serial.close_delay * 10);
+	closing_wait = new_serial.closing_wait == ASYNC_CLOSING_WAIT_NONE ?
 			ASYNC_CLOSING_WAIT_NONE :
-			msecs_to_jiffies(ss->closing_wait * 10);
+			msecs_to_jiffies(new_serial.closing_wait * 10);
+
+	/* we must redo the rounding here, so that the values match */
+	old_close_delay	= jiffies_to_msecs(acm->port.close_delay) / 10;
+	old_closing_wait = acm->port.closing_wait == ASYNC_CLOSING_WAIT_NONE ?
+				ASYNC_CLOSING_WAIT_NONE :
+				jiffies_to_msecs(acm->port.closing_wait) / 10;
 
 	mutex_lock(&acm->port.mutex);
 
 	if (!capable(CAP_SYS_ADMIN)) {
-		if ((close_delay != acm->port.close_delay) ||
-		    (closing_wait != acm->port.closing_wait))
+		if ((new_serial.close_delay != old_close_delay) ||
+	            (new_serial.closing_wait != old_closing_wait))
 			retval = -EPERM;
 	} else {
 		acm->port.close_delay  = close_delay;
@@ -1038,6 +1062,12 @@ static int acm_tty_ioctl(struct tty_struct *tty,
 	int rv = -ENOIOCTLCMD;
 
 	switch (cmd) {
+	case TIOCGSERIAL: /* gets serial port data */
+		rv = get_serial_info(acm, (struct serial_struct __user *) arg);
+		break;
+	case TIOCSSERIAL:
+		rv = set_serial_info(acm, (struct serial_struct __user *) arg);
+		break;
 	case TIOCMIWAIT:
 		rv = usb_autopm_get_interface(acm->control);
 		if (rv < 0) {
@@ -1210,6 +1240,9 @@ static int acm_probe(struct usb_interface *intf,
 		return -EINVAL;
 	}
 
+	if (!intf->cur_altsetting)
+		return -EINVAL;
+
 	if (!buflen) {
 		if (intf->cur_altsetting->endpoint &&
 				intf->cur_altsetting->endpoint->extralen &&
@@ -1232,19 +1265,26 @@ static int acm_probe(struct usb_interface *intf,
 		call_intf_num = cmgmd->bDataInterface;
 
 	if (!union_header) {
-		if (intf->cur_altsetting->desc.bNumEndpoints == 3) {
-			dev_dbg(&intf->dev, "No union descriptor, assuming single interface\n");
-			combined_interfaces = 1;
-			control_interface = data_interface = intf;
-			goto look_for_collapsed_interface;
-		} else if (call_intf_num > 0) {
+		if (call_intf_num > 0) {
 			dev_dbg(&intf->dev, "No union descriptor, using call management descriptor\n");
-			data_intf_num = call_intf_num;
-			data_interface = usb_ifnum_to_if(usb_dev, data_intf_num);
+			/* quirks for Droids MuIn LCD */
+			if (quirks & NO_DATA_INTERFACE) {
+				data_interface = usb_ifnum_to_if(usb_dev, 0);
+			} else {
+				data_intf_num = call_intf_num;
+				data_interface = usb_ifnum_to_if(usb_dev, data_intf_num);
+			}
 			control_interface = intf;
 		} else {
-			dev_dbg(&intf->dev, "No union descriptor, giving up\n");
-			return -ENODEV;
+			if (intf->cur_altsetting->desc.bNumEndpoints != 3) {
+				dev_dbg(&intf->dev,"No union descriptor, giving up\n");
+				return -ENODEV;
+			} else {
+				dev_warn(&intf->dev,"No union descriptor, testing for castrated device\n");
+				combined_interfaces = 1;
+				control_interface = data_interface = intf;
+				goto look_for_collapsed_interface;
+			}
 		}
 	} else {
 		int class = -1;
@@ -1268,6 +1308,8 @@ static int acm_probe(struct usb_interface *intf,
 		dev_dbg(&intf->dev, "no interfaces\n");
 		return -ENODEV;
 	}
+	if (!data_interface->cur_altsetting || !control_interface->cur_altsetting)
+		return -ENODEV;
 
 	if (data_intf_num != call_intf_num)
 		dev_dbg(&intf->dev, "Separate call control interface. That is not fully supported.\n");
@@ -1294,8 +1336,10 @@ look_for_collapsed_interface:
 skip_normal_probe:
 
 	/*workaround for switched interfaces */
-	if (data_interface->cur_altsetting->desc.bInterfaceClass != USB_CLASS_CDC_DATA) {
-		if (control_interface->cur_altsetting->desc.bInterfaceClass == USB_CLASS_CDC_DATA) {
+	if (data_interface->cur_altsetting->desc.bInterfaceClass
+						!= CDC_DATA_INTERFACE_TYPE) {
+		if (control_interface->cur_altsetting->desc.bInterfaceClass
+						== CDC_DATA_INTERFACE_TYPE) {
 			dev_dbg(&intf->dev,
 				"Your device has switched interfaces.\n");
 			swap(control_interface, data_interface);
@@ -1352,10 +1396,8 @@ made_compressed_probe:
 	usb_get_intf(acm->control); /* undone in destruct() */
 
 	minor = acm_alloc_minor(acm);
-	if (minor < 0) {
-		acm->minor = ACM_MINOR_INVALID;
+	if (minor < 0)
 		goto alloc_fail1;
-	}
 
 	acm->minor = minor;
 	acm->dev = usb_dev;
@@ -1830,9 +1872,6 @@ static const struct usb_device_id acm_ids[] = {
 	{ USB_DEVICE(0x09d8, 0x0320), /* Elatec GmbH TWN3 */
 	.driver_info = NO_UNION_NORMAL, /* has misplaced union descriptor */
 	},
-	{ USB_DEVICE(0x0c26, 0x0020), /* Icom ICF3400 Serie */
-	.driver_info = NO_UNION_NORMAL, /* reports zero length descriptor */
-	},
 	{ USB_DEVICE(0x0ca6, 0xa050), /* Castles VEGA3000 */
 	.driver_info = NO_UNION_NORMAL, /* reports zero length descriptor */
 	},
@@ -1910,17 +1949,16 @@ static const struct usb_device_id acm_ids[] = {
 
 	/* NOTE: non-Nokia COMM/ACM/0xff is likely MSFT RNDIS... NOT a modem! */
 
+	/* Support for Droids MuIn LCD */
+	{ USB_DEVICE(0x04d8, 0x000b),
+	.driver_info = NO_DATA_INTERFACE,
+	},
+
 #if IS_ENABLED(CONFIG_INPUT_IMS_PCU)
 	{ USB_DEVICE(0x04d8, 0x0082),	/* Application mode */
 	.driver_info = IGNORE_DEVICE,
 	},
 	{ USB_DEVICE(0x04d8, 0x0083),	/* Bootloader mode */
-	.driver_info = IGNORE_DEVICE,
-	},
-#endif
-
-#if IS_ENABLED(CONFIG_IR_TOY)
-	{ USB_DEVICE(0x04d8, 0xfd08),
 	.driver_info = IGNORE_DEVICE,
 	},
 
@@ -1959,11 +1997,6 @@ static const struct usb_device_id acm_ids[] = {
 
 	/* Exclude Goodix Fingerprint Reader */
 	{ USB_DEVICE(0x27c6, 0x5395),
-	.driver_info = IGNORE_DEVICE,
-	},
-
-	/* Exclude Heimann Sensor GmbH USB appset demo */
-	{ USB_DEVICE(0x32a7, 0x0000),
 	.driver_info = IGNORE_DEVICE,
 	},
 
@@ -2031,8 +2064,6 @@ static const struct tty_operations acm_ops = {
 	.set_termios =		acm_tty_set_termios,
 	.tiocmget =		acm_tty_tiocmget,
 	.tiocmset =		acm_tty_tiocmset,
-	.get_serial =		get_serial_info,
-	.set_serial =		set_serial_info,
 	.get_icount =		acm_tty_get_icount,
 };
 

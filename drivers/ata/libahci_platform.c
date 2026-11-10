@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AHCI SATA platform library
  *
@@ -6,6 +5,11 @@
  *   Jeff Garzik <jgarzik@pobox.com>
  * Copyright 2010  MontaVista Software, LLC.
  *   Anton Vorontsov <avorontsov@ru.mvista.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2, or (at your option)
+ * any later version.
  */
 
 #include <linux/clk.h>
@@ -52,14 +56,8 @@ int ahci_platform_enable_phys(struct ahci_host_priv *hpriv)
 		if (rc)
 			goto disable_phys;
 
-		rc = phy_set_mode(hpriv->phys[i], PHY_MODE_SATA);
-		if (rc) {
-			phy_exit(hpriv->phys[i]);
-			goto disable_phys;
-		}
-
 		rc = phy_power_on(hpriv->phys[i]);
-		if (rc && !(rc == -EOPNOTSUPP && (hpriv->flags & AHCI_HFLAG_IGN_NOTSUPP_POWER_ON))) {
+		if (rc) {
 			phy_exit(hpriv->phys[i]);
 			goto disable_phys;
 		}
@@ -143,7 +141,7 @@ EXPORT_SYMBOL_GPL(ahci_platform_disable_clks);
  * ahci_platform_enable_regulators - Enable regulators
  * @hpriv: host private area to store config values
  *
- * This function enables all the regulators found in controller and
+ * This function enables all the regulators found in
  * hpriv->target_pwrs, if any.  If a regulator fails to be enabled, it
  * disables all the regulators already enabled in reverse order and
  * returns an error.
@@ -154,14 +152,6 @@ EXPORT_SYMBOL_GPL(ahci_platform_disable_clks);
 int ahci_platform_enable_regulators(struct ahci_host_priv *hpriv)
 {
 	int rc, i;
-
-	rc = regulator_enable(hpriv->ahci_regulator);
-	if (rc)
-		return rc;
-
-	rc = regulator_enable(hpriv->phy_regulator);
-	if (rc)
-		goto disable_ahci_pwrs;
 
 	for (i = 0; i < hpriv->nports; i++) {
 		if (!hpriv->target_pwrs[i])
@@ -179,9 +169,6 @@ disable_target_pwrs:
 		if (hpriv->target_pwrs[i])
 			regulator_disable(hpriv->target_pwrs[i]);
 
-	regulator_disable(hpriv->phy_regulator);
-disable_ahci_pwrs:
-	regulator_disable(hpriv->ahci_regulator);
 	return rc;
 }
 EXPORT_SYMBOL_GPL(ahci_platform_enable_regulators);
@@ -190,8 +177,7 @@ EXPORT_SYMBOL_GPL(ahci_platform_enable_regulators);
  * ahci_platform_disable_regulators - Disable regulators
  * @hpriv: host private area to store config values
  *
- * This function disables all regulators found in hpriv->target_pwrs and
- * AHCI controller.
+ * This function disables all regulators found in hpriv->target_pwrs.
  */
 void ahci_platform_disable_regulators(struct ahci_host_priv *hpriv)
 {
@@ -202,9 +188,6 @@ void ahci_platform_disable_regulators(struct ahci_host_priv *hpriv)
 			continue;
 		regulator_disable(hpriv->target_pwrs[i]);
 	}
-
-	regulator_disable(hpriv->ahci_regulator);
-	regulator_disable(hpriv->phy_regulator);
 }
 EXPORT_SYMBOL_GPL(ahci_platform_disable_regulators);
 /**
@@ -322,11 +305,11 @@ static int ahci_platform_get_phy(struct ahci_host_priv *hpriv, u32 port,
 		/* No PHY support. Check if PHY is required. */
 		if (of_find_property(node, "phys", NULL)) {
 			dev_err(dev,
-				"couldn't get PHY in node %pOFn: ENOSYS\n",
-				node);
+				"couldn't get PHY in node %s: ENOSYS\n",
+				node->name);
 			break;
 		}
-		fallthrough;
+		/* fall through */
 	case -ENODEV:
 		/* continue normally */
 		hpriv->phys[port] = NULL;
@@ -338,8 +321,8 @@ static int ahci_platform_get_phy(struct ahci_host_priv *hpriv, u32 port,
 
 	default:
 		dev_err(dev,
-			"couldn't get PHY in node %pOFn: %d\n",
-			node, rc);
+			"couldn't get PHY in node %s: %d\n",
+			node->name, rc);
 
 		break;
 	}
@@ -353,7 +336,7 @@ static int ahci_platform_get_regulator(struct ahci_host_priv *hpriv, u32 port,
 	struct regulator *target_pwr;
 	int rc = 0;
 
-	target_pwr = regulator_get(dev, "target");
+	target_pwr = regulator_get_optional(dev, "target");
 
 	if (!IS_ERR(target_pwr))
 		hpriv->target_pwrs[port] = target_pwr;
@@ -373,7 +356,6 @@ static int ahci_platform_get_regulator(struct ahci_host_priv *hpriv, u32 port,
  *
  * 1) mmio registers (IORESOURCE_MEM 0, mandatory)
  * 2) regulator for controlling the targets power (optional)
- *    regulator for controlling the AHCI controller (optional)
  * 3) 0 - AHCI_MAX_CLKS clocks, as specified in the devs devicetree node,
  *    or for non devicetree enabled platforms a single clock
  * 4) resets, if flags has AHCI_PLATFORM_GET_RESETS (optional)
@@ -405,6 +387,7 @@ struct ahci_host_priv *ahci_platform_get_resources(struct platform_device *pdev,
 	hpriv->mmio = devm_ioremap_resource(dev,
 			      platform_get_resource(pdev, IORESOURCE_MEM, 0));
 	if (IS_ERR(hpriv->mmio)) {
+		dev_err(dev, "no mmio space\n");
 		rc = PTR_ERR(hpriv->mmio);
 		goto err_out;
 	}
@@ -430,19 +413,6 @@ struct ahci_host_priv *ahci_platform_get_resources(struct platform_device *pdev,
 		hpriv->clks[i] = clk;
 	}
 
-	hpriv->ahci_regulator = devm_regulator_get(dev, "ahci");
-	if (IS_ERR(hpriv->ahci_regulator)) {
-		rc = PTR_ERR(hpriv->ahci_regulator);
-		if (rc != 0)
-			goto err_out;
-	}
-
-	hpriv->phy_regulator = devm_regulator_get(dev, "phy");
-	if (IS_ERR(hpriv->phy_regulator)) {
-		rc = PTR_ERR(hpriv->phy_regulator);
-		goto err_out;
-	}
-
 	if (flags & AHCI_PLATFORM_GET_RESETS) {
 		hpriv->rsts = devm_reset_control_array_get_optional_shared(dev);
 		if (IS_ERR(hpriv->rsts)) {
@@ -451,24 +421,14 @@ struct ahci_host_priv *ahci_platform_get_resources(struct platform_device *pdev,
 		}
 	}
 
-	/*
-	 * Too many sub-nodes most likely means having something wrong with
-	 * the firmware.
-	 */
-	child_nodes = of_get_child_count(dev->of_node);
-	if (child_nodes > AHCI_MAX_PORTS) {
-		rc = -EINVAL;
-		goto err_out;
-	}
+	hpriv->nports = child_nodes = of_get_child_count(dev->of_node);
 
 	/*
 	 * If no sub-node was found, we still need to set nports to
 	 * one in order to be able to use the
 	 * ahci_platform_[en|dis]able_[phys|regulators] functions.
 	 */
-	if (child_nodes)
-		hpriv->nports = child_nodes;
-	else
+	if (!child_nodes)
 		hpriv->nports = 1;
 
 	hpriv->phys = devm_kcalloc(dev, hpriv->nports, sizeof(*hpriv->phys), GFP_KERNEL);
@@ -496,7 +456,6 @@ struct ahci_host_priv *ahci_platform_get_resources(struct platform_device *pdev,
 
 			if (of_property_read_u32(child, "reg", &port)) {
 				rc = -EINVAL;
-				of_node_put(child);
 				goto err_out;
 			}
 
@@ -514,18 +473,14 @@ struct ahci_host_priv *ahci_platform_get_resources(struct platform_device *pdev,
 			if (port_dev) {
 				rc = ahci_platform_get_regulator(hpriv, port,
 								&port_dev->dev);
-				if (rc == -EPROBE_DEFER) {
-					of_node_put(child);
+				if (rc == -EPROBE_DEFER)
 					goto err_out;
-				}
 			}
 #endif
 
 			rc = ahci_platform_get_phy(hpriv, port, dev, child);
-			if (rc) {
-				of_node_put(child);
+			if (rc)
 				goto err_out;
-			}
 
 			enabled_ports++;
 		}
@@ -748,9 +703,6 @@ int ahci_platform_suspend_host(struct device *dev)
 	writel(ctl, mmio + HOST_CTL);
 	readl(mmio + HOST_CTL); /* flush */
 
-	if (hpriv->flags & AHCI_HFLAG_SUSPEND_PHYS)
-		ahci_platform_disable_phys(hpriv);
-
 	return ata_host_suspend(host, PMSG_SUSPEND);
 }
 EXPORT_SYMBOL_GPL(ahci_platform_suspend_host);
@@ -769,7 +721,6 @@ EXPORT_SYMBOL_GPL(ahci_platform_suspend_host);
 int ahci_platform_resume_host(struct device *dev)
 {
 	struct ata_host *host = dev_get_drvdata(dev);
-	struct ahci_host_priv *hpriv = host->private_data;
 	int rc;
 
 	if (dev->power.power_state.event == PM_EVENT_SUSPEND) {
@@ -779,9 +730,6 @@ int ahci_platform_resume_host(struct device *dev)
 
 		ahci_init_controller(host);
 	}
-
-	if (hpriv->flags & AHCI_HFLAG_SUSPEND_PHYS)
-		ahci_platform_enable_phys(hpriv);
 
 	ata_host_resume(host);
 

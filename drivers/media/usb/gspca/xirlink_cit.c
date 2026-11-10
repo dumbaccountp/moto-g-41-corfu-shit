@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * USB IBM C-It Video Camera driver
  *
@@ -11,6 +10,17 @@
  *
  * (C) Copyright 1999 Johannes Erdfelt
  * (C) Copyright 1999 Randy Dunlap
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -1409,7 +1419,7 @@ static int cit_restart_stream(struct gspca_dev *gspca_dev)
 	case CIT_MODEL0:
 	case CIT_MODEL1:
 		cit_write_reg(gspca_dev, 0x0001, 0x0114);
-		fallthrough;
+		/* Fall through */
 	case CIT_MODEL2:
 	case CIT_MODEL4:
 		cit_write_reg(gspca_dev, 0x00c0, 0x010c); /* Go! */
@@ -2725,7 +2735,7 @@ static void sd_stop0(struct gspca_dev *gspca_dev)
 		break;
 	case CIT_MODEL2:
 		v4l2_ctrl_grab(sd->lighting, false);
-		fallthrough;
+		/* Fall through! */
 	case CIT_MODEL4:
 		cit_model2_Packet1(gspca_dev, 0x0030, 0x0004);
 

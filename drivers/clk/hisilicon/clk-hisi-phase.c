@@ -75,10 +75,10 @@ static int hisi_clk_set_phase(struct clk_hw *hw, int degrees)
 
 	spin_lock_irqsave(phase->lock, flags);
 
-	val = readl(phase->reg);
+	val = clk_readl(phase->reg);
 	val &= ~phase->mask;
 	val |= regval << phase->shift;
-	writel(val, phase->reg);
+	clk_writel(val, phase->reg);
 
 	spin_unlock_irqrestore(phase->lock, flags);
 
@@ -95,7 +95,7 @@ struct clk *clk_register_hisi_phase(struct device *dev,
 		void __iomem *base, spinlock_t *lock)
 {
 	struct clk_hisi_phase *phase;
-	struct clk_init_data init;
+	struct clk_init_data init = {};
 
 	phase = devm_kzalloc(dev, sizeof(struct clk_hisi_phase), GFP_KERNEL);
 	if (!phase)
@@ -103,7 +103,7 @@ struct clk *clk_register_hisi_phase(struct device *dev,
 
 	init.name = clks->name;
 	init.ops = &clk_phase_ops;
-	init.flags = clks->flags;
+	init.flags = clks->flags | CLK_IS_BASIC;
 	init.parent_names = clks->parent_names ? &clks->parent_names : NULL;
 	init.num_parents = clks->parent_names ? 1 : 0;
 

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Uniprocessor-only support functions.  The counterpart to kernel/smp.c
  */
@@ -14,8 +13,7 @@ int smp_call_function_single(int cpu, void (*func) (void *info), void *info,
 {
 	unsigned long flags;
 
-	if (cpu != 0)
-		return -ENXIO;
+	WARN_ON(cpu != 0);
 
 	local_irq_save(flags);
 	func(info);
@@ -36,13 +34,14 @@ int smp_call_function_single_async(int cpu, struct __call_single_data *csd)
 }
 EXPORT_SYMBOL(smp_call_function_single_async);
 
-void on_each_cpu(smp_call_func_t func, void *info, int wait)
+int on_each_cpu(smp_call_func_t func, void *info, int wait)
 {
 	unsigned long flags;
 
 	local_irq_save(flags);
 	func(info);
 	local_irq_restore(flags);
+	return 0;
 }
 EXPORT_SYMBOL(on_each_cpu);
 
@@ -69,8 +68,9 @@ EXPORT_SYMBOL(on_each_cpu_mask);
  * Preemption is disabled here to make sure the cond_func is called under the
  * same condtions in UP and SMP.
  */
-void on_each_cpu_cond_mask(smp_cond_func_t cond_func, smp_call_func_t func,
-			   void *info, bool wait, const struct cpumask *mask)
+void on_each_cpu_cond(bool (*cond_func)(int cpu, void *info),
+		      smp_call_func_t func, void *info, bool wait,
+		      gfp_t gfp_flags)
 {
 	unsigned long flags;
 
@@ -81,13 +81,6 @@ void on_each_cpu_cond_mask(smp_cond_func_t cond_func, smp_call_func_t func,
 		local_irq_restore(flags);
 	}
 	preempt_enable();
-}
-EXPORT_SYMBOL(on_each_cpu_cond_mask);
-
-void on_each_cpu_cond(smp_cond_func_t cond_func, smp_call_func_t func,
-		      void *info, bool wait)
-{
-	on_each_cpu_cond_mask(cond_func, func, info, wait, NULL);
 }
 EXPORT_SYMBOL(on_each_cpu_cond);
 

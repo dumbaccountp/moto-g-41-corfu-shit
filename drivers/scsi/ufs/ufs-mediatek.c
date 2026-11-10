@@ -6,9 +6,9 @@
  *	Peter Wang <peter.wang@mediatek.com>
  */
 
+#include <asm/unaligned.h>
 #include <linux/arm-smccc.h>
 #include <linux/bitfield.h>
-#include <linux/cpumask.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
@@ -17,139 +17,554 @@
 #include <linux/pm_qos.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
-#include <linux/soc/mediatek/mtk_sip_svc.h>
-#include <linux/tracepoint.h>
-
-#if IS_ENABLED(CONFIG_RPMB)
-#include <asm/unaligned.h>
-#include <linux/async.h>
 #include <linux/rpmb.h>
-#endif
+#include <linux/soc/mediatek/mtk_sip_svc.h>
+#include <linux/soc/mediatek/mtk-pm-qos.h>
+#include <mt-plat/mtk_boot.h>
+#include <linux/of.h>
+#include <linux/of_fdt.h>
+#include <linux/of_irq.h>
+#include <linux/of_platform.h>
 
-#include "mtk_blocktag.h"
+
+#ifdef CONFIG_MTK_AEE_FEATURE
+#include <mt-plat/aee.h>
+#endif
+#include <mt-plat/upmu_common.h>
+#define CREATE_TRACE_POINTS
+#include "trace/events/ufs_mtk.h"
+
 #include "ufshcd.h"
 #include "ufshcd-crypto.h"
 #include "ufshcd-pltfrm.h"
 #include "ufs_quirks.h"
-#include "unipro.h"
 #include "ufs-mediatek.h"
 #include "ufs-mediatek-dbg.h"
+#include "ufs-mtk-block.h"
+#include "unipro.h"
 
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
-#include <mt-plat/aee.h>
-static int ufs_abort_aee_count;
+#if defined(CONFIG_MACH_MT6781) || defined(CONFIG_MACH_MT6785)
+#include "mtk_clkbuf_ctl.h"
 #endif
 
-#define CREATE_TRACE_POINTS
-#include "ufs-mediatek-trace.h"
-#undef CREATE_TRACE_POINTS
-
-#ifdef CONFIG_FSCRYPT_WRAPED_KEY_MODE_SUPPORT
-#include "ufshcd-moto-crypto.h"
+#if defined(CONFIG_SCSI_UFS_HPB)
+#include "ufshpb.h"
 #endif
+
+u32  ufs_mtk_qcmd_r_cmd_cnt;
+u32  ufs_mtk_qcmd_w_cmd_cnt;
+static bool ufs_mtk_is_data_write_cmd(char cmd_op, bool isolation);
+static bool ufs_mtk_is_data_cmd(char cmd_op, bool isolation);
+
+#define ufs_mtk_smc(cmd, val, res) \
+	arm_smccc_smc(MTK_SIP_UFS_CONTROL, \
+		      cmd, val, 0, 0, 0, 0, 0, &(res))
 
 #define ufs_mtk_va09_pwr_ctrl(res, on) \
-	ufs_mtk_smc(UFS_MTK_SIP_VA09_PWR_CTRL, res, on)
+	ufs_mtk_smc(UFS_MTK_SIP_VA09_PWR_CTRL, on, res)
 
 #define ufs_mtk_crypto_ctrl(res, enable) \
-	ufs_mtk_smc(UFS_MTK_SIP_CRYPTO_CTRL, res, enable)
+	ufs_mtk_smc(UFS_MTK_SIP_CRYPTO_CTRL, enable, res)
 
 #define ufs_mtk_ref_clk_notify(on, res) \
-	ufs_mtk_smc(UFS_MTK_SIP_REF_CLK_NOTIFICATION, res, on)
+	ufs_mtk_smc(UFS_MTK_SIP_REF_CLK_NOTIFICATION, on, res)
 
 #define ufs_mtk_device_reset_ctrl(high, res) \
-	ufs_mtk_smc(UFS_MTK_SIP_DEVICE_RESET, res, high)
+	ufs_mtk_smc(UFS_MTK_SIP_DEVICE_RESET, high, res)
 
-#define ufs_mtk_host_pwr_ctrl(on, res) \
-	ufs_mtk_smc(UFS_MTK_SIP_HOST_PWR_CTRL, res, on)
-
-#define ufs_mtk_get_vcc_info(res) \
-	ufs_mtk_smc(UFS_MTK_SIP_GET_VCC_INFO, res)
-
-#define ufs_mtk_device_pwr_ctrl(on, ufs_version, res) \
-	ufs_mtk_smc(UFS_MTK_SIP_DEVICE_PWR_CTRL, res, on, ufs_version)
-
-#define ufshcd_eh_in_progress(h) \
-	((h)->eh_flags & UFSHCD_EH_IN_PROGRESS)
-
-#if defined(CONFIG_UFSFEATURE)
-struct mmi_storage_info {
-        char type[16];  /* UFS or eMMC */
-        char size[16];  /* size in GB */
-        char card_manufacturer[32];
-        char product_name[32];  /* model ID */
-        char firmware_version[32];
-};
-
-struct mmi_ddr_info{
-        unsigned int mr5;
-        unsigned int mr6;
-        unsigned int mr7;
-        unsigned int mr8;
-        unsigned int type;
-        unsigned int ramsize;
-};
-
-static int get_dram_info(struct ufs_hba *hba);
-static int get_storage_info(struct ufs_hba *hba);
-
-unsigned int ram_size;
-char storage_mfrid[32];
+#if defined(PMIC_RG_LDO_VUFS_LP_ADDR)
+#define ufs_mtk_vufs_set_lpm(on) \
+	pmic_config_interface(PMIC_RG_LDO_VUFS_LP_ADDR, \
+					(on), \
+					PMIC_RG_LDO_VUFS_LP_MASK, \
+					PMIC_RG_LDO_VUFS_LP_SHIFT)
+#else
+#define ufs_mtk_vufs_set_lpm(on)
 #endif
 
-static struct ufs_dev_fix ufs_mtk_dev_fixups[] = {
-	UFS_FIX(UFS_ANY_VENDOR, UFS_ANY_MODEL,
-		UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM | UFS_DEVICE_QUIRK_DELAY_AFTER_LPM),
-	UFS_FIX(UFS_VENDOR_SKHYNIX, "H9HQ21AFAMZDAR",
-		UFS_DEVICE_QUIRK_SUPPORT_EXTENDED_FEATURES),
-	UFS_FIX(UFS_VENDOR_SKHYNIX, "H9HQ15AFAMBDAR",
-		UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM | UFS_DEVICE_QUIRK_DELAY_AFTER_LPM),
-	END_FIX
+int ufsdbg_perf_dump = 0;
+static struct ufs_hba *ufs_mtk_hba;
+
+static const struct ufs_mtk_host_cfg ufs_mtk_mt8183_cfg = {
+	.quirks = UFS_MTK_HOST_QUIRK_BROKEN_AUTO_HIBERN8
+	#if defined(CONFIG_MACH_MT6877)
+				| UFS_MTK_HOST_QUIRK_UFS_VCC_ALWAYS_ON
+	#elif defined(CONFIG_MACH_MT6893)
+				| UFS_MTK_HOST_QUIRK_UFS_HCI_PERF_HEURISTIC | UFS_MTK_HOST_QUIRK_UFS_VCC_ALWAYS_ON
+	#endif
+
 };
 
 static const struct of_device_id ufs_mtk_of_match[] = {
-	{ .compatible = "mediatek,mt8183-ufshci" },
+	{
+		.compatible = "mediatek,mt8183-ufshci",
+		.data = &ufs_mtk_mt8183_cfg
+	},
 	{},
 };
 
-static bool ufs_mtk_is_boost_crypt_enabled(struct ufs_hba *hba)
+#if defined(CONFIG_MACH_MT6781) || defined(CONFIG_MACH_MT6785)
+extern bool clk_buf_ctrl(enum clk_buf_id id, bool onoff);
+#endif
+
+struct rpmb_dev *ufs_mtk_rpmb_get_raw_dev()
+{
+	struct ufs_mtk_host *host = ufshcd_get_variant(ufs_mtk_hba);
+
+	return host->rawdev_ufs_rpmb;
+}
+
+/* Read Geometry Descriptor for RPMB initialization */
+static inline int ufshcd_read_geometry_desc_param(struct ufs_hba *hba,
+				enum geometry_desc_param param_offset,
+				u8 *param_read_buf, u32 param_size)
+{
+	return ufshcd_read_desc_param(hba, QUERY_DESC_IDN_GEOMETRY, 0,
+				      param_offset, param_read_buf, param_size);
+}
+
+/*
+ * RPMB feature
+ */
+#define SEC_PROTOCOL_UFS  0xEC
+#define SEC_SPECIFIC_UFS_RPMB 0x0001
+
+#define SEC_PROTOCOL_CMD_SIZE 12
+#define SEC_PROTOCOL_RETRIES 3
+#define SEC_PROTOCOL_RETRIES_ON_RESET 10
+#define SEC_PROTOCOL_TIMEOUT msecs_to_jiffies(30000)
+int ufs_mtk_rpmb_security_out(struct scsi_device *sdev,
+			 struct rpmb_frame *frames, u32 cnt)
+{
+	struct scsi_sense_hdr sshdr = {0};
+	u32 trans_len = cnt * sizeof(struct rpmb_frame);
+	int reset_retries = SEC_PROTOCOL_RETRIES_ON_RESET;
+	int ret;
+	u8 cmd[SEC_PROTOCOL_CMD_SIZE];
+
+	memset(cmd, 0, SEC_PROTOCOL_CMD_SIZE);
+	cmd[0] = SECURITY_PROTOCOL_OUT;
+	cmd[1] = SEC_PROTOCOL_UFS;
+	put_unaligned_be16(SEC_SPECIFIC_UFS_RPMB, cmd + 2);
+	cmd[4] = 0;                              /* inc_512 bit 7 set to 0 */
+	put_unaligned_be32(trans_len, cmd + 6);  /* transfer length */
+
+	/* Ensure device is resumed before RPMB operation */
+	scsi_autopm_get_device(sdev);
+
+retry:
+	ret = scsi_execute_req(sdev, cmd, DMA_TO_DEVICE,
+				     frames, trans_len, &sshdr,
+				     SEC_PROTOCOL_TIMEOUT, SEC_PROTOCOL_RETRIES,
+				     NULL);
+
+	if (ret && scsi_sense_valid(&sshdr) &&
+	    sshdr.sense_key == UNIT_ATTENTION)
+		/*
+		 * Device reset might occur several times,
+		 * give it one more chance
+		 */
+		if (--reset_retries > 0)
+			goto retry;
+
+	if (ret)
+		dev_err(&sdev->sdev_gendev, "%s: failed with err %0x\n",
+			__func__, ret);
+
+	if (driver_byte(ret) & DRIVER_SENSE)
+		scsi_print_sense_hdr(sdev, "rpmb: security out", &sshdr);
+
+	/* Allow device to be runtime suspended */
+	scsi_autopm_put_device(sdev);
+
+	return ret;
+}
+
+int ufs_mtk_rpmb_security_in(struct scsi_device *sdev,
+			struct rpmb_frame *frames, u32 cnt)
+{
+	struct scsi_sense_hdr sshdr = {0};
+	u32 alloc_len = cnt * sizeof(struct rpmb_frame);
+	int reset_retries = SEC_PROTOCOL_RETRIES_ON_RESET;
+	int ret;
+	u8 cmd[SEC_PROTOCOL_CMD_SIZE];
+
+	memset(cmd, 0, SEC_PROTOCOL_CMD_SIZE);
+	cmd[0] = SECURITY_PROTOCOL_IN;
+	cmd[1] = SEC_PROTOCOL_UFS;
+	put_unaligned_be16(SEC_SPECIFIC_UFS_RPMB, cmd + 2);
+	cmd[4] = 0;                             /* inc_512 bit 7 set to 0 */
+	put_unaligned_be32(alloc_len, cmd + 6); /* allocation length */
+
+	/* Ensure device is resumed before RPMB operation */
+	scsi_autopm_get_device(sdev);
+
+retry:
+	ret = scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE,
+				     frames, alloc_len, &sshdr,
+				     SEC_PROTOCOL_TIMEOUT, SEC_PROTOCOL_RETRIES,
+				     NULL);
+
+	if (ret && scsi_sense_valid(&sshdr) &&
+	    sshdr.sense_key == UNIT_ATTENTION)
+		/*
+		 * Device reset might occur several times,
+		 * give it one more chance
+		 */
+		if (--reset_retries > 0)
+			goto retry;
+
+	/* Allow device to be runtime suspended */
+	scsi_autopm_put_device(sdev);
+
+	if (ret)
+		dev_err(&sdev->sdev_gendev, "%s: failed with err %0x\n",
+			__func__, ret);
+
+	if (driver_byte(ret) & DRIVER_SENSE)
+		scsi_print_sense_hdr(sdev, "rpmb: security in", &sshdr);
+
+	return ret;
+}
+
+static int ufs_mtk_rpmb_cmd_seq(struct device *dev,
+			       struct rpmb_cmd *cmds, u32 ncmds)
+{
+	unsigned long flags;
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+	struct scsi_device *sdev;
+	struct rpmb_cmd *cmd;
+	int i;
+	int ret;
+
+	spin_lock_irqsave(hba->host->host_lock, flags);
+	sdev = host->sdev_ufs_rpmb;
+	if (sdev) {
+		ret = scsi_device_get(sdev);
+		if (!ret && !scsi_device_online(sdev)) {
+			ret = -ENODEV;
+			scsi_device_put(sdev);
+		}
+	} else {
+		ret = -ENODEV;
+	}
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
+	if (ret)
+		return ret;
+
+	/*
+	 * Send all command one by one.
+	 * Use rpmb lock to prevent other rpmb read/write threads cut in line.
+	 * Use mutex not spin lock because in/out function might sleep.
+	 */
+	mutex_lock(&host->rpmb_lock);
+	for (ret = 0, i = 0; i < ncmds && !ret; i++) {
+		cmd = &cmds[i];
+		if (cmd->flags & RPMB_F_WRITE)
+			ret = ufs_mtk_rpmb_security_out(sdev, cmd->frames,
+						       cmd->nframes);
+		else
+			ret = ufs_mtk_rpmb_security_in(sdev, cmd->frames,
+						      cmd->nframes);
+	}
+	mutex_unlock(&host->rpmb_lock);
+
+	scsi_device_put(sdev);
+	return ret;
+}
+
+static struct rpmb_ops ufs_mtk_rpmb_dev_ops = {
+	.cmd_seq = ufs_mtk_rpmb_cmd_seq,
+	.type = RPMB_TYPE_UFS,
+};
+
+void ufs_mtk_rpmb_add(struct ufs_hba *hba, struct scsi_device *sdev_rpmb)
+{
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+	struct rpmb_dev *rdev;
+	u8 rw_size;
+	int ret;
+
+	host->sdev_ufs_rpmb = sdev_rpmb;
+	ret = ufshcd_read_geometry_desc_param(hba,
+		GEOMETRY_DESC_PARAM_RPMB_RW_SIZE,
+		&rw_size, sizeof(rw_size));
+	if (ret) {
+		dev_warn(hba->dev, "%s: cannot get rpmb rw limit %d\n",
+			 dev_name(hba->dev), ret);
+		/* fallback to singel frame write */
+		rw_size = 1;
+	}
+
+	if (hba->dev_quirks & UFS_DEVICE_QUIRK_LIMITED_RPMB_MAX_RW_SIZE) {
+		if (rw_size > 8)
+			rw_size = 8;
+	}
+
+	dev_info(hba->dev, "rpmb rw_size: %d\n", rw_size);
+
+	ufs_mtk_rpmb_dev_ops.reliable_wr_cnt = rw_size;
+
+	/* MTK PATCH: Add handling for scsi_device_get */
+	if (unlikely(scsi_device_get(host->sdev_ufs_rpmb)))
+		goto out_put_dev;
+
+	rdev = rpmb_dev_register(hba->dev, &ufs_mtk_rpmb_dev_ops);
+	if (IS_ERR(rdev)) {
+		dev_warn(hba->dev, "%s: cannot register to rpmb %ld\n",
+			 dev_name(hba->dev), PTR_ERR(rdev));
+		goto out_put_dev;
+	}
+
+	/*
+	 * MTK PATCH: Preserve rpmb_dev to globals for connection of legacy
+	 *            rpmb ioctl solution.
+	 */
+	host->rawdev_ufs_rpmb = rdev;
+
+	return;
+
+out_put_dev:
+	scsi_device_put(host->sdev_ufs_rpmb);
+	host->sdev_ufs_rpmb = NULL;
+	host->rawdev_ufs_rpmb = NULL;
+}
+
+void ufs_mtk_rpmb_remove(struct ufs_hba *hba)
+{
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+	unsigned long flags;
+
+	if (!host->sdev_ufs_rpmb || !hba->host)
+		return;
+
+	rpmb_dev_unregister(hba->dev);
+
+	/*
+	 * MTK Bug Fix:
+	 *
+	 * To prevent calling schedule() with preemption disabled,
+	 * spin_lock_irqsave shall be behind rpmb_dev_unregister().
+	 */
+
+	spin_lock_irqsave(hba->host->host_lock, flags);
+
+	scsi_device_put(host->sdev_ufs_rpmb);
+	host->sdev_ufs_rpmb = NULL;
+	host->rawdev_ufs_rpmb = NULL;
+
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
+}
+
+void ufs_mtk_rpmb_quiesce(struct ufs_hba *hba)
 {
 	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
 
-	return !!(host->caps & UFS_MTK_CAP_BOOST_CRYPT_ENGINE);
+	if (host->sdev_ufs_rpmb)
+		scsi_device_quiesce(host->sdev_ufs_rpmb);
 }
 
-static bool ufs_mtk_is_va09_supported(struct ufs_hba *hba)
+/**
+ * ufs_mtk_ioctl_rpmb - perform user rpmb read/write request
+ * @hba: per-adapter instance
+ * @buf_user: user space buffer for ioctl rpmb_cmd data
+ * @return: 0 for success negative error code otherwise
+ *
+ * Expected/Submitted buffer structure is struct rpmb_cmd.
+ * It will read/write data to rpmb
+ */
+int ufs_mtk_ioctl_rpmb(struct ufs_hba *hba, const void __user *buf_user)
+{
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+	struct rpmb_cmd cmd[3];
+	struct rpmb_frame *frame_buf = NULL;
+	struct rpmb_frame *frames = NULL;
+	int size = 0;
+	int nframes = 0;
+	unsigned long flags;
+	struct scsi_device *sdev;
+	int ret;
+	int i;
+
+	/* Get scsi device */
+	spin_lock_irqsave(hba->host->host_lock, flags);
+	sdev = host->sdev_ufs_rpmb;
+	if (sdev) {
+		ret = scsi_device_get(sdev);
+		if (!ret && !scsi_device_online(sdev)) {
+			ret = -ENODEV;
+			scsi_device_put(sdev);
+		}
+	} else {
+		ret = -ENODEV;
+	}
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
+	if (ret) {
+		dev_info(hba->dev,
+			"%s: failed get rpmb device, ret %d\n",
+			__func__, ret);
+		goto out;
+	}
+
+	/* Get cmd params from user buffer */
+	ret = copy_from_user((void *) cmd,
+		buf_user, sizeof(struct rpmb_cmd) * 3);
+	if (ret) {
+		dev_info(hba->dev,
+			"%s: failed copying cmd buffer from user, ret %d\n",
+			__func__, ret);
+		goto out_put;
+	}
+
+	/* Check number of rpmb frames */
+	for (i = 0; i < 3; i++) {
+		ret = (int)rpmb_get_rw_size(ufs_mtk_rpmb_get_raw_dev());
+		if (cmd[i].nframes > ret) {
+			dev_info(hba->dev,
+				"%s: number of rpmb frames %u exceeds limit %d\n",
+				__func__, cmd[i].nframes, ret);
+			ret = -EINVAL;
+			goto out_put;
+		}
+	}
+
+	/* Prepaer frame buffer */
+	for (i = 0; i < 3; i++)
+		nframes += cmd[i].nframes;
+	frame_buf = kcalloc(nframes, sizeof(struct rpmb_frame), GFP_KERNEL);
+	if (!frame_buf) {
+		ret = -ENOMEM;
+		goto out_put;
+	}
+	frames = frame_buf;
+
+	/*
+	 * Send all command one by one.
+	 * Use rpmb lock to prevent other rpmb read/write threads cut in line.
+	 * Use mutex not spin lock because in/out function might sleep.
+	 */
+	mutex_lock(&host->rpmb_lock);
+	for (i = 0; i < 3; i++) {
+		if (cmd[i].nframes == 0)
+			break;
+
+		/* Get frames from user buffer */
+		size = sizeof(struct rpmb_frame) * cmd[i].nframes;
+		ret = copy_from_user((void *) frames, cmd[i].frames, size);
+		if (ret) {
+			dev_err(hba->dev,
+				"%s: failed from user, ret %d\n",
+				__func__, ret);
+			break;
+		}
+
+		/* Do rpmb in out */
+		if (cmd[i].flags & RPMB_F_WRITE) {
+			ret = ufs_mtk_rpmb_security_out(sdev, frames,
+						       cmd[i].nframes);
+			if (ret) {
+				dev_err(hba->dev,
+					"%s: failed rpmb out, err %d\n",
+					__func__, ret);
+				break;
+			}
+
+		} else {
+			ret = ufs_mtk_rpmb_security_in(sdev, frames,
+						      cmd[i].nframes);
+			if (ret) {
+				dev_err(hba->dev,
+					"%s: failed rpmb in, err %d\n",
+					__func__, ret);
+				break;
+			}
+
+			/* Copy frames to user buffer */
+			ret = copy_to_user((void *) cmd[i].frames,
+				frames, size);
+			if (ret) {
+				dev_err(hba->dev,
+					"%s: failed to user, err %d\n",
+					__func__, ret);
+				break;
+			}
+		}
+
+		frames += cmd[i].nframes;
+	}
+	mutex_unlock(&host->rpmb_lock);
+
+	kfree(frame_buf);
+
+out_put:
+	scsi_device_put(sdev);
+out:
+	return ret;
+}
+
+bool ufs_mtk_has_broken_auto_hibern8(struct ufs_hba *hba)
 {
 	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
 
-	return !!(host->caps & UFS_MTK_CAP_VA09_PWR_CTRL);
+	return (ufshcd_is_auto_hibern8_supported(hba) && hba->ahit &&
+		host->cfg &&
+		(host->cfg->quirks & UFS_MTK_HOST_QUIRK_BROKEN_AUTO_HIBERN8));
 }
 
-static bool ufs_mtk_is_broken_vcc(struct ufs_hba *hba)
+bool ufs_mtk_get_unipro_lpm(struct ufs_hba *hba)
 {
 	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-
-	return !!(host->caps & UFS_MTK_CAP_BROKEN_VCC);
+	return host->unipro_lpm;
 }
 
-static bool ufs_mtk_is_delay_after_vcc_off(struct ufs_hba *hba)
+static void ufs_mtk_parse_dt(struct ufs_mtk_host *host)
 {
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-
-	return !!(host->caps & UFS_MTK_CAP_DEALY_AFTER_VCC_OFF);
-}
-
-static bool ufs_mtk_is_force_vsx_lpm(struct ufs_hba *hba)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-
-	return !!(host->caps & UFS_MTK_CAP_FORCE_VSx_LPM);
-}
-
-static void ufs_mtk_cfg_unipro_cg(struct ufs_hba *hba, bool enable)
-{
+	struct ufs_hba *hba = host->hba;
+	struct device *dev = hba->dev;
+	int ret;
 	u32 tmp;
+
+	/*
+	 * Parse reference clock control setting
+	 * SW mode:      0 (use external function to control ref-clk)
+	 * Half-HW mode: 1 (use ufshci register to control ref-clk,
+	 *                  but cannot turn off)
+	 * HW mode:      2 (use ufshci register to control ref-clk)
+	 */
+	ret = of_property_read_u32(dev->of_node, "mediatek,refclk_ctrl",
+				   &host->refclk_ctrl);
+	if (ret) {
+		dev_dbg(hba->dev,
+			"%s: failed to read mediatek,refclk_ctrl, ret=%d\n",
+			__func__, ret);
+		host->refclk_ctrl = REF_CLK_SW_MODE;
+	}
+
+	/* get and enable va09 regulator */
+	host->reg_va09 = regulator_get(hba->dev, "va09");
+	if (!host->reg_va09) {
+		dev_info(hba->dev, "%s: failed to get va09!\n",
+			 __func__);
+	}
+
+	tmp = 0;
+	ret = of_property_read_u32(dev->of_node, "mediatek,vreg_vufs_lpm",
+								&tmp);
+	if (ret)
+		host->vreg_lpm_supported = FALSE;
+	else
+		host->vreg_lpm_supported = tmp ? TRUE : FALSE;
+
+	if (of_property_read_bool(dev->of_node, "mediatek,ufs-qos")) {
+		host->qos_allowed = true;
+		host->qos_enabled = true;
+	}
+}
+
+void ufs_mtk_cfg_unipro_cg(struct ufs_hba *hba, bool enable)
+{
+	u32 tmp = 0;
 
 	if (enable) {
 		ufshcd_dme_get(hba,
@@ -191,7 +606,6 @@ static void ufs_mtk_crypto_enable(struct ufs_hba *hba)
 	if (res.a0) {
 		dev_info(hba->dev, "%s: crypto enable failed, err: %lu\n",
 			 __func__, res.a0);
-		hba->caps &= ~UFSHCD_CAP_CRYPTO;
 	}
 }
 
@@ -210,16 +624,19 @@ static void ufs_mtk_host_reset(struct ufs_hba *hba)
 	reset_control_deassert(host->hci_reset);
 }
 
-static void ufs_mtk_init_reset_control(struct ufs_hba *hba,
-				       struct reset_control **rc,
-				       char *str)
+static int ufs_mtk_init_reset_control(struct ufs_hba *hba,
+				      struct reset_control **rc,
+				      char *str)
 {
 	*rc = devm_reset_control_get(hba->dev, str);
 	if (IS_ERR(*rc)) {
-		dev_info(hba->dev, "Failed to get reset control %s: %ld\n",
-			 str, PTR_ERR(*rc));
+		dev_info(hba->dev, "Failed to get %s: %d\n", str,
+			PTR_ERR(*rc));
 		*rc = NULL;
+		return PTR_ERR(*rc);
 	}
+
+	return 0;
 }
 
 static void ufs_mtk_init_reset(struct ufs_hba *hba)
@@ -238,36 +655,35 @@ static int ufs_mtk_hce_enable_notify(struct ufs_hba *hba,
 				     enum ufs_notify_change_status status)
 {
 	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	unsigned long flags;
 
 	if (status == PRE_CHANGE) {
 		if (host->unipro_lpm) {
-			hba->vps->hba_enable_delay_us = 0;
+			hba->hba_enable_delay_us = 0;
 		} else {
-			hba->vps->hba_enable_delay_us = 600;
+			hba->hba_enable_delay_us = 600;
 			ufs_mtk_host_reset(hba);
 		}
 
-		if (hba->caps & UFSHCD_CAP_CRYPTO)
+		if (ufshcd_hba_is_crypto_supported(hba))
 			ufs_mtk_crypto_enable(hba);
-
-		if (host->caps & UFS_MTK_CAP_DISABLE_AH8) {
-			spin_lock_irqsave(hba->host->host_lock, flags);
-			ufshcd_writel(hba, 0,
-				      REG_AUTO_HIBERNATE_IDLE_TIMER);
-			spin_unlock_irqrestore(hba->host->host_lock,
-					       flags);
-
-			hba->capabilities &= ~MASK_AUTO_HIBERN8_SUPPORT;
-			hba->ahit = 0;
-		}
-
-		ufshcd_writel(hba,
-			(ufshcd_readl(hba, REG_UFS_XOUFS_CTRL) | 0x80),
-			REG_UFS_XOUFS_CTRL);
 	}
 
 	return 0;
+}
+
+static void ufs_mtk_pm_qos(struct ufs_hba *hba, bool qos_en)
+{
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+
+	if (host && host->pm_qos_init) {
+		if (qos_en)
+			pm_qos_update_request(
+				&host->req_cpu_dma_latency, 0);
+		else
+			pm_qos_update_request(
+				&host->req_cpu_dma_latency,
+				PM_QOS_DEFAULT_VALUE);
+	}
 }
 
 static int ufs_mtk_bind_mphy(struct ufs_hba *hba)
@@ -279,31 +695,27 @@ static int ufs_mtk_bind_mphy(struct ufs_hba *hba)
 
 	host->mphy = devm_of_phy_get_by_index(dev, np, 0);
 
-	if (host->mphy == ERR_PTR(-EPROBE_DEFER)) {
-		/*
-		 * UFS driver might be probed before the phy driver does.
-		 * In that case we would like to return EPROBE_DEFER code.
-		 */
-		err = -EPROBE_DEFER;
-		dev_info(dev,
-			 "%s: required phy hasn't probed yet. err = %d\n",
-			__func__, err);
-	} else if (IS_ERR(host->mphy)) {
+	if (IS_ERR(host->mphy)) {
 		err = PTR_ERR(host->mphy);
-		if (err != -ENODEV) {
-			dev_info(dev, "%s: PHY get failed %d\n", __func__,
-				 err);
+		if (err == -EPROBE_DEFER)
+			dev_info(dev, "%s: ufs mphy hasn't probed yet. err = %d\n",
+				__func__, err);
+		else if (err == -ENODEV) {
+			dev_info(dev, "%s: ufs mphy is no dev. err = %d\n",
+				__func__, err);
+			/*
+			 * Allow unbound mphy because not every platform needs specific
+			 * mphy control
+			 */
+			err = 0;
+		} else {
+			dev_info(dev, "%s: ufs mphy get failed. err = %d\n",
+				__func__, err);
 		}
-	}
-
-	if (err)
 		host->mphy = NULL;
-	/*
-	 * Allow unbound mphy because not every platform needs specific
-	 * mphy control.
-	 */
-	if (err == -ENODEV)
-		err = 0;
+	} else {
+		dev_info(dev, "%s: ufs mphy is found.\n", __func__);
+	}
 
 	return err;
 }
@@ -319,12 +731,37 @@ static int ufs_mtk_setup_ref_clk(struct ufs_hba *hba, bool on)
 		return 0;
 
 	if (on) {
-		ufs_mtk_ref_clk_notify(on, res);
-		ufshcd_writel(hba, REFCLK_REQUEST, REG_UFS_REFCLK_CTRL);
-	} else {
-		ufshcd_delay_us(host->ref_clk_gating_wait_us, 10);
-		ufshcd_writel(hba, REFCLK_RELEASE, REG_UFS_REFCLK_CTRL);
+		#if defined(CONFIG_MACH_MT6781) || defined(CONFIG_MACH_MT6785)
+			clk_buf_ctrl(CLK_BUF_UFS, on);
+		#else
+			ufs_mtk_ref_clk_notify(on, res);
+		#endif
+		ufshcd_delay_us(host->ref_clk_ungating_wait_us, 10);
 	}
+
+	/* This is HW and Half-HW flow, SW flow should ignore */
+	if (host->refclk_ctrl == REF_CLK_SW_MODE)
+		goto out;
+
+	/* Half-HW mode cannot turn off ref-clk, release xoufs spm req only */
+	if (host->refclk_ctrl == REF_CLK_HALF_HW_MODE) {
+		ufshcd_writel(hba, REFCLK_RELEASE, REG_UFS_REFCLK_CTRL);
+		goto out;
+	}
+
+	/*
+	 * REG_UFS_REFCLK_CTRL[0] is xoufs_req_s
+	 * REG_UFS_REFCLK_CTRL[1] is xoufs_ack_s
+	 * xoufs_req_s is used for XOUFS Clock request to SPM
+	 * SW sets xoufs_ack_s to trigger Clock Request for XOUFS, and
+	 * check xoufs_ack_s set for clock avialable.
+	 * SW clears xoufs_ack_s to trigger Clock Release for XOUFS, and
+	 * check xoufs_ack_s clear for clock off.
+	 */
+	if (on)
+		ufshcd_writel(hba, REFCLK_REQUEST, REG_UFS_REFCLK_CTRL);
+	else
+		ufshcd_writel(hba, REFCLK_RELEASE, REG_UFS_REFCLK_CTRL);
 
 	/* Wait for ack */
 	timeout = ktime_add_us(ktime_get(), REFCLK_REQ_TIMEOUT_US);
@@ -347,10 +784,14 @@ static int ufs_mtk_setup_ref_clk(struct ufs_hba *hba, bool on)
 
 out:
 	host->ref_clk_enabled = on;
-	if (on)
-		ufshcd_delay_us(host->ref_clk_ungating_wait_us, 10);
-	else
+	if (!on) {
+		ufshcd_delay_us(host->ref_clk_gating_wait_us, 10);
+	#if defined(CONFIG_MACH_MT6781) || defined(CONFIG_MACH_MT6785)
+		clk_buf_ctrl(CLK_BUF_UFS, on);
+	#else
 		ufs_mtk_ref_clk_notify(on, res);
+	#endif
+	}
 
 	return 0;
 }
@@ -370,66 +811,8 @@ static void ufs_mtk_setup_ref_clk_wait_us(struct ufs_hba *hba,
 	host->ref_clk_ungating_wait_us = ungating_us;
 }
 
-static void ufs_mtk_dbg_sel(struct ufs_hba *hba)
-{
-	static u32 hw_ver;
-
-	if (!hw_ver)
-		hw_ver = ufshcd_readl(hba, REG_UFS_MTK_HW_VER);
-
-	if (((hw_ver >> 16) & 0xFF) >= 0x36) {
-		ufshcd_writel(hba, 0x820820, REG_UFS_DEBUG_SEL);
-		ufshcd_writel(hba, 0x0, REG_UFS_DEBUG_SEL_B0);
-		ufshcd_writel(hba, 0x55555555, REG_UFS_DEBUG_SEL_B1);
-		ufshcd_writel(hba, 0xaaaaaaaa, REG_UFS_DEBUG_SEL_B2);
-		ufshcd_writel(hba, 0xffffffff, REG_UFS_DEBUG_SEL_B3);
-	} else {
-		ufshcd_writel(hba, 0x20, REG_UFS_DEBUG_SEL);
-	}
-}
-
-static void ufs_mtk_wait_idle_state(struct ufs_hba *hba,
-			    unsigned long retry_ms)
-{
-	u64 timeout, time_checked;
-	u32 val, sm;
-	bool wait_idle;
-
-	timeout = sched_clock() + retry_ms * 1000000UL;
-
-
-	/* wait a specific time after check base */
-	udelay(10);
-	wait_idle = false;
-
-	do {
-		time_checked = sched_clock();
-		ufs_mtk_dbg_sel(hba);
-		val = ufshcd_readl(hba, REG_UFS_PROBE);
-
-		sm = val & 0x1f;
-
-		/*
-		 * if state is in H8 enter and H8 enter confirm
-		 * wait until return to idle state.
-		 */
-		if ((sm >= VS_HIB_ENTER) && (sm <= VS_HIB_EXIT)) {
-			wait_idle = true;
-			udelay(50);
-			continue;
-		} else if (!wait_idle)
-			break;
-
-		if (wait_idle && (sm == VS_HCE_BASE))
-			break;
-	} while (time_checked < timeout);
-
-	if (wait_idle && sm != VS_HCE_BASE)
-		dev_info(hba->dev, "wait idle tmo: 0x%x\n", val);
-}
-
-static int ufs_mtk_wait_link_state(struct ufs_hba *hba, u32 state,
-				   unsigned long max_wait_ms)
+int ufs_mtk_wait_link_state(struct ufs_hba *hba, u32 state,
+			    unsigned long max_wait_ms)
 {
 	ktime_t timeout, time_checked;
 	u32 val;
@@ -437,7 +820,7 @@ static int ufs_mtk_wait_link_state(struct ufs_hba *hba, u32 state,
 	timeout = ktime_add_ms(ktime_get(), max_wait_ms);
 	do {
 		time_checked = ktime_get();
-		ufs_mtk_dbg_sel(hba);
+		ufshcd_writel(hba, 0x20, REG_UFS_DEBUG_SEL);
 		val = ufshcd_readl(hba, REG_UFS_PROBE);
 		val = val >> 28;
 
@@ -454,21 +837,6 @@ static int ufs_mtk_wait_link_state(struct ufs_hba *hba, u32 state,
 	return -ETIMEDOUT;
 }
 
-static void ufs_mtk_pm_qos(struct ufs_hba *hba, bool qos_en)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-
-	if (host && host->pm_qos_init) {
-		if (qos_en)
-			cpu_latency_qos_update_request(
-				&host->pm_qos_req, 0);
-		else
-			cpu_latency_qos_update_request(
-				&host->pm_qos_req,
-				PM_QOS_DEFAULT_VALUE);
-	}
-}
-
 static int ufs_mtk_mphy_power_on(struct ufs_hba *hba, bool on)
 {
 	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
@@ -480,7 +848,7 @@ static int ufs_mtk_mphy_power_on(struct ufs_hba *hba, bool on)
 		return 0;
 
 	if (on) {
-		if (ufs_mtk_is_va09_supported(hba)) {
+		if (host->reg_va09) {
 			ret = regulator_enable(host->reg_va09);
 			if (ret < 0)
 				goto out;
@@ -491,7 +859,7 @@ static int ufs_mtk_mphy_power_on(struct ufs_hba *hba, bool on)
 		phy_power_on(mphy);
 	} else {
 		phy_power_off(mphy);
-		if (ufs_mtk_is_va09_supported(hba)) {
+		if (host->reg_va09) {
 			ufs_mtk_va09_pwr_ctrl(res, 0);
 			ret = regulator_disable(host->reg_va09);
 			if (ret < 0)
@@ -501,511 +869,14 @@ static int ufs_mtk_mphy_power_on(struct ufs_hba *hba, bool on)
 out:
 	if (ret) {
 		dev_info(hba->dev,
-			 "failed to %s va09: %d\n",
-			 on ? "enable" : "disable",
-			 ret);
+			"failed to %s va09: %d\n",
+			on ? "enable" : "disable",
+			ret);
 	} else {
 		host->mphy_powered_on = on;
 	}
 
 	return ret;
-}
-
-static int ufs_mtk_get_host_clk(struct device *dev, const char *name,
-				struct clk **clk_out)
-{
-	struct clk *clk;
-	int err = 0;
-
-	clk = devm_clk_get(dev, name);
-	if (IS_ERR(clk))
-		err = PTR_ERR(clk);
-	else
-		*clk_out = clk;
-
-	return err;
-}
-
-static void ufs_mtk_boost_crypt(struct ufs_hba *hba, bool boost)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	struct ufs_mtk_crypt_cfg *cfg;
-	struct regulator *reg;
-	int volt, ret;
-
-	if (!ufs_mtk_is_boost_crypt_enabled(hba))
-		return;
-
-	cfg = host->crypt;
-	volt = cfg->vcore_volt;
-	reg = cfg->reg_vcore;
-
-	ret = clk_prepare_enable(cfg->clk_crypt_mux);
-	if (ret) {
-		dev_info(hba->dev, "clk_prepare_enable(): %d\n",
-			 ret);
-		return;
-	}
-
-	if (boost) {
-		ret = regulator_set_voltage(reg, volt, INT_MAX);
-		if (ret) {
-			dev_info(hba->dev,
-				 "failed to set vcore to %d\n", volt);
-			goto out;
-		}
-
-		ret = clk_set_parent(cfg->clk_crypt_mux,
-				     cfg->clk_crypt_perf);
-		if (ret) {
-			dev_info(hba->dev,
-				 "failed to set clk_crypt_perf\n");
-			regulator_set_voltage(reg, 0, INT_MAX);
-			goto out;
-		}
-	} else {
-		ret = clk_set_parent(cfg->clk_crypt_mux,
-				     cfg->clk_crypt_lp);
-		if (ret) {
-			dev_info(hba->dev,
-				 "failed to set clk_crypt_lp\n");
-			goto out;
-		}
-
-		ret = regulator_set_voltage(reg, 0, INT_MAX);
-		if (ret) {
-			dev_info(hba->dev,
-				 "failed to set vcore to MIN\n");
-		}
-	}
-out:
-	clk_disable_unprepare(cfg->clk_crypt_mux);
-}
-
-static int ufs_mtk_init_host_clk(struct ufs_hba *hba, const char *name,
-				 struct clk **clk)
-{
-	int ret;
-
-	ret = ufs_mtk_get_host_clk(hba->dev, name, clk);
-	if (ret) {
-		dev_info(hba->dev, "%s: failed to get %s: %d", __func__,
-			 name, ret);
-	}
-
-	return ret;
-}
-
-static void ufs_mtk_init_boost_crypt(struct ufs_hba *hba)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	struct ufs_mtk_crypt_cfg *cfg;
-	struct device *dev = hba->dev;
-	struct regulator *reg;
-	u32 volt;
-
-	host->crypt = devm_kzalloc(dev, sizeof(*(host->crypt)),
-				   GFP_KERNEL);
-	if (!host->crypt)
-		goto disable_caps;
-
-	reg = devm_regulator_get_optional(dev, "dvfsrc-vcore");
-	if (IS_ERR(reg)) {
-		dev_info(dev, "failed to get dvfsrc-vcore: %ld",
-			 PTR_ERR(reg));
-		goto disable_caps;
-	}
-
-	if (of_property_read_u32(dev->of_node, "boost-crypt-vcore-min",
-				 &volt)) {
-		dev_info(dev, "failed to get boost-crypt-vcore-min");
-		goto disable_caps;
-	}
-
-	cfg = host->crypt;
-	if (ufs_mtk_init_host_clk(hba, "crypt_mux",
-				  &cfg->clk_crypt_mux))
-		goto disable_caps;
-
-	if (ufs_mtk_init_host_clk(hba, "crypt_lp",
-				  &cfg->clk_crypt_lp))
-		goto disable_caps;
-
-	if (ufs_mtk_init_host_clk(hba, "crypt_perf",
-				  &cfg->clk_crypt_perf))
-		goto disable_caps;
-
-	cfg->reg_vcore = reg;
-	cfg->vcore_volt = volt;
-	host->caps |= UFS_MTK_CAP_BOOST_CRYPT_ENGINE;
-
-disable_caps:
-	return;
-}
-
-static void ufs_mtk_init_va09_pwr_ctrl(struct ufs_hba *hba)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-
-	host->reg_va09 = regulator_get(hba->dev, "va09");
-	if (IS_ERR(host->reg_va09))
-		dev_info(hba->dev, "failed to get va09");
-	else
-		host->caps |= UFS_MTK_CAP_VA09_PWR_CTRL;
-}
-
-static void ufs_mtk_init_host_caps(struct ufs_hba *hba)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	struct device_node *np = hba->dev->of_node;
-	struct device_node *boot_node = NULL;
-	struct tag_bootmode *tag = NULL;
-
-	if (of_property_read_bool(np, "mediatek,ufs-boost-crypt"))
-		ufs_mtk_init_boost_crypt(hba);
-
-	if (of_property_read_bool(np, "mediatek,ufs-support-va09"))
-		ufs_mtk_init_va09_pwr_ctrl(hba);
-
-	if (of_property_read_bool(np, "mediatek,ufs-disable-ah8"))
-		host->caps |= UFS_MTK_CAP_DISABLE_AH8;
-
-	if (of_property_read_bool(np, "mediatek,ufs-qos"))
-		host->qos_enabled = host->qos_allowed = true;
-
-	if (of_property_read_bool(np, "mediatek,ufs-broken-vcc"))
-		host->caps |= UFS_MTK_CAP_BROKEN_VCC;
-
-	if (of_property_read_bool(np, "mediatek,ufs-delay-after-vcc-off"))
-		host->caps |= UFS_MTK_CAP_DEALY_AFTER_VCC_OFF;
-
-	dev_info(hba->dev, "caps: 0x%x", host->caps);
-
-	boot_node = of_parse_phandle(np, "bootmode", 0);
-
-	if (!boot_node)
-		dev_info(hba->dev, "failed to get bootmode phandle\n");
-	else {
-		tag = (struct tag_bootmode *)of_get_property(boot_node,
-							"atag,boot", NULL);
-		if (!tag)
-			dev_info(hba->dev, "failed to get atag,boot\n");
-		else if (tag->boottype == BOOTDEV_UFS)
-			host->boot_device = true;
-	}
-}
-
-/**
- * ufs_mtk_setup_clocks - enables/disable clocks
- * @hba: host controller instance
- * @on: If true, enable clocks else disable them.
- * @status: PRE_CHANGE or POST_CHANGE notify
- *
- * Returns 0 on success, non-zero on failure.
- */
-static int ufs_mtk_setup_clocks(struct ufs_hba *hba, bool on,
-				enum ufs_notify_change_status status)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	bool clk_pwr_off = false;
-	int ret = 0;
-
-	/*
-	 * In case ufs_mtk_init() is not yet done, simply ignore.
-	 * This ufs_mtk_setup_clocks() shall be called from
-	 * ufs_mtk_init() after init is done.
-	 */
-	if (!host)
-		return 0;
-
-	if (!on && status == PRE_CHANGE) {
-		if (ufshcd_is_link_off(hba)) {
-			clk_pwr_off = true;
-		} else if (ufshcd_is_link_hibern8(hba) ||
-			 (!ufshcd_can_hibern8_during_gating(hba) &&
-			 ufshcd_is_auto_hibern8_enabled(hba))) {
-			/*
-			 * Gate ref-clk and poweroff mphy if link state is in
-			 * OFF or Hibern8 by either Auto-Hibern8 or
-			 * ufshcd_link_state_transition().
-			 */
-			ret = ufs_mtk_wait_link_state(hba,
-						      VS_LINK_HIBERN8,
-						      15);
-			if (!ret)
-				clk_pwr_off = true;
-		}
-
-		if (clk_pwr_off) {
-			ufs_mtk_pm_qos(hba, on);
-			ufs_mtk_boost_crypt(hba, on);
-			ufs_mtk_setup_ref_clk(hba, on);
-			phy_power_off(host->mphy);
-			if (host->qos_enabled)
-				ufs_mtk_biolog_clk_gating(on);
-		}
-	} else if (on && status == POST_CHANGE) {
-		phy_power_on(host->mphy);
-		ufs_mtk_setup_ref_clk(hba, on);
-		ufs_mtk_boost_crypt(hba, on);
-		ufs_mtk_pm_qos(hba, on);
-		if (host->qos_enabled)
-			ufs_mtk_biolog_clk_gating(on);
-	}
-
-	return ret;
-}
-
-static bool ufs_mtk_is_data_cmd(struct scsi_cmnd *cmd)
-{
-	char cmd_op = cmd->cmnd[0];
-
-	if (cmd_op == WRITE_10 || cmd_op == READ_10 ||
-	    cmd_op == WRITE_16 || cmd_op == READ_16 ||
-	    cmd_op == WRITE_6 || cmd_op == READ_6)
-		return true;
-
-	return false;
-}
-
-#define UFS_VEND_SAMSUNG  (1 << 0)
-#define UFS_VEND_MICRON   (1 << 1)
-
-struct tracepoints_table {
-	const char *name;
-	void *func;
-	struct tracepoint *tp;
-	bool init;
-	unsigned int vend;
-};
-
-#if defined(CONFIG_UFSFEATURE)
-static void ufs_mtk_trace_vh_prepare_command_vend_ss(void *data,
-				struct ufs_hba *hba, struct request *rq,
-				struct ufshcd_lrb *lrbp, int *err)
-{
-	ufsf_change_lun(ufs_mtk_get_ufsf(hba), lrbp);
-	*err = ufsf_prep_fn(ufs_mtk_get_ufsf(hba), lrbp);
-}
-
-static void ufs_mtk_trace_vh_compl_command_vend_ss(struct ufs_hba *hba,
-				struct ufshcd_lrb *lrbp,
-				unsigned long out_reqs,
-				unsigned long out_tasks)
-{
-	struct scsi_cmnd *cmd = lrbp->cmd;
-	struct utp_upiu_header *header = &lrbp->ucd_rsp_ptr->header;
-	int result = 0;
-	int scsi_status;
-	int ocs;
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	if (!cmd)
-		return;
-
-#if defined(CONFIG_UFSSHPB) && defined(CONFIG_HPB_DEBUG)
-	trace_printk("%llu + %u cmd 0x%X comp tag[%d] out %lX\n",
-		     (unsigned long long) blk_rq_pos(cmd->request),
-		     (unsigned int) blk_rq_sectors(cmd->request),
-		     cmd->cmnd[0], lrbp->task_tag, hba->outstanding_reqs);
-#endif
-	ocs = le32_to_cpu(header->dword_2) & MASK_OCS;
-
-	if (ocs == OCS_SUCCESS) {
-		result = be32_to_cpu(header->dword_0) >> 24;
-		if (result == UPIU_TRANSACTION_RESPONSE) {
-			scsi_status = be32_to_cpu(header->dword_1) &
-				MASK_SCSI_STATUS;
-			if (scsi_status == SAM_STAT_GOOD) {
-				ufsf_hpb_noti_rb(ufsf, lrbp);
-				if (ufsf_upiu_check_for_ccd(lrbp)) {
-					ufsf_copy_sense_data(lrbp);
-					/*
-					 * this applies to "GOOD" case
-					 * in scsi_decide_disposition()
-					 * and will pass normally.
-					 * if result is 0x00, sense will not
-					 * be able to copy in sg_scsi_ioctl()
-					 * Finally, ioctl tool in userspace will
-					 * receive the error as 1.
-					 */
-					result |= GOOD_CCD;
-				}
-			}
-		}
-	}
-#if defined(CONFIG_UFSHID)
-	/* Check if it is the last request to be completed */
-	if (!out_tasks && (out_reqs == (1 << lrbp->task_tag)))
-		schedule_work(&ufsf->on_idle_work);
-#endif
-}
-
-static void ufs_mtk_trace_vh_send_tm_command_vend_ss(void *data, struct ufs_hba *hba,
-			int tag, const char *str)
-{
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	if (strcmp(str, "tm_complete") == 0)
-		ufsf_reset_lu(ufsf);
-
-}
-
-static void ufs_mtk_trace_vh_update_sdev_vend_ss(void *data, struct scsi_device *sdev)
-{
-	struct ufs_hba *hba = shost_priv(sdev->host);
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	if ((hba->dev_info.wmanufacturerid == UFS_VENDOR_SAMSUNG) || (hba->dev_info.wmanufacturerid == UFS_VENDOR_MICRON))
-		ufsf_slave_configure(ufsf, sdev);
-}
-
-static void ufs_mtk_trace_vh_send_command_vend_ss(void *data, struct ufs_hba *hba,
-				struct ufshcd_lrb *lrbp)
-{
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	ufsf_hid_acc_io_stat(ufsf, lrbp);
-}
-#endif
-
-static void ufs_mtk_trace_vh_send_command(void *data, struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
-{
-	struct scsi_cmnd *cmd = lrbp->cmd;
-
-	if (!cmd)
-		return;
-
-	if (ufs_mtk_is_data_cmd(cmd)) {
-		ufs_mtk_biolog_send_command(lrbp->task_tag, cmd);
-		ufs_mtk_biolog_check(1);
-	}
-}
-
-static void ufs_mtk_trace_vh_compl_command(void *data, struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
-{
-	struct scsi_cmnd *cmd = lrbp->cmd;
-	int tag = lrbp->task_tag;
-	unsigned long req_mask;
-	unsigned long outstanding_reqs;
-	unsigned long outstanding_tasks;
-	unsigned long flags;
-#if defined(CONFIG_UFSFEATURE)
-	struct ufsf_feature *ufsf;
-#endif
-
-	if (!cmd)
-		return;
-
-	spin_lock_irqsave(hba->host->host_lock, flags);
-	outstanding_reqs = hba->outstanding_reqs;
-	outstanding_tasks = hba->outstanding_tasks;
-	spin_unlock_irqrestore(hba->host->host_lock, flags);
-
-	if (ufs_mtk_is_data_cmd(cmd)) {
-		req_mask = outstanding_reqs & ~(1 << tag);
-		ufs_mtk_biolog_transfer_req_compl(tag, req_mask);
-		ufs_mtk_biolog_check(req_mask);
-	}
-
-#if defined(CONFIG_UFSFEATURE)
-	ufsf = ufs_mtk_get_ufsf(hba);
-
-	if (ufsf->hba)
-		ufs_mtk_trace_vh_compl_command_vend_ss(hba, lrbp,
-			outstanding_reqs, outstanding_tasks);
-#endif
-}
-
-static struct tracepoints_table interests[] = {
-	{
-		.name = "android_vh_ufs_send_command",
-		.func = ufs_mtk_trace_vh_send_command
-	},
-	{
-		.name = "android_vh_ufs_compl_command",
-		.func = ufs_mtk_trace_vh_compl_command
-	},
-#if defined(CONFIG_UFSFEATURE)
-	{
-		.name = "android_vh_ufs_prepare_command",
-		.func = ufs_mtk_trace_vh_prepare_command_vend_ss,
-		.vend = UFS_VEND_SAMSUNG
-	},
-	{
-		.name = "android_vh_ufs_send_tm_command",
-		.func = ufs_mtk_trace_vh_send_tm_command_vend_ss,
-		.vend = UFS_VEND_SAMSUNG
-	},
-	{
-		.name = "android_vh_ufs_update_sdev",
-		.func = ufs_mtk_trace_vh_update_sdev_vend_ss,
-		.vend = UFS_VEND_SAMSUNG | UFS_VEND_MICRON
-	},
-	{
-		.name = "android_vh_ufs_send_command",
-		.func = ufs_mtk_trace_vh_send_command_vend_ss,
-		.vend = UFS_VEND_SAMSUNG
-	},
-#endif
-};
-
-#define FOR_EACH_INTEREST(i) \
-	for (i = 0; i < sizeof(interests) / sizeof(struct tracepoints_table); \
-	i++)
-
-static void ufs_mtk_lookup_tracepoints(struct tracepoint *tp,
-				       void *ignore)
-{
-	int i;
-
-	FOR_EACH_INTEREST(i) {
-		if (strcmp(interests[i].name, tp->name) == 0)
-			interests[i].tp = tp;
-	}
-}
-
-static void ufs_mtk_uninstall_tracepoints(void)
-{
-	int i;
-
-	FOR_EACH_INTEREST(i) {
-		if (interests[i].init) {
-			tracepoint_probe_unregister(interests[i].tp,
-						    interests[i].func,
-						    NULL);
-		}
-	}
-}
-
-static int ufs_mtk_install_tracepoints(struct ufs_hba *hba)
-{
-	int i;
-	unsigned int vend;
-
-	/* Install the tracepoints */
-	for_each_kernel_tracepoint(ufs_mtk_lookup_tracepoints, NULL);
-
-	FOR_EACH_INTEREST(i) {
-		if (interests[i].tp == NULL) {
-			dev_info(hba->dev, "Error: tracepoint %s not found\n",
-				interests[i].name);
-			continue;
-		}
-
-		vend = interests[i].vend;
-		if ((vend & UFS_VEND_SAMSUNG) || (vend & UFS_VEND_MICRON)) {
-			if ((hba->dev_info.wmanufacturerid != UFS_VENDOR_SAMSUNG) && (hba->dev_info.wmanufacturerid != UFS_VENDOR_MICRON))
-				continue;
-		}
-
-		tracepoint_probe_register(interests[i].tp,
-					  interests[i].func,
-					  NULL);
-		interests[i].init = true;
-	}
-
-	return 0;
 }
 
 static void ufs_mtk_get_controller_version(struct ufs_hba *hba)
@@ -1026,590 +897,342 @@ static void ufs_mtk_get_controller_version(struct ufs_hba *hba)
 	}
 }
 
-static u32 ufs_mtk_get_ufs_hci_version(struct ufs_hba *hba)
+static int ufs_mtk_host_clk_get(struct device *dev, const char *name,
+				struct clk **clk_out)
 {
-	return hba->ufs_version;
+	struct clk *clk;
+	int err = 0;
+
+	clk = devm_clk_get(dev, name);
+	if (IS_ERR(clk))
+		err = PTR_ERR(clk);
+	else
+		*clk_out = clk;
+
+	return err;
 }
-
-
-#if IS_ENABLED(CONFIG_RPMB)
-
-#define SEC_PROTOCOL_UFS  0xEC
-#define SEC_SPECIFIC_UFS_RPMB 0x0001
-
-#define SEC_PROTOCOL_CMD_SIZE 12
-#define SEC_PROTOCOL_RETRIES 3
-#define SEC_PROTOCOL_RETRIES_ON_RESET 10
-#define SEC_PROTOCOL_TIMEOUT msecs_to_jiffies(30000)
-
-int ufs_mtk_rpmb_security_out(struct scsi_device *sdev,
-			 struct rpmb_frame *frames, u32 cnt)
+static bool ufs_mtk_is_data_write_cmd(char cmd_op, bool isolation)
 {
-	struct scsi_sense_hdr sshdr = {0};
-	u32 trans_len = cnt * sizeof(struct rpmb_frame);
-	int reset_retries = SEC_PROTOCOL_RETRIES_ON_RESET;
-	int ret;
-	u8 cmd[SEC_PROTOCOL_CMD_SIZE];
+	if (cmd_op == WRITE_10 || cmd_op == WRITE_16 || cmd_op == WRITE_6)
+		return true;
 
-	memset(cmd, 0, SEC_PROTOCOL_CMD_SIZE);
-	cmd[0] = SECURITY_PROTOCOL_OUT;
-	cmd[1] = SEC_PROTOCOL_UFS;
-	put_unaligned_be16(SEC_SPECIFIC_UFS_RPMB, cmd + 2);
-	cmd[4] = 0;                              /* inc_512 bit 7 set to 0 */
-	put_unaligned_be32(trans_len, cmd + 6);  /* transfer length */
+	if (isolation) {
+		if ((cmd_op == WRITE_BUFFER) ||
+			(cmd_op == UNMAP) ||
+			(cmd_op == FORMAT_UNIT) ||
+			(cmd_op == SECURITY_PROTOCOL_OUT))
+			return true;
+	}
 
-retry:
-	ret = scsi_execute_req(sdev, cmd, DMA_TO_DEVICE,
-				     frames, trans_len, &sshdr,
-				     SEC_PROTOCOL_TIMEOUT, SEC_PROTOCOL_RETRIES,
-				     NULL);
-
-	if (ret && scsi_sense_valid(&sshdr) &&
-	    sshdr.sense_key == UNIT_ATTENTION)
-		/*
-		 * Device reset might occur several times,
-		 * give it one more chance
-		 */
-		if (--reset_retries > 0)
-			goto retry;
-
-	if (ret)
-		dev_err(&sdev->sdev_gendev, "%s: failed with err %0x\n",
-			__func__, ret);
-
-	if (driver_byte(ret) & DRIVER_SENSE)
-		scsi_print_sense_hdr(sdev, "rpmb: security out", &sshdr);
-
-	return ret;
-}
-
-int ufs_mtk_rpmb_security_in(struct scsi_device *sdev,
-			struct rpmb_frame *frames, u32 cnt)
-{
-	struct scsi_sense_hdr sshdr = {0};
-	u32 alloc_len = cnt * sizeof(struct rpmb_frame);
-	int reset_retries = SEC_PROTOCOL_RETRIES_ON_RESET;
-	int ret;
-	u8 cmd[SEC_PROTOCOL_CMD_SIZE];
-
-	memset(cmd, 0, SEC_PROTOCOL_CMD_SIZE);
-	cmd[0] = SECURITY_PROTOCOL_IN;
-	cmd[1] = SEC_PROTOCOL_UFS;
-	put_unaligned_be16(SEC_SPECIFIC_UFS_RPMB, cmd + 2);
-	cmd[4] = 0;                             /* inc_512 bit 7 set to 0 */
-	put_unaligned_be32(alloc_len, cmd + 6); /* allocation length */
-
-retry:
-	ret = scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE,
-				     frames, alloc_len, &sshdr,
-				     SEC_PROTOCOL_TIMEOUT, SEC_PROTOCOL_RETRIES,
-				     NULL);
-
-	if (ret && scsi_sense_valid(&sshdr) &&
-	    sshdr.sense_key == UNIT_ATTENTION)
-		/*
-		 * Device reset might occur several times,
-		 * give it one more chance
-		 */
-		if (--reset_retries > 0)
-			goto retry;
-
-	if (ret)
-		dev_err(&sdev->sdev_gendev, "%s: failed with err %0x\n",
-			__func__, ret);
-
-	if (driver_byte(ret) & DRIVER_SENSE)
-		scsi_print_sense_hdr(sdev, "rpmb: security in", &sshdr);
-
-	return ret;
-}
-
-static int ufs_mtk_rpmb_cmd_seq(struct device *dev,
-			       struct rpmb_cmd *cmds, u32 ncmds)
-{
-	unsigned long flags;
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufs_mtk_host *host;
-	struct scsi_device *sdev;
-	struct rpmb_cmd *cmd;
-	int i;
-	int ret;
-
-	host = ufshcd_get_variant(hba);
-
-	spin_lock_irqsave(hba->host->host_lock, flags);
-	sdev = hba->sdev_rpmb;
-	if (sdev) {
-		ret = scsi_device_get(sdev);
-		if (!ret && !scsi_device_online(sdev)) {
-			ret = -ENODEV;
-			scsi_device_put(sdev);
+#if defined(CONFIG_SCSI_UFS_HPB) || defined(CONFIG_SCSI_SKHPB)
+	/* All data out operation need check */
+	if (isolation) {
+		if (cmd_op == UFSHPB_WRITE_BUFFER)
+			return true;
 		}
-	} else {
-		ret = -ENODEV;
-	}
-	spin_unlock_irqrestore(hba->host->host_lock, flags);
-	if (ret)
-		return ret;
-
-	/*
-	 * Send all command one by one.
-	 * Use rpmb lock to prevent other rpmb read/write threads cut in line.
-	 * Use mutex not spin lock because in/out function might sleep.
-	 */
-	down(&host->rpmb_sem);
-	/* Ensure device is resumed before RPMB operation */
-	scsi_autopm_get_device(sdev);
-
-	for (ret = 0, i = 0; i < ncmds && !ret; i++) {
-		cmd = &cmds[i];
-		if (cmd->flags & RPMB_F_WRITE)
-			ret = ufs_mtk_rpmb_security_out(sdev, cmd->frames,
-						       cmd->nframes);
-		else
-			ret = ufs_mtk_rpmb_security_in(sdev, cmd->frames,
-						      cmd->nframes);
-	}
-
-	/* Allow device to be runtime suspended */
-	scsi_autopm_put_device(sdev);
-	up(&host->rpmb_sem);
-
-	scsi_device_put(sdev);
-	return ret;
+#endif
+	return false;
 }
 
-static struct rpmb_ops ufs_mtk_rpmb_dev_ops = {
-	.cmd_seq = ufs_mtk_rpmb_cmd_seq,
-	.type = RPMB_TYPE_UFS,
-};
-static struct rpmb_dev *rawdev_ufs_rpmb;
-
-/**
- * ufs_mtk_rpmb_ddd - add mtk rpmb cdev
- * @data: host controller instance (hba)
- *
- * Read max ufs device read/write rpmb size support and
- * set to reliable_wr_cnt for rpmb cdev read/write reference.
- *
- * Register raw cdve device in rawdev_ufs_rpmb
- */
-static void ufs_mtk_rpmb_add(void *data, async_cookie_t cookie)
+static bool ufs_mtk_is_data_cmd(char cmd_op, bool isolation)
 {
-	int err;
-	u8 *desc_buf;
-	struct rpmb_dev *rdev;
-	u8 rw_size;
-	int retry = 10;
-	struct ufs_mtk_host *host;
-	struct ufs_hba *hba = (struct ufs_hba *)data;
+	if (cmd_op == WRITE_10 || cmd_op == READ_10 ||
+		cmd_op == WRITE_16 || cmd_op == READ_16 ||
+		cmd_op == WRITE_6 || cmd_op == READ_6)
+		return true;
+	if (isolation) {
+		if ((cmd_op == WRITE_BUFFER) ||
+			(cmd_op == UNMAP) ||
+			(cmd_op == FORMAT_UNIT) ||
+			(cmd_op == SECURITY_PROTOCOL_OUT))
+			return true;
+		}
+#if defined(CONFIG_SCSI_UFS_HPB) || defined(CONFIG_SCSI_SKHPB)
+		if (cmd_op == UFSHPB_READ_BUFFER || cmd_op == UFSHPB_WRITE_BUFFER)
+			return true;
+#endif
+	return false;
+}
 
-	host = ufshcd_get_variant(hba);
+int ufs_mtk_perf_heurisic_if_allow_cmd(struct ufs_hba *hba, struct scsi_cmnd *cmd)
+{
+	if (!(hba->quirks & UFS_MTK_HOST_QUIRK_UFS_HCI_PERF_HEURISTIC))
+		return 0;
 
-	/* wait ufshcd_scsi_add_wlus add sdev_rpmb  */
-	while (hba->sdev_rpmb == NULL) {
-		if (retry) {
-			retry--;
-			msleep(1000);
+	/* Check rw commands only and allow all other commands. */
+	if (ufs_mtk_is_data_cmd(cmd->cmnd[0], true)) {
+		if (!hba->ufs_mtk_qcmd_r_cmd_cnt &&
+			!hba->ufs_mtk_qcmd_w_cmd_cnt) {
+			/* Case: no on-going r or w commands. */
+			if (ufs_mtk_is_data_write_cmd(cmd->cmnd[0], true))
+				hba->ufs_mtk_qcmd_w_cmd_cnt++;
+			else
+				hba->ufs_mtk_qcmd_r_cmd_cnt++;
 		} else {
-			dev_err(hba->dev,
-				"scsi rpmb device cannot found\n");
-			goto out;
+			if (ufs_mtk_is_data_write_cmd(cmd->cmnd[0], true)) {
+				if (hba->ufs_mtk_qcmd_r_cmd_cnt)
+					return 1;
+				hba->ufs_mtk_qcmd_w_cmd_cnt++;
+			} else {
+				if (hba->ufs_mtk_qcmd_w_cmd_cnt)
+					return 1;
+				hba->ufs_mtk_qcmd_r_cmd_cnt++;
+			}
 		}
 	}
+	return 0;
+}
 
-	desc_buf = kmalloc(QUERY_DESC_MAX_SIZE, GFP_KERNEL);
-	if (!desc_buf)
-		goto out;
+void ufs_mtk_perf_heurisic_req_done(struct ufs_hba *hba, struct scsi_cmnd *cmd)
+{
+	if (!(hba->quirks & UFS_MTK_HOST_QUIRK_UFS_HCI_PERF_HEURISTIC))
+		return;
+	if (ufs_mtk_is_data_cmd(cmd->cmnd[0], true)) {
+		if (ufs_mtk_is_data_write_cmd(cmd->cmnd[0], true))
+			hba->ufs_mtk_qcmd_w_cmd_cnt--;
+		else
+			hba->ufs_mtk_qcmd_r_cmd_cnt--;
+	}
+}
 
-	err = ufshcd_read_desc_param(hba, QUERY_DESC_IDN_GEOMETRY, 0, 0,
-				     desc_buf, QUERY_DESC_MAX_SIZE);
+bool ufs_mtk_perf_is_supported(struct ufs_mtk_host *host)
+{
+	if (!host->crypto_clk_mux ||
+	    !host->crypto_parent_clk_normal ||
+	    !host->crypto_parent_clk_perf ||
+	    !host->req_vcore ||
+	    host->crypto_vcore_opp < 0)
+		return false;
+	else
+		return true;
+}
+
+int ufs_mtk_perf_setup_req(struct ufs_mtk_host *host, bool perf)
+{
+	int err = 0;
+
+	err = clk_prepare_enable(host->crypto_clk_mux);
 	if (err) {
-		dev_warn(hba->dev, "%s: cannot get rpmb rw limit %d\n",
-			 dev_name(hba->dev), err);
-		/* fallback to singel frame write */
-		rw_size = 1;
-	} else {
-		rw_size = desc_buf[GEOMETRY_DESC_PARAM_RPMB_RW_SIZE];
-	}
-
-	kfree(desc_buf);
-	dev_info(hba->dev, "rpmb rw_size: %d\n", rw_size);
-
-	ufs_mtk_rpmb_dev_ops.reliable_wr_cnt = rw_size;
-
-	if (unlikely(scsi_device_get(hba->sdev_rpmb)))
+		dev_info(host->hba->dev, "%s: clk_prepare_enable(): %d\n",
+			 __func__, err);
 		goto out;
-
-	rdev = rpmb_dev_register(hba->dev, &ufs_mtk_rpmb_dev_ops);
-	if (IS_ERR(rdev)) {
-		dev_warn(hba->dev, "%s: cannot register to rpmb %ld\n",
-			 dev_name(hba->dev), PTR_ERR(rdev));
-		goto out_put_dev;
 	}
 
-	/*
-	 * Preserve rpmb_dev to globals for connection of legacy
-	 * rpmb ioctl solution.
-	 */
-	rawdev_ufs_rpmb = rdev;
+	if (perf) {
+		mtk_pm_qos_update_request(host->req_vcore,
+					host->crypto_vcore_opp);
+		err = clk_set_parent(host->crypto_clk_mux,
+					host->crypto_parent_clk_perf);
+	} else {
+		err = clk_set_parent(host->crypto_clk_mux,
+					host->crypto_parent_clk_normal);
+		mtk_pm_qos_update_request(host->req_vcore,
+					MTK_PM_QOS_VCORE_OPP_DEFAULT_VALUE);
+	}
 
-	/*
-	 * Initialize rpmb semaphore.
-	 */
-	sema_init(&host->rpmb_sem, 1);
+	if (err)
+		dev_info(host->hba->dev, "%s: clk_set_parent(): %d\n",
+			 __func__, err);
 
-out_put_dev:
-	scsi_device_put(hba->sdev_rpmb);
+	clk_disable_unprepare(host->crypto_clk_mux);
 
 out:
-	return;
+	ufs_mtk_dbg_add_trace(dev_name(host->hba->dev), "perf_mode", perf,
+			0, (u32) err, 0, 0, 0, 0, 0);
+
+	return err;
 }
 
-struct rpmb_dev *ufs_mtk_rpmb_get_raw_dev(void)
+int ufs_mtk_perf_setup_crypto_clk(struct ufs_mtk_host *host, bool perf)
 {
-	return rawdev_ufs_rpmb;
-}
-EXPORT_SYMBOL_GPL(ufs_mtk_rpmb_get_raw_dev);
-#endif
-
-/**
- * ufs_mtk_query_ioctl - perform user read queries
- * @hba: per-adapter instance
- * @lun: used for lun specific queries
- * @buffer: user space buffer for reading and submitting query data and params
- * @return: 0 for success negative error code otherwise
- *
- * Expected/Submitted buffer structure is struct ufs_ioctl_query_data.
- * It will read the opcode, idn and buf_length parameters, and, put the
- * response in the buffer field while updating the used size in buf_length.
- */
-static int
-ufs_mtk_query_ioctl(struct ufs_hba *hba, u8 lun, void __user *buffer)
-{
-	struct ufs_ioctl_query_data *ioctl_data;
 	int err = 0;
-	int length = 0;
-	void *data_ptr;
-	bool flag;
-	u32 att;
-	u8 index = 0;
-	u8 *desc = NULL;
+	bool rpm_resumed = false;
+	bool clk_prepared = false;
 
-	ioctl_data = kzalloc(sizeof(*ioctl_data), GFP_KERNEL);
-	if (!ioctl_data) {
+	if (!ufs_mtk_perf_is_supported(host)) {
+		dev_info(host->hba->dev, "%s: perf mode is unsupported\n", __func__);
+		err = -ENOTSUPP;
+		goto out;
+	}
+
+	/* runtime resume shall be prior to blocking requests */
+	pm_runtime_get_sync(host->hba->dev);
+	rpm_resumed = true;
+
+	/*
+	 * reuse clk scaling preparation function to wait until all
+	 * on-going commands are done, and then block future commands
+	 */
+	err = ufshcd_clock_scaling_prepare(host->hba);
+	if (err) {
+		dev_info(host->hba->dev, "%s: ufshcd_clock_scaling_prepare(): %d\n",
+			 __func__, err);
+		goto out;
+	}
+
+	clk_prepared = true;
+	err = ufs_mtk_perf_setup_req(host, perf);
+out:
+	/*
+	 * add event before any possible incoming commands
+	 * by unblocking requests in ufshcd_clock_scaling_unprepare()
+	 */
+	dev_info(host->hba->dev, "perf mode: request %s %s\n",
+		 perf ? "enable" : "disable",
+		 err ? "failed" : "ok");
+
+	if (clk_prepared)
+		ufshcd_clock_scaling_unprepare(host->hba);
+
+	if (rpm_resumed)
+		pm_runtime_put_sync(host->hba->dev);
+
+	return err;
+}
+
+int ufs_mtk_perf_setup(struct ufs_mtk_host *host, bool perf)
+{
+	int err = 0;
+
+	if (!ufs_mtk_perf_is_supported(host) ||
+		(host->perf_mode != PERF_AUTO)) {
+		/* return without error */
+		return 0;
+	}
+
+	err = ufs_mtk_perf_setup_req(host, perf);
+	if (!err)
+		host->perf_enable = perf;
+	else
+		dev_info(host->hba->dev, "%s: %s perf mode fail %d\n",
+				__func__, perf ? "enable":"disable", err);
+
+	return err;
+}
+
+static int ufs_mtk_perf_init_crypto(struct ufs_hba *hba)
+{
+	int err = 0;
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+	struct device_node *np = hba->dev->of_node;
+
+	err = ufs_mtk_host_clk_get(hba->dev,
+				   "ufs-vendor-crypto-clk-mux",
+				   &host->crypto_clk_mux);
+	if (err) {
+		dev_info(hba->dev,
+			"%s: failed to get ufs-vendor-crypto-clk-mux, err: %d",
+			__func__, err);
+		goto out;
+	}
+
+	err = ufs_mtk_host_clk_get(hba->dev,
+				   "ufs-vendor-crypto-normal-parent-clk",
+				   &host->crypto_parent_clk_normal);
+	if (err) {
+		dev_info(hba->dev,
+			"%s: failed to get ufs-vendor-crypto-normal-parent-clk, err: %d",
+			__func__, err);
+		goto out;
+	}
+
+	err = ufs_mtk_host_clk_get(hba->dev,
+				   "ufs-vendor-crypto-perf-parent-clk",
+				   &host->crypto_parent_clk_perf);
+	if (err) {
+		dev_info(hba->dev,
+			"%s: failed to get ufs-vendor-crypto-perf-parent-clk, err: %d",
+			__func__, err);
+		goto out;
+	}
+
+	err = of_property_read_s32(np, "mediatek,perf-crypto-vcore",
+				   &host->crypto_vcore_opp);
+	if (err) {
+		dev_info(hba->dev,
+			"%s: failed to get mediatek,perf-crypto-vcore",
+			__func__);
+		host->crypto_vcore_opp = -1;
+		goto out;
+	}
+
+	/* init VCORE QOS */
+	host->req_vcore = devm_kzalloc(hba->dev, sizeof(*host->req_vcore),
+				       GFP_KERNEL);
+	if (!host->req_vcore) {
 		err = -ENOMEM;
 		goto out;
 	}
 
-	/* extract params from user buffer */
-	err = copy_from_user(ioctl_data, buffer,
-			     sizeof(struct ufs_ioctl_query_data));
-	if (err) {
-		dev_err(hba->dev,
-			"%s: Failed copying buffer from user, err %d\n",
-			__func__, err);
-		goto out_release_mem;
-	}
-
-#if defined(CONFIG_UFSFEATURE)
-	if (ufsf_check_query(ioctl_data->opcode)) {
-		err = ufsf_query_ioctl(ufs_mtk_get_ufsf(hba), lun, buffer,
-				       ioctl_data, UFSFEATURE_SELECTOR);
-		goto out_release_mem;
-	}
-#endif
-
-	/* verify legal parameters & send query */
-	switch (ioctl_data->opcode) {
-	case UPIU_QUERY_OPCODE_READ_DESC:
-		switch (ioctl_data->idn) {
-		case QUERY_DESC_IDN_DEVICE:
-		case QUERY_DESC_IDN_CONFIGURATION:
-		case QUERY_DESC_IDN_INTERCONNECT:
-		case QUERY_DESC_IDN_GEOMETRY:
-		case QUERY_DESC_IDN_POWER:
-			index = 0;
-			break;
-		case QUERY_DESC_IDN_UNIT:
-			if (!ufs_is_valid_unit_desc_lun(&hba->dev_info, lun, 0)) {
-				dev_err(hba->dev,
-					"%s: No unit descriptor for lun 0x%x\n",
-					__func__, lun);
-				err = -EINVAL;
-				goto out_release_mem;
-			}
-			index = lun;
-			break;
-		default:
-			goto out_einval;
-		}
-		length = min_t(int, QUERY_DESC_MAX_SIZE,
-			       ioctl_data->buf_size);
-		desc = kzalloc(length, GFP_KERNEL);
-		if (!desc) {
-			dev_err(hba->dev, "%s: Failed allocating %d bytes\n",
-				__func__, length);
-			err = -ENOMEM;
-			goto out_release_mem;
-		}
-		err = ufshcd_query_descriptor_retry(hba, ioctl_data->opcode,
-						    ioctl_data->idn, index, 0,
-						    desc, &length);
-		break;
-	case UPIU_QUERY_OPCODE_READ_ATTR:
-		switch (ioctl_data->idn) {
-		case QUERY_ATTR_IDN_BOOT_LU_EN:
-		case QUERY_ATTR_IDN_POWER_MODE:
-		case QUERY_ATTR_IDN_ACTIVE_ICC_LVL:
-		case QUERY_ATTR_IDN_OOO_DATA_EN:
-		case QUERY_ATTR_IDN_BKOPS_STATUS:
-		case QUERY_ATTR_IDN_PURGE_STATUS:
-		case QUERY_ATTR_IDN_MAX_DATA_IN:
-		case QUERY_ATTR_IDN_MAX_DATA_OUT:
-		case QUERY_ATTR_IDN_REF_CLK_FREQ:
-		case QUERY_ATTR_IDN_CONF_DESC_LOCK:
-		case QUERY_ATTR_IDN_MAX_NUM_OF_RTT:
-		case QUERY_ATTR_IDN_EE_CONTROL:
-		case QUERY_ATTR_IDN_EE_STATUS:
-		case QUERY_ATTR_IDN_SECONDS_PASSED:
-			index = 0;
-			break;
-		case QUERY_ATTR_IDN_DYN_CAP_NEEDED:
-		case QUERY_ATTR_IDN_CORR_PRG_BLK_NUM:
-			index = lun;
-			break;
-		default:
-			goto out_einval;
-		}
-		err = ufshcd_query_attr(hba, ioctl_data->opcode,
-					ioctl_data->idn, index, 0, &att);
-		break;
-
-	case UPIU_QUERY_OPCODE_WRITE_ATTR:
-		err = copy_from_user(&att,
-				     buffer +
-				     sizeof(struct ufs_ioctl_query_data),
-				     sizeof(u32));
-		if (err) {
-			dev_err(hba->dev,
-				"%s: Failed copying buffer from user, err %d\n",
-				__func__, err);
-			goto out_release_mem;
-		}
-
-		switch (ioctl_data->idn) {
-		case QUERY_ATTR_IDN_BOOT_LU_EN:
-			index = 0;
-			if (!att) {
-				dev_err(hba->dev,
-					"%s: Illegal ufs query ioctl data, opcode 0x%x, idn 0x%x, att 0x%x\n",
-					__func__, ioctl_data->opcode,
-					(unsigned int)ioctl_data->idn, att);
-				err = -EINVAL;
-				goto out_release_mem;
-			}
-			break;
-		default:
-			goto out_einval;
-		}
-		err = ufshcd_query_attr(hba, ioctl_data->opcode,
-					ioctl_data->idn, index, 0, &att);
-		break;
-
-	case UPIU_QUERY_OPCODE_READ_FLAG:
-		switch (ioctl_data->idn) {
-		case QUERY_FLAG_IDN_FDEVICEINIT:
-		case QUERY_FLAG_IDN_PERMANENT_WPE:
-		case QUERY_FLAG_IDN_PWR_ON_WPE:
-		case QUERY_FLAG_IDN_BKOPS_EN:
-		case QUERY_FLAG_IDN_PURGE_ENABLE:
-		case QUERY_FLAG_IDN_FPHYRESOURCEREMOVAL:
-		case QUERY_FLAG_IDN_BUSY_RTC:
-			break;
-		default:
-			goto out_einval;
-		}
-		err = ufshcd_query_flag(hba, ioctl_data->opcode,
-					ioctl_data->idn, 0, &flag);
-		break;
-	default:
-		goto out_einval;
-	}
-
-	if (err) {
-		dev_err(hba->dev, "%s: Query for idn %d failed\n", __func__,
-			ioctl_data->idn);
-		goto out_release_mem;
-	}
-
-	/*
-	 * copy response data
-	 * As we might end up reading less data than what is specified in
-	 * "ioctl_data->buf_size". So we are updating "ioctl_data->
-	 * buf_size" to what exactly we have read.
-	 */
-	switch (ioctl_data->opcode) {
-	case UPIU_QUERY_OPCODE_READ_DESC:
-		ioctl_data->buf_size = min_t(int, ioctl_data->buf_size, length);
-		data_ptr = desc;
-		break;
-	case UPIU_QUERY_OPCODE_READ_ATTR:
-		ioctl_data->buf_size = sizeof(u32);
-		data_ptr = &att;
-		break;
-	case UPIU_QUERY_OPCODE_READ_FLAG:
-		ioctl_data->buf_size = 1;
-		data_ptr = &flag;
-		break;
-	case UPIU_QUERY_OPCODE_WRITE_ATTR:
-		goto out_release_mem;
-	default:
-		goto out_einval;
-	}
-
-	/* copy to user */
-	err = copy_to_user(buffer, ioctl_data,
-			   sizeof(struct ufs_ioctl_query_data));
-	if (err)
-		dev_err(hba->dev, "%s: Failed copying back to user.\n",
-			__func__);
-	err = copy_to_user(buffer + sizeof(struct ufs_ioctl_query_data),
-			   data_ptr, ioctl_data->buf_size);
-	if (err)
-		dev_err(hba->dev, "%s: err %d copying back to user.\n",
-			__func__, err);
-	goto out_release_mem;
-
-out_einval:
-	dev_err(hba->dev,
-		"%s: illegal ufs query ioctl data, opcode 0x%x, idn 0x%x\n",
-		__func__, ioctl_data->opcode, (unsigned int)ioctl_data->idn);
-	err = -EINVAL;
-out_release_mem:
-	kfree(ioctl_data);
-	kfree(desc);
+	mtk_pm_qos_add_request(host->req_vcore, MTK_PM_QOS_VCORE_OPP,
+				MTK_PM_QOS_VCORE_OPP_DEFAULT_VALUE);
 out:
+	if (!err)
+		host->perf_mode = PERF_AUTO;
+	else
+		host->perf_mode = PERF_FORCE_DISABLE;
 	return err;
 }
 
 /**
- * ufs_mtk_ioctl - ufs ioctl callback registered in scsi_host
- * @dev: scsi device required for per LUN queries
- * @cmd: command opcode
- * @buffer: user space buffer for transferring data
+ * ufs_mtk_setup_clocks - enables/disable clocks
+ * @hba: host controller instance
+ * @on: If true, enable clocks else disable them.
+ * @status: PRE_CHANGE or POST_CHANGE notify
  *
- * Supported commands:
- * UFS_IOCTL_QUERY
+ * Returns 0 on success, non-zero on failure.
  */
-static int
-ufs_mtk_ioctl(struct scsi_device *dev, unsigned int cmd, void __user *buffer)
+static int ufs_mtk_setup_clocks(struct ufs_hba *hba, bool on,
+				enum ufs_notify_change_status status)
 {
-	struct ufs_hba *hba = shost_priv(dev->host);
-	int err = 0;
-
-	BUG_ON(!hba);
-	if (!buffer) {
-		dev_err(hba->dev, "%s: User buffer is NULL!\n", __func__);
-		return -EINVAL;
-	}
-
-	switch (cmd) {
-	case UFS_IOCTL_QUERY:
-		pm_runtime_get_sync(hba->dev);
-		err = ufs_mtk_query_ioctl(hba,
-					  ufshcd_scsi_to_upiu_lun(dev->lun),
-					  buffer);
-		pm_runtime_put_sync(hba->dev);
-		break;
-	default:
-		err = -ENOIOCTLCMD;
-		dev_dbg(hba->dev, "%s: Unsupported ioctl cmd %d\n", __func__,
-			cmd);
-		break;
-	}
-
-	return err;
-}
-
-/* Same with ufshcd_populate_vreg, should EXPORT for upstream */
-#define MAX_PROP_SIZE 32
-static int ufs_mtk_populate_vreg(struct device *dev, const char *name,
-		struct ufs_vreg **out_vreg)
-{
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+	struct phy *mphy;
 	int ret = 0;
-	char prop_name[MAX_PROP_SIZE];
-	struct ufs_vreg *vreg = NULL;
-	struct device_node *np = dev->of_node;
-
-	if (!np)
-		goto out;
-
-	snprintf(prop_name, MAX_PROP_SIZE, "%s-supply", name);
-	if (!of_parse_phandle(np, prop_name, 0)) {
-		dev_info(dev, "%s: Unable to find %s regulator, assuming enabled\n",
-				__func__, prop_name);
-		goto out;
-	}
-
-	vreg = devm_kzalloc(dev, sizeof(*vreg), GFP_KERNEL);
-	if (!vreg)
-		return -ENOMEM;
-
-	vreg->name = kstrdup(name, GFP_KERNEL);
-
-	snprintf(prop_name, MAX_PROP_SIZE, "%s-max-microamp", name);
-	if (of_property_read_u32(np, prop_name, &vreg->max_uA)) {
-		dev_info(dev, "%s: unable to find %s\n", __func__, prop_name);
-		vreg->max_uA = 0;
-	}
-out:
-	if (!ret)
-		*out_vreg = vreg;
-	return ret;
-}
-
-/* Same with ufshcd_get_vreg, should EXPORT for upstream */
-static int ufs_mtk_get_vreg(struct device *dev, struct ufs_vreg *vreg)
-{
-	int ret = 0;
-
-	if (!vreg)
-		goto out;
-
-	vreg->reg = devm_regulator_get(dev, vreg->name);
-	if (IS_ERR(vreg->reg)) {
-		ret = PTR_ERR(vreg->reg);
-		dev_err(dev, "%s: %s get failed, err=%d\n",
-				__func__, vreg->name, ret);
-	}
-out:
-	return ret;
-}
-
-static void ufs_mtk_ctrl_dev_pwr(struct ufs_hba *hba, bool vcc_on, bool is_init)
-{
-	struct arm_smccc_res res;
-	u64 ufs_version;
-
-	/* prevent entering lpm when device is still active */
-	if (!vcc_on && ufshcd_is_ufs_dev_active(hba))
-		return;
-
-	/* Transfer the ufs version to tf-a */
-	ufs_version = (u64)hba->dev_info.wspecversion;
 
 	/*
-	 * If VCC kept always-on, we do not use smc call to avoid
-	 * non-essential time consumption.
-	 *
-	 * We don't need to control VS buck (the upper layer of VCCQ/VCCQ2)
-	 * to enter LPM, because UFS device may be active when VCC
-	 * is always-on. We also introduce UFS_MTK_CAP_FORCE_VSx_LPM to
-	 * allow overriding such protection to save power.
+	 * In case ufs_mtk_init() is not yet done, simply ignore.
+	 * This ufs_mtk_setup_clocks() shall be called from
+	 * ufs_mtk_init() after init is done.
 	 */
-	if (ufs_mtk_is_force_vsx_lpm(hba) || !ufs_mtk_is_broken_vcc(hba) || is_init)
-		ufs_mtk_device_pwr_ctrl(vcc_on, ufs_version, res);
+	if (!host)
+		return 0;
+
+	mphy = host->mphy;
+
+	if (!on && status == PRE_CHANGE) {
+		/*
+		 * Gate ref-clk and poweroff mphy if link state is in OFF
+		 * or Hibern8 by either ufshcd_link_state_transition() or
+		 * Auto-Hibern8.
+		 */
+		if (!ufshcd_is_link_active(hba) ||
+			(!ufshcd_can_hibern8_during_gating(hba) &&
+			ufshcd_is_auto_hibern8_enabled(hba))) {
+			ret = ufs_mtk_wait_link_state(hba,
+						      VS_LINK_HIBERN8,
+						      15);
+			if (!ret) {
+				ret = ufs_mtk_perf_setup(host, false);
+				if (ret)
+					goto out;
+				ufs_mtk_pm_qos(hba, on);
+				ufs_mtk_setup_ref_clk(hba, on);
+				phy_power_off(mphy);
+			}
+		}
+		if (host && host->qos_enabled)
+			ufs_mtk_biolog_clk_gating(true);
+	} else if (on && status == POST_CHANGE) {
+		phy_power_on(mphy);
+		ufs_mtk_setup_ref_clk(hba, on);
+		ufs_mtk_pm_qos(hba, on);
+		ufs_mtk_perf_setup(host, true);
+		if (host && host->qos_enabled)
+			ufs_mtk_biolog_clk_gating(false);
+	}
+
+out:
+	return ret;
 }
 
 /**
@@ -1627,7 +1250,6 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 	const struct of_device_id *id;
 	struct device *dev = hba->dev;
 	struct ufs_mtk_host *host;
-	struct arm_smccc_res res;
 	int err = 0;
 
 	host = devm_kzalloc(dev, sizeof(*host), GFP_KERNEL);
@@ -1637,17 +1259,22 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 		goto out;
 	}
 
+	ufs_mtk_hba = hba;
 	host->hba = hba;
 	ufshcd_set_variant(hba, host);
 
+	/* Get host quirks */
 	id = of_match_device(ufs_mtk_of_match, dev);
 	if (!id) {
 		err = -EINVAL;
 		goto out;
 	}
 
-	/* Initialize host capability */
-	ufs_mtk_init_host_caps(hba);
+	if (id->data) {
+		host->cfg = (struct ufs_mtk_host_cfg *)id->data;
+		if (host->cfg->quirks & UFS_MTK_HOST_QUIRK_BROKEN_AUTO_HIBERN8)
+			host->auto_hibern_enabled = true;
+	}
 
 	err = ufs_mtk_bind_mphy(hba);
 	if (err)
@@ -1655,23 +1282,17 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 
 	ufs_mtk_init_reset(hba);
 
+	ufs_mtk_parse_dt(host);
+
 	/* Enable runtime autosuspend */
 	hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;
 
 	/* Enable clock-gating */
 	hba->caps |= UFSHCD_CAP_CLK_GATING;
 
-	/* Enable inline encryption */
-	hba->caps |= UFSHCD_CAP_CRYPTO;
-
-	/* Enable WriteBooster */
-	hba->caps |= UFSHCD_CAP_WB_EN;
-
-	hba->quirks |= UFSHCI_QUIRK_SKIP_MANUAL_WB_FLUSH_CTRL;
-	hba->vps->wb_flush_threshold = UFS_WB_BUF_REMAIN_PERCENT(80);
-
-	if (host->caps & UFS_MTK_CAP_DISABLE_AH8)
-		hba->caps |= UFSHCD_CAP_HIBERN8_WITH_CLK_GATING;
+	/* Allow auto bkops to enabled during runtime suspend */
+	/* Need to fix VCCQ2 issue first */
+	/* hba->caps |= UFSHCD_CAP_AUTO_BKOPS_SUSPEND; */
 
 	/*
 	 * ufshcd_vops_init() is invoked after
@@ -1683,72 +1304,110 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 	ufs_mtk_mphy_power_on(hba, true);
 	ufs_mtk_setup_clocks(hba, true, POST_CHANGE);
 
-#if defined(CONFIG_UFSFEATURE)
-	get_storage_info(hba);
-	get_dram_info(hba);
-#endif
-#if defined(CONFIG_SCSI_SKHID)
-	if (IS_SKHYNIX_DEVICE(storage_mfrid)) {
-		err = pixel_init(hba);
-		if (err)
-			return err;
-		pixel_init_manual_gc(hba);
-	}
-#endif
+	ufs_mtk_perf_init_crypto(hba);
 
-	/* Instantiate Motorola crypto capabilities for wrapped keys.
-	 * It is controlled by CONFIG_FSCRYPT_WRAPED_KEY_MODE_SUPPORT.
-	 * If this is not defined, this API would return zero and
-	 * non-wrapped crypto capabilities will be initialized.
-	 */
-#ifdef CONFIG_FSCRYPT_WRAPED_KEY_MODE_SUPPORT
-	hba->quirks |= UFSHCD_QUIRK_CUSTOM_KEYSLOT_MANAGER;
-	ufshcd_moto_hba_init_crypto_capabilities(hba);
-#endif
-
-	/* Get vcc-opt */
-	ufs_mtk_get_vcc_info(res);
-	if (res.a1 == VCC_1)
-		err = ufs_mtk_populate_vreg(dev, "vcc-opt1", &host->vcc);
-	else if (res.a1 == VCC_2)
-		err = ufs_mtk_populate_vreg(dev, "vcc-opt2", &host->vcc);
-	else
-		goto skip_vcc;
-	if (err)
-		goto out_variant_clear;
-	err = ufs_mtk_get_vreg(dev, host->vcc);
-	if (err)
-		goto out_variant_clear;
-skip_vcc:
-
-	cpu_latency_qos_add_request(&host->pm_qos_req,
-	     	   PM_QOS_DEFAULT_VALUE);
+	pm_qos_add_request(&host->req_cpu_dma_latency, PM_QOS_CPU_DMA_LATENCY,
+			   PM_QOS_DEFAULT_VALUE);
 	host->pm_qos_init = true;
 
-	ufs_mtk_biolog_init(host->qos_allowed, host->boot_device);
+	ufs_mtk_biolog_init(host->qos_allowed);
 
-#if IS_ENABLED(CONFIG_SCSI_UFS_MEDIATEK_DBG)
-	ufs_mtk_dbg_register(hba);
-#endif
+	ufsdbg_register(hba->dev);
 
-#if IS_ENABLED(CONFIG_RPMB)
-	async_schedule(ufs_mtk_rpmb_add, hba);
-#endif
-
-	/* Provide SCSI host ioctl API */
-	hba->host->hostt->ioctl = (int (*)(struct scsi_device *, unsigned int,
-				   void __user *))ufs_mtk_ioctl;
-#ifdef CONFIG_COMPAT
-	hba->host->hostt->compat_ioctl = (int (*)(struct scsi_device *,
-					  unsigned int,
-					  void __user *))ufs_mtk_ioctl;
-#endif
 	goto out;
 
 out_variant_clear:
 	ufshcd_set_variant(hba, NULL);
 out:
 	return err;
+}
+
+/**
+ * ufs_mtk_exit - release resource
+ * @hba: host controller instance
+ */
+void ufs_mtk_exit(struct ufs_hba *hba)
+{
+	struct ufs_mtk_host *host;
+
+	host = ufshcd_get_variant(hba);
+
+	if (host && host->pm_qos_init) {
+		/* remove pm_qos when exit */
+		mtk_pm_qos_remove_request(host->req_vcore);
+		pm_qos_remove_request(&host->req_cpu_dma_latency);
+		host->pm_qos_init = false;
+	}
+
+	/* prevent pointer is used after hba is freed */
+	ufs_mtk_hba = NULL;
+}
+
+void ufs_mtk_wait_idle_state(struct ufs_hba *hba, unsigned long retry_ms)
+{
+	u64 timeout, time_checked;
+	u32 val, sm;
+	bool wait_idle;
+
+	timeout = sched_clock() + retry_ms * 1000000UL;
+
+	/* wait a specific time after check base */
+	udelay(10);
+	wait_idle = false;
+
+	do {
+		time_checked = sched_clock();
+		ufshcd_writel(hba, 0x20, REG_UFS_MTK_DEBUG_SEL);
+		val = ufshcd_readl(hba, REG_UFS_MTK_PROBE);
+
+		sm = val & 0x1f;
+
+		/*
+		 * if state is in H8 enter and H8 enter confirm
+		 * wait until return to idle state.
+		 */
+		if ((sm >= 0x8) && (sm <= 0xd)) {
+			wait_idle = true;
+			udelay(50);
+			continue;
+		} else if (!wait_idle)
+			break;
+
+		if (wait_idle && (sm == 0x1))
+			break;
+	} while (time_checked < timeout);
+
+	if (wait_idle && sm != 1)
+		dev_info(hba->dev, "wait idle tmo: 0x%x\n", val);
+}
+
+static void _ufs_mtk_auto_hibern8_update(struct ufs_hba *hba, bool enable)
+{
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+
+	/*
+	 * To prevent dummy "enable" while multiple slots are finished in
+	 * the same loop in __ufshcd_transfer_req_compl().
+	 */
+	if (enable && host->auto_hibern_enabled)
+		return;
+
+	ufshcd_writel(hba, (enable) ? hba->ahit : 0,
+		REG_AUTO_HIBERNATE_IDLE_TIMER);
+	host->auto_hibern_enabled = enable;
+
+	/* wait host return to idle state when ah8 off */
+	if (!enable)
+		ufs_mtk_wait_idle_state(hba, 5);
+}
+
+static void ufs_mtk_auto_hibern8_update(struct ufs_hba *hba, bool enable)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(hba->host->host_lock, flags);
+	_ufs_mtk_auto_hibern8_update(hba, enable);
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
 }
 
 static int ufs_mtk_pre_pwr_change(struct ufs_hba *hba,
@@ -1759,6 +1418,9 @@ static int ufs_mtk_pre_pwr_change(struct ufs_hba *hba,
 	struct ufs_dev_params host_cap;
 	u32 adapt_val;
 	int ret;
+
+	if (ufs_mtk_has_broken_auto_hibern8(hba))
+		ufs_mtk_auto_hibern8_update(hba, false);
 
 	host_cap.tx_lanes = UFS_MTK_LIMIT_NUM_LANES_TX;
 	host_cap.rx_lanes = UFS_MTK_LIMIT_NUM_LANES_RX;
@@ -1787,11 +1449,13 @@ static int ufs_mtk_pre_pwr_change(struct ufs_hba *hba,
 			adapt_val = PA_INITIAL_ADAPT;
 		else
 			adapt_val = PA_NO_ADAPT;
+#ifndef CONFIG_MACH_MT6877
+		// TODO: temporary disable the action to avoid boot fail for MT6877
 		ufshcd_dme_set(hba,
-			       UIC_ARG_MIB(PA_TXHSADAPTTYPE),
-			       adapt_val);
+					UIC_ARG_MIB(PA_TXHSADAPTTYPE),
+					adapt_val);
+#endif
 	}
-
 	return ret;
 }
 
@@ -1817,14 +1481,14 @@ static int ufs_mtk_pwr_change_notify(struct ufs_hba *hba,
 	return ret;
 }
 
-static int ufs_mtk_unipro_set_lpm(struct ufs_hba *hba, bool lpm)
+static int ufs_mtk_unipro_set_pm(struct ufs_hba *hba, bool lpm)
 {
 	int ret;
 	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
 
 	ret = ufshcd_dme_set(hba,
 			     UIC_ARG_MIB_SEL(VS_UNIPROPOWERDOWNCONTROL, 0),
-			     lpm ? 1 : 0);
+			     lpm);
 	if (!ret || !lpm) {
 		/*
 		 * Forcibly set as non-LPM mode if UIC commands is failed
@@ -1844,7 +1508,7 @@ static int ufs_mtk_pre_link(struct ufs_hba *hba)
 
 	ufs_mtk_get_controller_version(hba);
 
-	ret = ufs_mtk_unipro_set_lpm(hba, false);
+	ret = ufs_mtk_unipro_set_pm(hba, false);
 	if (ret)
 		return ret;
 
@@ -1872,16 +1536,16 @@ static int ufs_mtk_pre_link(struct ufs_hba *hba)
 static void ufs_mtk_setup_clk_gating(struct ufs_hba *hba)
 {
 	unsigned long flags;
-	u32 ah_ms;
+	u32 delay;
 
 	if (ufshcd_is_clkgating_allowed(hba)) {
 		if (ufshcd_is_auto_hibern8_supported(hba) && hba->ahit)
-			ah_ms = FIELD_GET(UFSHCI_AHIBERN8_TIMER_MASK,
-					  hba->ahit);
+			delay = FIELD_GET(UFSHCI_AHIBERN8_TIMER_MASK,
+					  hba->ahit) + 5;
 		else
-			ah_ms = 10;
+			delay = 15;
 		spin_lock_irqsave(hba->host->host_lock, flags);
-		hba->clk_gating.delay_ms = ah_ms + 5;
+		hba->clk_gating.delay_ms = delay;
 		spin_unlock_irqrestore(hba->host->host_lock, flags);
 	}
 }
@@ -1891,15 +1555,14 @@ static int ufs_mtk_post_link(struct ufs_hba *hba)
 	/* enable unipro clock gating feature */
 	ufs_mtk_cfg_unipro_cg(hba, true);
 
-	/* configure auto-hibern8 timer to 10ms */
+	/* configure auto-hibern8 timer to 10 ms */
 	if (ufshcd_is_auto_hibern8_supported(hba)) {
-		hba->ahit = FIELD_PREP(UFSHCI_AHIBERN8_TIMER_MASK, 5) |
-			    FIELD_PREP(UFSHCI_AHIBERN8_SCALE_MASK, 3);
+		ufshcd_auto_hibern8_update(hba,
+			FIELD_PREP(UFSHCI_AHIBERN8_TIMER_MASK, 10) |
+			FIELD_PREP(UFSHCI_AHIBERN8_SCALE_MASK, 3));
 	}
 
 	ufs_mtk_setup_clk_gating(hba);
-
-	device_enable_async_suspend(hba->dev);
 
 	return 0;
 }
@@ -1924,19 +1587,12 @@ static int ufs_mtk_link_startup_notify(struct ufs_hba *hba,
 	return ret;
 }
 
-static int ufs_mtk_device_reset(struct ufs_hba *hba)
+static void ufs_mtk_device_reset(struct ufs_hba *hba)
 {
 	struct arm_smccc_res res;
 
-#if defined(CONFIG_UFSFEATURE)
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	if (ufsf->hba)
-		ufsf_reset_host(ufs_mtk_get_ufsf(hba));
-#endif
-
 	/* disable hba before device reset */
-	ufshcd_hba_stop(hba);
+	ufshcd_hba_stop(hba, true);
 
 	ufs_mtk_device_reset_ctrl(0, res);
 
@@ -1955,55 +1611,45 @@ static int ufs_mtk_device_reset(struct ufs_hba *hba)
 	usleep_range(10000, 15000);
 
 	dev_info(hba->dev, "device reset done\n");
-
-	return 0;
 }
 
 static int ufs_mtk_link_set_hpm(struct ufs_hba *hba)
 {
 	int err;
-	u32 val;
 
 	err = ufshcd_hba_enable(hba);
 	if (err)
-		return err;
+		goto out;
 
-	err = ufs_mtk_unipro_set_lpm(hba, false);
-	if (err) {
-		ufs_mtk_dbg_sel(hba);
-		val = ufshcd_readl(hba, REG_UFS_PROBE);
-		ufshcd_update_evt_hist(hba, UFS_EVT_RESUME_ERR, (u32)val);
-		val = ufshcd_readl(hba, REG_INTERRUPT_STATUS);
-		ufshcd_update_evt_hist(hba, UFS_EVT_RESUME_ERR, (u32)val);
-		return err;
-	}
+	err = ufs_mtk_unipro_set_pm(hba, false);
+	if (err)
+		goto out;
 
 	err = ufshcd_uic_hibern8_exit(hba);
 	if (!err)
 		ufshcd_set_link_active(hba);
 	else
-		return err;
+		goto out;
 
 	err = ufshcd_make_hba_operational(hba);
+out:
 	if (err)
-		return err;
-
-	return 0;
+		ufshcd_print_info(hba, UFS_INFO_HOST_STATE |
+				  UFS_INFO_HOST_REGS | UFS_INFO_PWR);
+	return err;
 }
 
 static int ufs_mtk_link_set_lpm(struct ufs_hba *hba)
 {
 	int err;
 
-	/* not wait unipro resetCnf */
-	ufshcd_writel(hba,
-		(ufshcd_readl(hba, REG_UFS_XOUFS_CTRL) & ~0x100),
-		REG_UFS_XOUFS_CTRL);
-
-	err = ufs_mtk_unipro_set_lpm(hba, true);
+	err = ufs_mtk_unipro_set_pm(hba, true);
 	if (err) {
+		ufshcd_print_info(hba, UFS_INFO_HOST_STATE |
+				  UFS_INFO_HOST_REGS | UFS_INFO_PWR);
+
 		/* Resume UniPro state for following error recovery */
-		ufs_mtk_unipro_set_lpm(hba, false);
+		ufs_mtk_unipro_set_pm(hba, false);
 		return err;
 	}
 
@@ -2012,19 +1658,21 @@ static int ufs_mtk_link_set_lpm(struct ufs_hba *hba)
 
 static void ufs_mtk_vreg_set_lpm(struct ufs_hba *hba, bool lpm)
 {
-	if (!hba->vreg_info.vccq2 || !hba->vreg_info.vcc)
-		return;
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
 
-	/* prevent entering lpm when device is still active */
-	if (lpm && ufshcd_is_ufs_dev_active(hba))
-		return;
-
-	if (lpm && !hba->vreg_info.vcc->enabled)
-		regulator_set_mode(hba->vreg_info.vccq2->reg,
-				   REGULATOR_MODE_IDLE);
-	else if (!lpm)
-		regulator_set_mode(hba->vreg_info.vccq2->reg,
-				   REGULATOR_MODE_NORMAL);
+	if (lpm & !hba->vreg_info.vcc->enabled) {
+		if (hba->vreg_info.vccq2)
+			regulator_set_mode(hba->vreg_info.vccq2->reg,
+								REGULATOR_MODE_IDLE);
+		else if (host->vreg_lpm_supported)
+			ufs_mtk_vufs_set_lpm(1);
+	} else if (!lpm) {
+		if (hba->vreg_info.vccq2)
+			regulator_set_mode(hba->vreg_info.vccq2->reg,
+								REGULATOR_MODE_NORMAL);
+		else if (host->vreg_lpm_supported)
+			ufs_mtk_vufs_set_lpm(0);
+	}
 }
 
 static int ufs_mtk_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
@@ -2053,8 +1701,6 @@ static int ufs_mtk_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	if (ufshcd_is_link_off(hba))
 		ufs_mtk_device_reset_ctrl(0, res);
 
-	ufs_mtk_host_pwr_ctrl(false, res);
-
 	return 0;
 fail:
 	/*
@@ -2069,12 +1715,6 @@ fail:
 static int ufs_mtk_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 {
 	int err;
-	struct arm_smccc_res res;
-
-	if (ufshcd_eh_in_progress(hba))
-		ufs_mtk_ctrl_dev_pwr(hba, true, false);
-
-	ufs_mtk_host_pwr_ctrl(true, res);
 
 	err = ufs_mtk_mphy_power_on(hba, true);
 	if (err)
@@ -2104,89 +1744,8 @@ static void ufs_mtk_dbg_register_dump(struct ufs_hba *hba)
 			 "MPHY Ctrl ");
 
 	/* Direct debugging information to REG_MTK_PROBE */
-	ufs_mtk_dbg_sel(hba);
+	ufshcd_writel(hba, 0x20, REG_UFS_DEBUG_SEL);
 	ufshcd_dump_regs(hba, REG_UFS_PROBE, 0x4, "Debug Probe ");
-	ufs_mtk_dbg_dump(100);
-}
-
-static int ufs_mtk_setup_regulators(struct ufs_hba *hba, bool on)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	struct ufs_vreg_info *vreg_info = &hba->vreg_info;
-	int ret = 0;
-
-	if (host->vcc) {
-		vreg_info->vcc = host->vcc;
-		if (on)
-			ret = regulator_enable(host->vcc->reg);
-		else
-			ret = regulator_disable(host->vcc->reg);
-		if (!ret)
-			host->vcc->enabled = on;
-	}
-
-	return ret;
-}
-
-static void ufs_mtk_fix_regulators(struct ufs_hba *hba)
-{
-	struct ufs_dev_info *dev_info = &hba->dev_info;
-	struct ufs_vreg_info *vreg_info = &hba->vreg_info;
-
-	if (dev_info->wspecversion >= 0x0300) {
-		if (vreg_info->vccq2) {
-			regulator_disable(vreg_info->vccq2->reg);
-			devm_kfree(hba->dev, vreg_info->vccq2->name);
-			devm_kfree(hba->dev, vreg_info->vccq2);
-			vreg_info->vccq2 = NULL;
-		}
-		if (vreg_info->vccq)
-			vreg_info->vccq->always_on = true;
-	} else {
-		if (vreg_info->vccq) {
-			regulator_disable(vreg_info->vccq->reg);
-			devm_kfree(hba->dev, vreg_info->vccq->name);
-			devm_kfree(hba->dev, vreg_info->vccq);
-			vreg_info->vccq = NULL;
-		}
-		if (vreg_info->vccq2)
-			vreg_info->vccq2->always_on = true;
-	}
-}
-
-static int ufs_mtk_fixup_vcc_regulator(struct ufs_hba *hba)
-{
-	int err = 0;
-	u16 ufs_ver;
-	char vcc_name[MAX_PROP_SIZE];
-	struct device *dev = hba->dev;
-	struct ufs_vreg_info *vcc_info = &hba->vreg_info;
-
-	/* Get UFS version to setting VCC */
-	ufs_ver = (hba->dev_info.wspecversion & 0xF00) >> 8;
-	snprintf(vcc_name, MAX_PROP_SIZE, "vcc_ufs%u", ufs_ver);
-
-	err = ufs_mtk_populate_vreg(dev, vcc_name, &vcc_info->vcc);
-	if (err || !vcc_info->vcc) {
-		dev_info(dev, "%s: Unable to find %s\n", __func__, vcc_name);
-		goto out;
-	}
-
-	err = ufs_mtk_get_vreg(dev, vcc_info->vcc);
-	if (err)
-		goto out;
-
-	err = regulator_enable(vcc_info->vcc->reg);
-	if (!err)
-		vcc_info->vcc->enabled = true;
-	else
-		dev_info(dev, "%s: %s enable failed, err=%d\n",
-					__func__, vcc_info->vcc->name, err);
-
-out:
-	if (err)
-		dev_info(hba->dev, "%s: No combo ufs pmic setting\n", __func__);
-	return err;
 }
 
 static int ufs_mtk_apply_dev_quirks(struct ufs_hba *hba)
@@ -2194,15 +1753,13 @@ static int ufs_mtk_apply_dev_quirks(struct ufs_hba *hba)
 	struct ufs_dev_info *dev_info = &hba->dev_info;
 	u16 mid = dev_info->wmanufacturerid;
 
-	if (mid == UFS_VENDOR_SAMSUNG) {
+	if (mid == UFS_VENDOR_SAMSUNG)
 		ufshcd_dme_set(hba, UIC_ARG_MIB(PA_TACTIVATE), 6);
-		ufshcd_dme_set(hba, UIC_ARG_MIB(PA_HIBERN8TIME), 10);
-	}
 
 	/*
 	 * Decide waiting time before gating reference clock and
 	 * after ungating reference clock according to vendors'
-	 * requirements. Default 30, 30.
+	 * requirements.
 	 */
 	if (mid == UFS_VENDOR_SAMSUNG)
 		ufs_mtk_setup_ref_clk_wait_us(hba, 1, 32);
@@ -2210,155 +1767,221 @@ static int ufs_mtk_apply_dev_quirks(struct ufs_hba *hba)
 		ufs_mtk_setup_ref_clk_wait_us(hba, 30, 30);
 	else if (mid == UFS_VENDOR_TOSHIBA)
 		ufs_mtk_setup_ref_clk_wait_us(hba, 100, 32);
-	else
-		ufs_mtk_setup_ref_clk_wait_us(hba, 30, 30);
-
-	ufs_mtk_fix_regulators(hba);
 
 	return 0;
 }
 
-static void ufs_mtk_fixup_dev_quirks(struct ufs_hba *hba)
+static void ufs_mtk_abort_handler(struct ufs_hba *hba, int tag,
+				  char *file, int line)
 {
-	struct ufs_dev_info *dev_info = &hba->dev_info;
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+#ifdef CONFIG_MTK_AEE_FEATURE
+	u8 cmd = 0;
 
-	/*
-	 * If VCC setting is no yet enable,
-	 * setting VCC by ufs_mtk_fixup_vcc_regulator.
-	 */
-	if (!hba->vreg_info.vcc)
-		ufs_mtk_fixup_vcc_regulator(hba);
+	if (hba->lrb[tag].cmd)
+		cmd = hba->lrb[tag].cmd->cmnd[0];
 
-	ufshcd_fixup_dev_quirks(hba, ufs_mtk_dev_fixups);
-
-	if (dev_info->wmanufacturerid == UFS_VENDOR_MICRON)
-		host->caps |= UFS_MTK_CAP_BROKEN_VCC;
-
-	if (STR_PRFX_EQUAL("H9HQ15AFAMBDAR", dev_info->model))
-		host->caps |= UFS_MTK_CAP_BROKEN_VCC | UFS_MTK_CAP_FORCE_VSx_LPM;
-
-	if (ufs_mtk_is_delay_after_vcc_off(hba) && hba->vreg_info.vcc) {
-		/*
-		 * Always delay 5ms after VCC off.
-		 */
-		hba->dev_quirks |= UFS_DEVICE_QUIRK_DELAY_AFTER_LPM;
-	}
-
-	if (ufs_mtk_is_broken_vcc(hba) && hba->vreg_info.vcc &&
-	    (hba->dev_quirks & UFS_DEVICE_QUIRK_DELAY_AFTER_LPM)) {
-		hba->vreg_info.vcc->always_on = true;
-		/*
-		 * VCC will be kept always-on thus we don't
-		 * need any delay during regulator operations
-		 */
-		hba->dev_quirks &= ~(UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM |
-			UFS_DEVICE_QUIRK_DELAY_AFTER_LPM);
-	}
-
-	ufs_mtk_install_tracepoints(hba);
-
-#if defined(CONFIG_UFSFEATURE)
-	if ((hba->dev_info.wmanufacturerid == UFS_VENDOR_SAMSUNG) || (hba->dev_info.wmanufacturerid == UFS_VENDOR_MICRON)) {
-		host->ufsf.hba = hba;
-		ufsf_set_init_state(ufs_mtk_get_ufsf(hba));
-	}
+	cmd_hist_disable();
+	ufs_mediatek_dbg_dump();
+	aee_kernel_warning_api(file, line, DB_OPT_FS_IO_LOG,
+		"[UFS] Command Timeout", "Command 0x%x timeout, %s:%d", cmd,
+		file, line);
+	cmd_hist_enable();
 #endif
+}
+
+static void ufs_mtk_handle_broken_auto_hibern8(struct ufs_hba *hba,
+					       unsigned long out_reqs,
+					       bool enable)
+{
+	/*
+	 * Always allow "disable" and allow "enable" in non-PM scenario
+	 * only. For PM scenario, auto-hibern8 will be enabled by core
+	 * driver, e.g., ufshcd_resume().
+	 */
+	if (!out_reqs && !hba->outstanding_tasks &&
+		(!enable || (enable && !hba->pm_op_in_progress)))
+		_ufs_mtk_auto_hibern8_update(hba, enable);
 }
 
 static void ufs_mtk_event_notify(struct ufs_hba *hba,
 				 enum ufs_event_type evt, void *data)
 {
+	static bool skip_first_dev_reset = true;
 	unsigned int val = *(u32 *)data;
 
-	trace_ufs_mtk_event(evt, val);
-
-	/*
-	 * After error handling of ufshcd_host_reset_and_restore
-	 * Bypass clear ua to send scsi command request sense, else
-	 * deadlock hang because scsi is waiting error handling done.
-	 */
-	if (evt == UFS_EVT_HOST_RESET)
-		hba->wlun_dev_clr_ua = false;
-
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
-	if (evt == UFS_EVT_ABORT && !ufs_abort_aee_count) {
-		cmd_hist_disable();
-		ufs_abort_aee_count++;
-		aee_kernel_warning_api(__FILE__,
-			__LINE__, DB_OPT_FS_IO_LOG,
-			"ufshcd_abort", "timeout at tag %d", val);
+	/* Ignore the first device reset during initialization */
+	if ((hba->lanes_per_direction == 2) &&
+	    (evt == UFS_EVT_DEV_RESET) &&
+	    skip_first_dev_reset) {
+		skip_first_dev_reset = false;
+		return;
 	}
-#endif
+
+	if ((evt == UFS_EVT_SUSPEND_ERR && val == -EAGAIN) ||
+		(evt == UFS_EVT_PERF_WARN))
+		return;
+
+	trace_ufs_mtk_event(evt, val);
 }
 
-static void ufs_mtk_auto_hibern8_disable(struct ufs_hba *hba)
+static void ufs_mtk_setup_xfer_req(struct ufs_hba *hba, int tag,
+				   bool is_scsi_cmd)
 {
-	unsigned long flags;
-	int ret;
+	struct ufshcd_lrb *lrbp;
+	struct scsi_cmnd *cmd;
 
-	/* disable auto-hibern8 */
-	spin_lock_irqsave(hba->host->host_lock, flags);
-	ufshcd_writel(hba, 0, REG_AUTO_HIBERNATE_IDLE_TIMER);
-	spin_unlock_irqrestore(hba->host->host_lock, flags);
+	if (is_scsi_cmd) {
+		lrbp = &hba->lrb[tag];
+		cmd = lrbp->cmd;
 
-	/* wait host return to idle state when auto-hibern8 off */
-	ufs_mtk_wait_idle_state(hba, 5);
+		if (!ufs_mtk_is_data_cmd(cmd->cmnd[0], false))
+			return;
 
-	ret = ufs_mtk_wait_link_state(hba, VS_LINK_UP, 100);
-	if (ret)
-		dev_warn(hba->dev, "exit h8 state fail, ret=%d\n", ret);
+		ufs_mtk_biolog_send_command(tag, cmd);
+		ufs_mtk_biolog_check(hba->outstanding_reqs | (1 << tag));
+	}
+	if (!ufs_mtk_has_broken_auto_hibern8(hba))
+		return;
+	ufs_mtk_handle_broken_auto_hibern8(hba, hba->outstanding_reqs, false);
+}
+
+static void ufs_mtk_compl_xfer_req(struct ufs_hba *hba, int tag,
+				   unsigned long completed_reqs,
+				   bool is_scsi_cmd)
+{
+	struct ufshcd_lrb *lrbp;
+	struct scsi_cmnd *cmd;
+	unsigned long req_mask;
+
+	if (is_scsi_cmd) {
+		lrbp = &hba->lrb[tag];
+		cmd = lrbp->cmd;
+
+		if (!ufs_mtk_is_data_cmd(cmd->cmnd[0], false))
+			return;
+
+		req_mask = hba->outstanding_reqs &
+			   ~(1 << tag);
+		ufs_mtk_biolog_transfer_req_compl(tag, req_mask);
+		ufs_mtk_biolog_check(req_mask);
+	}
+	if (!ufs_mtk_has_broken_auto_hibern8(hba))
+		return;
+	ufs_mtk_handle_broken_auto_hibern8(hba,
+				hba->outstanding_reqs ^ completed_reqs,
+				true);
+}
+
+static void ufs_mtk_setup_task_mgmt(struct ufs_hba *hba,
+				    int tag, u8 tm_function)
+{
+	if (!ufs_mtk_has_broken_auto_hibern8(hba))
+		return;
+	ufs_mtk_handle_broken_auto_hibern8(hba, hba->outstanding_reqs, false);
+}
+
+static void ufs_mtk_compl_task_mgmt(struct ufs_hba *hba,
+				    int tag, int err)
+{
+	if (!ufs_mtk_has_broken_auto_hibern8(hba))
+		return;
+	ufs_mtk_handle_broken_auto_hibern8(hba, hba->outstanding_reqs, true);
 }
 
 static void ufs_mtk_hibern8_notify(struct ufs_hba *hba, enum uic_cmd_dme cmd,
-				    enum ufs_notify_change_status status)
+				   enum ufs_notify_change_status status)
 {
-	if (!ufshcd_is_auto_hibern8_supported(hba))
+	int ret;
+
+	if (!ufs_mtk_has_broken_auto_hibern8(hba))
 		return;
 
-	if (status == PRE_CHANGE && cmd == UIC_CMD_DME_HIBER_ENTER)
-		ufs_mtk_auto_hibern8_disable(hba);
+	if (cmd == UIC_CMD_DME_HIBER_ENTER && status == PRE_CHANGE) {
+		ufs_mtk_auto_hibern8_update(hba, false);
 
-	if (status == POST_CHANGE && cmd == UIC_CMD_DME_HIBER_ENTER &&
-		hba->dev_info.wmanufacturerid == UFS_VENDOR_MICRON)
-		usleep_range(5000, 5100);
+		ret = ufs_mtk_wait_link_state(hba, VS_LINK_UP, 100);
+		if (ret)
+			ufshcd_link_recovery(hba);
+	}
 }
 
-void ufs_mtk_setup_task_mgmt(struct ufs_hba *hba, int tag, u8 tm_function)
-{
-#if defined(CONFIG_UFSFEATURE)
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
+static bool ufs_mtk_has_vcc_always_on(struct ufs_hba *hba) {
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
 
-	if (ufsf->hba && (tm_function == UFS_LOGICAL_RESET))
-		ufsf_prepare_reset_lu(ufsf);
-#endif
+	return (host && host->cfg
+		&& (host->cfg->quirks & UFS_MTK_HOST_QUIRK_UFS_VCC_ALWAYS_ON));
 }
 
-/*
+static bool ufs_mtk_has_ufshci_perf_heuristic(struct ufs_hba *hba) {
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+
+	return (host && host->cfg
+		&& (host->cfg->quirks & UFS_MTK_HOST_QUIRK_UFS_HCI_PERF_HEURISTIC));
+}
+
+/**
  * struct ufs_hba_mtk_vops - UFS MTK specific variant operations
  *
  * The variant operations configure the necessary controller and PHY
  * handshake during initialization.
  */
-static const struct ufs_hba_variant_ops ufs_hba_mtk_vops = {
+static struct ufs_hba_variant_ops ufs_hba_mtk_vops = {
 	.name                = "mediatek.ufshci",
 	.init                = ufs_mtk_init,
-	.get_ufs_hci_version = ufs_mtk_get_ufs_hci_version,
+	.exit                = ufs_mtk_exit,
 	.setup_clocks        = ufs_mtk_setup_clocks,
-	.setup_regulators    = ufs_mtk_setup_regulators,
 	.hce_enable_notify   = ufs_mtk_hce_enable_notify,
 	.link_startup_notify = ufs_mtk_link_startup_notify,
 	.pwr_change_notify   = ufs_mtk_pwr_change_notify,
+	.setup_xfer_req      = ufs_mtk_setup_xfer_req,
+	.compl_xfer_req      = ufs_mtk_compl_xfer_req,
+	.setup_task_mgmt     = ufs_mtk_setup_task_mgmt,
+	.compl_task_mgmt     = ufs_mtk_compl_task_mgmt,
 	.hibern8_notify      = ufs_mtk_hibern8_notify,
 	.apply_dev_quirks    = ufs_mtk_apply_dev_quirks,
-	.fixup_dev_quirks    = ufs_mtk_fixup_dev_quirks,
 	.suspend             = ufs_mtk_suspend,
 	.resume              = ufs_mtk_resume,
 	.dbg_register_dump   = ufs_mtk_dbg_register_dump,
 	.device_reset        = ufs_mtk_device_reset,
+	.abort_handler       = ufs_mtk_abort_handler,
 	.event_notify        = ufs_mtk_event_notify,
-	.setup_task_mgmt     = ufs_mtk_setup_task_mgmt,
+	.has_vcc_always_on   = ufs_mtk_has_vcc_always_on,
+	.has_ufshci_perf_heuristic = ufs_mtk_has_ufshci_perf_heuristic,
 };
+
+struct tag_bootmode {
+		u32 size;
+		u32 tag;
+		u32 bootmode;
+		u32 boottype;
+};
+
+unsigned int ufs_mtk_get_boot_type(void)
+{
+	struct tag_bootmode *tags = NULL;
+	struct device_node *node = NULL;
+	unsigned long size = 0;
+	int ret = BOOTDEV_UFS;
+
+	node = of_find_node_by_path("/chosen");
+	if (!node)
+		node = of_find_node_by_path("/chosen@0");
+	if (node) {
+		tags = (struct tag_bootmode *)of_get_property(node,
+				"atag,boot", (int *)&size);
+	} else
+		pr_notice("[%s] of_chosen not found\n", __func__);
+
+	if (tags) {
+		ret = tags->boottype;
+		if ((ret > 2) || (ret < 0))
+			ret = BOOTDEV_SDMMC;
+	} else {
+		pr_notice("[%s] 'atag,boot' is not found\n", __func__);
+	}
+
+	return ret;
+}
 
 /**
  * ufs_mtk_probe - probe routine of the driver
@@ -2369,71 +1992,27 @@ static const struct ufs_hba_variant_ops ufs_hba_mtk_vops = {
 static int ufs_mtk_probe(struct platform_device *pdev)
 {
 	int err;
+	int boot_type;
 	struct device *dev = &pdev->dev;
-	struct device_node *reset_node;
-	struct platform_device *reset_pdev;
-	struct device_link *link;
-	struct ufs_hba *hba;
 
-	reset_node = of_find_compatible_node(NULL, NULL,
-					     "ti,syscon-reset");
-	if (!reset_node) {
-		dev_notice(dev, "find ti,syscon-reset fail\n");
-		goto skip_reset;
-	}
-	reset_pdev = of_find_device_by_node(reset_node);
-	if (!reset_pdev) {
-		dev_notice(dev, "find reset_pdev fail\n");
-		goto skip_reset;
-	}
-	link = device_link_add(dev, &reset_pdev->dev,
-		DL_FLAG_AUTOPROBE_CONSUMER);
-	if (!link) {
-		dev_notice(dev, "add reset device_link fail\n");
-		goto skip_reset;
-	}
-	/* supplier is not probed */
-	if (link->status == DL_STATE_DORMANT) {
-		err = -EPROBE_DEFER;
-		goto out;
-	}
+	/* Add get_boot_type check and return ENODEV if not ufs boot */
+	boot_type = ufs_mtk_get_boot_type();
+	if (boot_type != BOOTDEV_UFS)
+		return -ENODEV;
 
-skip_reset:
 	/* perform generic probe */
 	err = ufshcd_pltfrm_init(pdev, &ufs_hba_mtk_vops);
-
-	if (err) {
+	if (err)
 		dev_info(dev, "probe failed %d\n", err);
-		goto out;
-	}
 
-	/* set affinity to cpu3 */
-	hba = platform_get_drvdata(pdev);
-	if (hba && hba->irq)
-		irq_set_affinity_hint(hba->irq, get_cpu_mask(3));
-
-	/*
-	 * Because the default power setting of VSx (the upper layer of
-	 * VCCQ/VCCQ2) is HWLP, we need to prevent VCCQ/VCCQ2 from
-	 * entering LPM.
-	 */
-	ufs_mtk_ctrl_dev_pwr(hba, true, true);
-
-out:
-
-	of_node_put(reset_node);
 	return err;
 }
 
-#if defined(CONFIG_UFSFEATURE)
-static void ufs_mtk_remove_ufsf(struct ufs_hba *hba)
+struct ufs_hba *ufs_mtk_get_hba(void)
 {
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	if (ufsf->hba)
-		ufsf_remove(ufsf);
+	return ufs_mtk_hba;
 }
-#endif
+EXPORT_SYMBOL_GPL(ufs_mtk_get_hba);
 
 /**
  * ufs_mtk_remove - set driver_data of the device to NULL
@@ -2443,276 +2022,32 @@ static void ufs_mtk_remove_ufsf(struct ufs_hba *hba)
  */
 static int ufs_mtk_remove(struct platform_device *pdev)
 {
-	struct ufs_hba *hba = platform_get_drvdata(pdev);
+	struct ufs_hba *hba =  platform_get_drvdata(pdev);
 
 	pm_runtime_get_sync(&(pdev)->dev);
-
-#if defined(CONFIG_UFSFEATURE)
-	ufs_mtk_remove_ufsf(hba);
-#endif
-
 	ufshcd_remove(hba);
 	ufs_mtk_biolog_exit();
-	ufs_mtk_uninstall_tracepoints();
 	return 0;
 }
 
-int ufs_mtk_pltfrm_suspend(struct device *dev)
-{
-	int ret;
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufs_mtk_host *host;
-#if defined(CONFIG_UFSFEATURE)
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-#endif
-
-	host = ufshcd_get_variant(hba);
-	if (down_trylock(&host->rpmb_sem))
-		return -EBUSY;
-
-#if defined(CONFIG_UFSFEATURE)
-	if (ufsf->hba)
-		ufsf_suspend(ufsf);
-#endif
-
-	/* Check if shutting down */
-	if (!ufshcd_is_user_access_allowed(hba)) {
-		ret = -EBUSY;
-		goto out;
-	}
-
-	if (ufshcd_is_auto_hibern8_supported(hba)) {
-		ufshcd_hold(hba, false);
-		ufs_mtk_auto_hibern8_disable(hba);
-		ufshcd_release(hba);
-	}
-
-	ret = ufshcd_pltfrm_suspend(dev);
-
-	if (!ret)
-		ufs_mtk_ctrl_dev_pwr(hba, false, false);
-out:
-
-#if defined(CONFIG_UFSFEATURE)
-	/* We assume link is off */
-	if (ret && ufsf)
-		ufsf_resume(ufsf, true);
-#endif
-	if (ret)
-		up(&host->rpmb_sem);
-
-	return ret;
-}
-
-int ufs_mtk_pltfrm_resume(struct device *dev)
-{
-	int ret;
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufs_mtk_host *host;
-#if defined(CONFIG_UFSFEATURE)
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-	bool is_link_off = ufshcd_is_link_off(hba);
-#endif
-
-	ufs_mtk_ctrl_dev_pwr(hba, true, false);
-
-	ret = ufshcd_pltfrm_resume(dev);
-
-	if (ret)
-		ufs_mtk_ctrl_dev_pwr(hba, false, false);
-
-#if defined(CONFIG_UFSFEATURE)
-	if (!ret && ufsf->hba)
-		ufsf_resume(ufsf, is_link_off);
-#endif
-
-	host = ufshcd_get_variant(hba);
-	if (!ret)
-		up(&host->rpmb_sem);
-
-	return ret;
-}
-
-int ufs_mtk_pltfrm_runtime_suspend(struct device *dev)
-{
-	int ret;
-#if defined(CONFIG_UFSFEATURE)
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	if (ufsf->hba)
-		ufsf_suspend(ufsf);
-#endif
-
-	if (ufshcd_is_auto_hibern8_supported(hba)) {
-		ufshcd_hold(hba, false);
-		ufs_mtk_auto_hibern8_disable(hba);
-		ufshcd_release(hba);
-	}
-
-	ret = ufshcd_pltfrm_runtime_suspend(dev);
-
-	if (!ret)
-		ufs_mtk_ctrl_dev_pwr(hba, false, false);
-
-#if defined(CONFIG_UFSFEATURE)
-	/* We assume link is off */
-	if (ret && ufsf->hba)
-		ufsf_resume(ufsf, true);
-#endif
-
-	return ret;
-}
-
-int ufs_mtk_pltfrm_runtime_resume(struct device *dev)
-{
-	int ret;
-#if defined(CONFIG_UFSFEATURE)
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-	bool is_link_off = ufshcd_is_link_off(hba);
-#endif
-
-	ufs_mtk_ctrl_dev_pwr(hba, true, false);
-
-	ret = ufshcd_pltfrm_runtime_resume(dev);
-
-	if (ret)
-		ufs_mtk_ctrl_dev_pwr(hba, false, false);
-
-#if defined(CONFIG_UFSFEATURE)
-	if (!ret && ufsf->hba)
-		ufsf_resume(ufsf, is_link_off);
-#endif
-
-	return ret;
-}
-
-void ufs_mtk_shutdown(struct platform_device *pdev)
-{
-	struct device *dev = &pdev->dev;
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct scsi_device *sdev;
-
-#if defined(CONFIG_UFSFEATURE)
-	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
-
-	if (ufsf->hba)
-		ufsf_suspend(ufsf);
-#endif
-
-	/*
-	 * Quiesce all SCSI devices to prevent any non-PM requests sending
-	 * from block layer during and after shutdown.
-	 *
-	 * Note. Using scsi_autopm_get_device() instead of pm_runtime_disable()
-	 * is to prevent noisy message by below checking,
-	 * WARN_ON_ONCE(sdev->quiesced_by && sdev->quiesced_by != current);
-	 * This warning shows up if we try to quiesce a runtime-suspended
-	 * SCSI device. This is possible during our new shutdown flow.
-	 * Using scsi_autopm_get_device() to resume all SCSI devices first
-	 * can prevent it.
-	 */
-	shost_for_each_device(sdev, hba->host)
-		scsi_device_quiesce(sdev);
-
-
-	/* Alaways shutdown even in case of error */
-	ufshcd_pltfrm_shutdown(pdev);
-}
-
 static const struct dev_pm_ops ufs_mtk_pm_ops = {
-	.suspend         = ufs_mtk_pltfrm_suspend,
-	.resume          = ufs_mtk_pltfrm_resume,
-	.runtime_suspend = ufs_mtk_pltfrm_runtime_suspend,
-	.runtime_resume  = ufs_mtk_pltfrm_runtime_resume,
+	.suspend         = ufshcd_pltfrm_suspend,
+	.resume          = ufshcd_pltfrm_resume,
+	.runtime_suspend = ufshcd_pltfrm_runtime_suspend,
+	.runtime_resume  = ufshcd_pltfrm_runtime_resume,
 	.runtime_idle    = ufshcd_pltfrm_runtime_idle,
 };
 
 static struct platform_driver ufs_mtk_pltform = {
 	.probe      = ufs_mtk_probe,
 	.remove     = ufs_mtk_remove,
-	.shutdown   = ufs_mtk_shutdown,
+	.shutdown   = ufshcd_pltfrm_shutdown,
 	.driver = {
 		.name   = "ufshcd-mtk",
 		.pm     = &ufs_mtk_pm_ops,
 		.of_match_table = ufs_mtk_of_match,
 	},
 };
-
-#if defined(CONFIG_UFSFEATURE)
-static int get_storage_info(struct ufs_hba *hba)
-{
-    int ret = 0;
-    struct property *p;
-    struct device_node *n;
-    struct mmi_storage_info *info;
-
-    n = of_find_node_by_path("/chosen/mmi,storage");
-    if (n == NULL) {
-        ret = 1;
-        goto err;
-    }
-
-    info = kzalloc(sizeof(struct mmi_storage_info), GFP_KERNEL);
-    if (!info) {
-        dev_err(hba->dev,"%s: failed to allocate space for mmi_storage_info\n",
-           __func__);
-        ret = 1;
-        goto err;
-    }
-
-    for_each_property_of_node(n, p) {
-        if (!strcmp(p->name, "type") && p->value)
-            strlcpy(info->type, (char *)p->value, sizeof(info->type));
-        if (!strcmp(p->name, "size") && p->value)
-            strlcpy(info->size, (char *)p->value, sizeof(info->size));
-        if (!strcmp(p->name, "manufacturer") && p->value)
-            strlcpy(info->card_manufacturer, (char *)p->value, sizeof(info->card_manufacturer));
-        if (!strcmp(p->name, "product") && p->value)
-            strlcpy(info->product_name, (char *)p->value, sizeof(info->product_name));
-        if (!strcmp(p->name, "firmware") && p->value)
-            strlcpy(info->firmware_version, (char *)p->value, sizeof(info->firmware_version));
-    }
-
-    of_node_put(n);
-
-    dev_info(hba->dev, "manufacturer parsed from choosen is %s\n",info->card_manufacturer);
-    strncpy(storage_mfrid, info->card_manufacturer, sizeof(info->card_manufacturer));
-err:
-        return ret;
-}
-
-static int get_dram_info(struct ufs_hba *hba)
-{
-         int ret = -1;
-         struct device_node *n;
-         struct mmi_ddr_info *ddr_info;
-
-		ddr_info = kzalloc(sizeof(struct mmi_ddr_info), GFP_KERNEL);
-        if (!ddr_info) {
-                pr_err("%s: failed to allocate space for mmi_ddr_info\n", __func__);
-                goto err;
-        }
-
-        n = of_find_node_by_path("/chosen/mmi,ram");
-       if (n != NULL) {
-               of_property_read_u32(n, "mr5", &ddr_info->mr5);
-                of_property_read_u32(n, "mr6", &ddr_info->mr6);
-                of_property_read_u32(n, "mr7", &ddr_info->mr7);
-                of_property_read_u32(n, "mr8", &ddr_info->mr8);
-                of_property_read_u32(n, "type", &ddr_info->type);
-                of_property_read_u32(n, "ramsize", &ddr_info->ramsize);
-                of_node_put(n);
-        }
-
-        ram_size = (ddr_info->ramsize / 1024);
-        dev_info(hba->dev, "ram_size parsed from chosen is %d\n",ram_size);
-        return ram_size;
-err:
-        return ret;
-}
-#endif
 
 MODULE_AUTHOR("Stanley Chu <stanley.chu@mediatek.com>");
 MODULE_AUTHOR("Peter Wang <peter.wang@mediatek.com>");

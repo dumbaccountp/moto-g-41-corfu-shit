@@ -138,11 +138,11 @@
  * Test Mode Selectors
  * See USB 2.0 spec Table 9-7
  */
-#define	USB_TEST_J		1
-#define	USB_TEST_K		2
-#define	USB_TEST_SE0_NAK	3
-#define	USB_TEST_PACKET		4
-#define	USB_TEST_FORCE_ENABLE	5
+#define	TEST_J		1
+#define	TEST_K		2
+#define	TEST_SE0_NAK	3
+#define	TEST_PACKET	4
+#define	TEST_FORCE_EN	5
 
 /* Status Type */
 #define USB_STATUS_TYPE_STANDARD	0
@@ -326,10 +326,6 @@ struct usb_device_descriptor {
 #define USB_CLASS_CONTENT_SEC		0x0d	/* content security */
 #define USB_CLASS_VIDEO			0x0e
 #define USB_CLASS_WIRELESS_CONTROLLER	0xe0
-#define USB_CLASS_PERSONAL_HEALTHCARE	0x0f
-#define USB_CLASS_AUDIO_VIDEO		0x10
-#define USB_CLASS_BILLBOARD		0x11
-#define USB_CLASS_USB_TYPE_C_BRIDGE	0x12
 #define USB_CLASS_MISC			0xef
 #define USB_CLASS_APP_SPEC		0xfe
 #define USB_CLASS_VENDOR_SPEC		0xff
@@ -901,8 +897,6 @@ struct usb_ext_cap_descriptor {		/* Link Power Management */
 #define USB_BESL_SUPPORT		(1 << 2)	/* supports BESL */
 #define USB_BESL_BASELINE_VALID		(1 << 3)	/* Baseline BESL valid*/
 #define USB_BESL_DEEP_VALID		(1 << 4)	/* Deep BESL valid */
-#define USB_SET_BESL_BASELINE(p)	(((p) & 0xf) << 8)
-#define USB_SET_BESL_DEEP(p)		(((p) & 0xf) << 12)
 #define USB_GET_BESL_BASELINE(p)	(((p) & (0xf << 8)) >> 8)
 #define USB_GET_BESL_DEEP(p)		(((p) & (0xf << 12)) >> 12)
 } __attribute__((packed));
@@ -968,22 +962,9 @@ struct usb_ssp_cap_descriptor {
 	__le32 bmSublinkSpeedAttr[1]; /* list of sublink speed attrib entries */
 #define USB_SSP_SUBLINK_SPEED_SSID	(0xf)		/* sublink speed ID */
 #define USB_SSP_SUBLINK_SPEED_LSE	(0x3 << 4)	/* Lanespeed exponent */
-#define USB_SSP_SUBLINK_SPEED_LSE_BPS		0
-#define USB_SSP_SUBLINK_SPEED_LSE_KBPS		1
-#define USB_SSP_SUBLINK_SPEED_LSE_MBPS		2
-#define USB_SSP_SUBLINK_SPEED_LSE_GBPS		3
-
 #define USB_SSP_SUBLINK_SPEED_ST	(0x3 << 6)	/* Sublink type */
-#define USB_SSP_SUBLINK_SPEED_ST_SYM_RX		0
-#define USB_SSP_SUBLINK_SPEED_ST_ASYM_RX	1
-#define USB_SSP_SUBLINK_SPEED_ST_SYM_TX		2
-#define USB_SSP_SUBLINK_SPEED_ST_ASYM_TX	3
-
 #define USB_SSP_SUBLINK_SPEED_RSVD	(0x3f << 8)	/* Reserved */
 #define USB_SSP_SUBLINK_SPEED_LP	(0x3 << 14)	/* Link protocol */
-#define USB_SSP_SUBLINK_SPEED_LP_SS		0
-#define USB_SSP_SUBLINK_SPEED_LP_SSP		1
-
 #define USB_SSP_SUBLINK_SPEED_LSM	(0xff << 16)	/* Lanespeed mantissa */
 } __attribute__((packed));
 
@@ -1102,6 +1083,26 @@ struct usb_ptm_cap_descriptor {
  * (SSAC) specified in bmAttributes[4:0]. SSAC is zero-based
  */
 #define USB_DT_USB_SSP_CAP_SIZE(ssac)	(12 + (ssac + 1) * 4)
+
+/*
+ * Configuration Summary descriptors: Defines a list of device preferred
+ * configurations. This descriptor may be used by Host software to decide
+ * which Configuration to use to obtain the desired functionality.
+ */
+#define USB_CAP_TYPE_CONFIG_SUMMARY	0x10
+#define USB_CONFIG_SUMMARY_DESC_REV	0x100
+
+struct usb_config_summary_descriptor {
+	__u8 bLength;
+	__u8 bDescriptorType;
+	__u8 bDevCapabilityType;
+	__u16 bcdVersion;
+	__u8 bClass;
+	__u8 bSubClass;
+	__u8 bProtocol;
+	__u8 bConfigurationCount;
+	__u8 bConfigurationIndex[];
+} __attribute__((packed));
 
 /*-------------------------------------------------------------------------*/
 
@@ -1242,7 +1243,7 @@ struct usb_set_sel_req {
  * As per USB compliance update, a device that is actively drawing
  * more than 100mA from USB must report itself as bus-powered in
  * the GetStatus(DEVICE) call.
- * https://compliance.usb.org/index.asp?UpdateFile=Electrical&Format=Standard#34
+ * http://compliance.usb.org/index.asp?UpdateFile=Electrical&Format=Standard#34
  */
 #define USB_SELF_POWER_VBUS_MAX_DRAW		100
 

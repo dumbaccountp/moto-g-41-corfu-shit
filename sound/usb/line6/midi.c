@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Line 6 Linux USB driver
  *
  * Copyright (C) 2004-2010 Markus Grabner (grabner@icg.tugraz.at)
+ *
+ *	This program is free software; you can redistribute it and/or
+ *	modify it under the terms of the GNU General Public License as
+ *	published by the Free Software Foundation, version 2.
+ *
  */
 
 #include <linux/slab.h>
@@ -44,8 +48,7 @@ static void line6_midi_transmit(struct snd_rawmidi_substream *substream)
 	int req, done;
 
 	for (;;) {
-		req = min3(line6_midibuf_bytes_free(mb), line6->max_packet_size,
-			   LINE6_FALLBACK_MAXPACKETSIZE);
+		req = min(line6_midibuf_bytes_free(mb), line6->max_packet_size);
 		done = snd_rawmidi_transmit_peek(substream, chunk, req);
 
 		if (done == 0)
@@ -57,8 +60,7 @@ static void line6_midi_transmit(struct snd_rawmidi_substream *substream)
 
 	for (;;) {
 		done = line6_midibuf_read(mb, chunk,
-					  LINE6_FALLBACK_MAXPACKETSIZE,
-					  LINE6_MIDIBUF_READ_TX);
+					  LINE6_FALLBACK_MAXPACKETSIZE);
 
 		if (done == 0)
 			break;

@@ -7,7 +7,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/io.h>
+#include <asm-generic/io.h>
 
 #include "devapc-mt6833.h"
 
@@ -56,11 +56,11 @@ static struct INFRAAXI_ID_INFO infra_mi_id_to_master[] = {
 	{"HWCCF",             { 0, 0, 1, 0,	0, 1, 0, 0,	1, 1, 2, 2,	0, 0 } },
 	{"DX_CC",             { 0, 0, 1, 0,	1, 1, 0, 2,	2, 2, 2, 0,	0, 0 } },
 	{"GCE",               { 0, 0, 1, 0,	0, 0, 1, 2,	2, 0, 0, 0,	0, 0 } },
-	{"MCUPM",             { 0, 0, 1, 0,	1, 0, 1, 2,	2, 2, 2, 2,	2, 0 } },
+	{"CPUEB",             { 0, 0, 1, 0,	1, 0, 1, 2,	2, 2, 2, 2,	2, 0 } },
 	{"DPMAIF",            { 0, 1, 1, 0,	2, 2, 2, 2,	0, 0, 0, 0,	0, 0 } },
 	{"SSPM",              { 0, 0, 0, 1,	2, 2, 0, 0,	0, 0, 0, 0,	0, 0 } },
 	{"UFS",               { 0, 1, 0, 1,	2, 2, 0, 0,	0, 0, 0, 0,	0, 0 } },
-	{"MCUPM",             { 0, 0, 1, 1,	2, 2, 2, 2,	2, 2, 0, 0,	0, 0 } },
+	{"CPUEB",             { 0, 0, 1, 1,	2, 2, 2, 2,	2, 2, 0, 0,	0, 0 } },
 	{"APMCU_Write",       { 1, 2, 2, 2,	2, 0, 0, 0,	0, 0, 0, 0,	0, 0 } },
 	{"APMCU_Write",       { 1, 2, 2, 2,	2, 0, 0, 1,	0, 0, 0, 0,	0, 0 } },
 	{"APMCU_Write",       { 1, 2, 2, 2,	2, 2, 2, 2,	2, 1, 0, 0,	0, 0 } },
@@ -474,6 +474,21 @@ static uint32_t mt6833_shift_group_get(int slave_type, uint32_t vio_idx)
 	return 31;
 }
 
+void devapc_catch_illegal_range(phys_addr_t phys_addr, size_t size)
+{
+	/*
+	 * Catch BROM addr mapped
+	 */
+	if (phys_addr >= 0x0 && phys_addr < SRAM_START_ADDR) {
+		pr_err(PFX "%s: %s %s:(%pa), %s:(0x%lx)\n",
+				"catch BROM address mapped!",
+				__func__, "phys_addr", &phys_addr,
+				"size", size);
+		BUG_ON(1);
+	}
+}
+EXPORT_SYMBOL(devapc_catch_illegal_range);
+
 static struct mtk_devapc_dbg_status mt6833_devapc_dbg_stat = {
 	.enable_ut = PLAT_DBG_UT_DEFAULT,
 	.enable_KE = PLAT_DBG_KE_DEFAULT,
@@ -539,7 +554,6 @@ static const uint32_t mt6833_devapc_pds[] = {
 	PD_SHIFT_STA_OFFSET,
 	PD_SHIFT_SEL_OFFSET,
 	PD_SHIFT_CON_OFFSET,
-	PD_VIO_DBG3_OFFSET,
 };
 
 static struct mtk_devapc_soc mt6833_data = {

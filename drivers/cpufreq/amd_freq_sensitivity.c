@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * amd_freq_sensitivity.c: AMD frequency sensitivity feedback powersave bias
  *                         for the ondemand governor.
@@ -6,6 +5,10 @@
  * Copyright (C) 2013 Advanced Micro Devices, Inc.
  *
  * Author: Jacob Shin <jacob.shin@amd.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -18,7 +21,6 @@
 
 #include <asm/msr.h>
 #include <asm/cpufeature.h>
-#include <asm/cpu_device_id.h>
 
 #include "cpufreq_ondemand.h"
 
@@ -109,23 +111,16 @@ static int __init amd_freq_sensitivity_init(void)
 {
 	u64 val;
 	struct pci_dev *pcidev;
-	unsigned int pci_vendor;
 
-	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD)
-		pci_vendor = PCI_VENDOR_ID_AMD;
-	else if (boot_cpu_data.x86_vendor == X86_VENDOR_HYGON)
-		pci_vendor = PCI_VENDOR_ID_HYGON;
-	else
+	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
 		return -ENODEV;
 
-	pcidev = pci_get_device(pci_vendor,
+	pcidev = pci_get_device(PCI_VENDOR_ID_AMD,
 			PCI_DEVICE_ID_AMD_KERNCZ_SMBUS, NULL);
 
 	if (!pcidev) {
-		if (!boot_cpu_has(X86_FEATURE_PROC_FEEDBACK))
+		if (!static_cpu_has(X86_FEATURE_PROC_FEEDBACK))
 			return -ENODEV;
-	} else {
-		pci_dev_put(pcidev);
 	}
 
 	if (rdmsrl_safe(MSR_AMD64_FREQ_SENSITIVITY_ACTUAL, &val))
@@ -146,8 +141,8 @@ static void __exit amd_freq_sensitivity_exit(void)
 }
 module_exit(amd_freq_sensitivity_exit);
 
-static const struct x86_cpu_id __maybe_unused amd_freq_sensitivity_ids[] = {
-	X86_MATCH_FEATURE(X86_FEATURE_PROC_FEEDBACK, NULL),
+static const struct x86_cpu_id amd_freq_sensitivity_ids[] = {
+	X86_FEATURE_MATCH(X86_FEATURE_PROC_FEEDBACK),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, amd_freq_sensitivity_ids);

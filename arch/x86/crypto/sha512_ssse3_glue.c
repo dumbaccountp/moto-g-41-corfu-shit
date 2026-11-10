@@ -28,15 +28,16 @@
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
 
 #include <crypto/internal/hash.h>
-#include <crypto/internal/simd.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
-#include <linux/string.h>
+#include <linux/cryptohash.h>
 #include <linux/types.h>
 #include <crypto/sha.h>
 #include <crypto/sha512_base.h>
-#include <asm/simd.h>
+#include <asm/fpu/api.h>
+
+#include <linux/string.h>
 
 asmlinkage void sha512_transform_ssse3(struct sha512_state *state,
 				       const u8 *data, int blocks);
@@ -46,7 +47,7 @@ static int sha512_update(struct shash_desc *desc, const u8 *data,
 {
 	struct sha512_state *sctx = shash_desc_ctx(desc);
 
-	if (!crypto_simd_usable() ||
+	if (!irq_fpu_usable() ||
 	    (sctx->count[0] % SHA512_BLOCK_SIZE) + len < SHA512_BLOCK_SIZE)
 		return crypto_sha512_update(desc, data, len);
 
@@ -66,7 +67,7 @@ static int sha512_update(struct shash_desc *desc, const u8 *data,
 static int sha512_finup(struct shash_desc *desc, const u8 *data,
 	      unsigned int len, u8 *out, sha512_block_fn *sha512_xform)
 {
-	if (!crypto_simd_usable())
+	if (!irq_fpu_usable())
 		return crypto_sha512_finup(desc, data, len, out);
 
 	kernel_fpu_begin();
@@ -141,6 +142,7 @@ static void unregister_sha512_ssse3(void)
 			ARRAY_SIZE(sha512_ssse3_algs));
 }
 
+#ifdef CONFIG_AS_AVX
 asmlinkage void sha512_transform_avx(struct sha512_state *state,
 				     const u8 *data, int blocks);
 static bool avx_usable(void)
@@ -216,7 +218,12 @@ static void unregister_sha512_avx(void)
 		crypto_unregister_shashes(sha512_avx_algs,
 			ARRAY_SIZE(sha512_avx_algs));
 }
+#else
+static inline int register_sha512_avx(void) { return 0; }
+static inline void unregister_sha512_avx(void) { }
+#endif
 
+#if defined(CONFIG_AS_AVX2) && defined(CONFIG_AS_AVX)
 asmlinkage void sha512_transform_rorx(struct sha512_state *state,
 				      const u8 *data, int blocks);
 
@@ -291,6 +298,10 @@ static void unregister_sha512_avx2(void)
 		crypto_unregister_shashes(sha512_avx2_algs,
 			ARRAY_SIZE(sha512_avx2_algs));
 }
+#else
+static inline int register_sha512_avx2(void) { return 0; }
+static inline void unregister_sha512_avx2(void) { }
+#endif
 
 static int __init sha512_ssse3_mod_init(void)
 {

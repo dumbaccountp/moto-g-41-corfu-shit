@@ -427,8 +427,6 @@ int mtk_ccci_handle_port_list(int status, char *name)
 	struct sk_buff *skb = NULL;
 
 	channel = mtk_ccci_request_port(name);
-	if (channel < 0)
-		return -1;
 	ret = find_port_by_channel(channel, &port);
 	if (ret)
 		return -1;
@@ -467,11 +465,13 @@ static void ccmni_queue_recv_skb(struct port_t *port, struct sk_buff *skb)
 		spin_unlock_irqrestore(&port->port_rx_list.lock, flags);
 	}
 }
-
 static int port_net_recv_skb(struct port_t *port, struct sk_buff *skb)
 {
+#if MD_GENERATION >= (6293)
 	struct lhif_header *lhif_h = (struct lhif_header *)skb->data;
-
+#else
+	struct ccci_header *ccci_h = (struct ccci_header *)skb->data;
+#endif
 	int mbim_ccmni_current = 0;
 #ifdef CCCI_SKB_TRACE
 	struct ccci_per_md *per_md_data = ccci_get_per_md_data(port->md_id);
@@ -484,22 +484,23 @@ static int port_net_recv_skb(struct port_t *port, struct sk_buff *skb)
 
 	total_time = sched_clock();
 #endif
-	if (port->hif_id == MD1_NET_HIF) {
-		skb_pull(skb, sizeof(struct lhif_header));
-		CCCI_DEBUG_LOG(port->md_id, NET,
-			"port %s recv: 0x%08X, 0x%08X, %08X, 0x%08X\n",
-			port->name, lhif_h->netif, lhif_h->f, lhif_h->flow,
-			lhif_h->pdcp_count);
-	} else {
-		struct ccci_header *ccci_h = (struct ccci_header *)skb->data;
-
-		skb_pull(skb, sizeof(struct ccci_header));
-		CCCI_DEBUG_LOG(port->md_id, NET,
-			"port %s recv: 0x%08X, 0x%08X, %08X, 0x%08X\n",
-			port->name,
-			ccci_h->data[0], ccci_h->data[1], ccci_h->channel,
-			ccci_h->reserved);
+	if (port->md_id < 0 || port->md_id >= MAX_MD_NUM) {
+		CCCI_ERROR_LOG(-1, NET, "invalid MD id=%d\n", port->md_id);
+		return -EINVAL;
 	}
+
+#if MD_GENERATION >= (6293)
+	skb_pull(skb, sizeof(struct lhif_header));
+		CCCI_DEBUG_LOG(port->md_id, NET,
+		"port %s recv: 0x%08X, 0x%08X, %08X, 0x%08X\n", port->name,
+		lhif_h->netif, lhif_h->f, lhif_h->flow, lhif_h->pdcp_count);
+#else
+	skb_pull(skb, sizeof(struct ccci_header));
+		CCCI_DEBUG_LOG(port->md_id, NET,
+		"port %s recv: 0x%08X, 0x%08X, %08X, 0x%08X\n", port->name,
+		ccci_h->data[0], ccci_h->data[1], ccci_h->channel,
+		ccci_h->reserved);
+#endif
 
 	mbim_ccmni_current = atomic_read(&mbim_ccmni_index[port->md_id]);
 	if (mbim_ccmni_current == GET_CCMNI_IDX(port)) {
@@ -556,13 +557,13 @@ static void port_net_queue_state_notify(struct port_t *port, int dir,
 			return;
 		}
 	}
-	if (state == TX_FULL) {
-		if (ccci_dpmaif_empty_query(qno) > 0) {
-			if (dir == OUT)
-				spin_unlock_irqrestore(&port->flag_lock, flags);
-			return;
-		}
+#if MD_GENERATION > (6293)
+if (state == TX_FULL && hif_empty_query(qno)) {
+		if (dir == OUT)
+			spin_unlock_irqrestore(&port->flag_lock, flags);
+		return;
 	}
+#endif
 	ccmni_ops.queue_state_callback(port->md_id,
 		GET_CCMNI_IDX(port), state, is_ack);
 

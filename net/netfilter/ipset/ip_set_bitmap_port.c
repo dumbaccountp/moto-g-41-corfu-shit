@@ -1,5 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (C) 2003-2013 Jozsef Kadlecsik <kadlec@netfilter.org> */
+/* Copyright (C) 2003-2013 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
 
 /* Kernel module implementing an IP set type: the bitmap:port type */
 
@@ -22,7 +26,7 @@
 #define IPSET_TYPE_REV_MAX	3	/* skbinfo support added */
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@netfilter.org>");
+MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
 IP_SET_MODULE_DESC("bitmap:port", IPSET_TYPE_REV_MIN, IPSET_TYPE_REV_MAX);
 MODULE_ALIAS("ip_set_bitmap:port");
 
@@ -37,7 +41,7 @@ struct bitmap_port {
 	size_t memsize;		/* members size */
 	struct timer_list gc;	/* garbage collection */
 	struct ip_set *set;	/* attached to this ip_set */
-	unsigned char extensions[]	/* data extensions */
+	unsigned char extensions[0]	/* data extensions */
 		__aligned(__alignof__(u64));
 };
 
@@ -46,7 +50,7 @@ struct bitmap_port_adt_elem {
 	u16 id;
 };
 
-static u16
+static inline u16
 port_to_id(const struct bitmap_port *m, u16 port)
 {
 	return port - m->first_port;
@@ -54,34 +58,34 @@ port_to_id(const struct bitmap_port *m, u16 port)
 
 /* Common functions */
 
-static int
+static inline int
 bitmap_port_do_test(const struct bitmap_port_adt_elem *e,
 		    const struct bitmap_port *map, size_t dsize)
 {
 	return !!test_bit(e->id, map->members);
 }
 
-static int
+static inline int
 bitmap_port_gc_test(u16 id, const struct bitmap_port *map, size_t dsize)
 {
 	return !!test_bit(id, map->members);
 }
 
-static int
+static inline int
 bitmap_port_do_add(const struct bitmap_port_adt_elem *e,
 		   struct bitmap_port *map, u32 flags, size_t dsize)
 {
 	return !!test_bit(e->id, map->members);
 }
 
-static int
+static inline int
 bitmap_port_do_del(const struct bitmap_port_adt_elem *e,
 		   struct bitmap_port *map)
 {
 	return !test_and_clear_bit(e->id, map->members);
 }
 
-static int
+static inline int
 bitmap_port_do_list(struct sk_buff *skb, const struct bitmap_port *map, u32 id,
 		    size_t dsize)
 {
@@ -89,38 +93,11 @@ bitmap_port_do_list(struct sk_buff *skb, const struct bitmap_port *map, u32 id,
 			     htons(map->first_port + id));
 }
 
-static int
+static inline int
 bitmap_port_do_head(struct sk_buff *skb, const struct bitmap_port *map)
 {
 	return nla_put_net16(skb, IPSET_ATTR_PORT, htons(map->first_port)) ||
 	       nla_put_net16(skb, IPSET_ATTR_PORT_TO, htons(map->last_port));
-}
-
-static bool
-ip_set_get_ip_port(const struct sk_buff *skb, u8 pf, bool src, __be16 *port)
-{
-	bool ret;
-	u8 proto;
-
-	switch (pf) {
-	case NFPROTO_IPV4:
-		ret = ip_set_get_ip4_port(skb, src, port, &proto);
-		break;
-	case NFPROTO_IPV6:
-		ret = ip_set_get_ip6_port(skb, src, port, &proto);
-		break;
-	default:
-		return false;
-	}
-	if (!ret)
-		return ret;
-	switch (proto) {
-	case IPPROTO_TCP:
-	case IPPROTO_UDP:
-		return true;
-	default:
-		return false;
-	}
 }
 
 static int
@@ -274,7 +251,7 @@ bitmap_port_create(struct net *net, struct ip_set *set, struct nlattr *tb[],
 	map->memsize = BITS_TO_LONGS(elements) * sizeof(unsigned long);
 	set->variant = &bitmap_port;
 	if (!init_map_port(set, map, first_port, last_port)) {
-		ip_set_free(map);
+		kfree(map);
 		return -ENOMEM;
 	}
 	if (tb[IPSET_ATTR_TIMEOUT]) {

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  * Author: Owen Chen <owen.chen@mediatek.com>
  */
 
 #include <linux/clk-provider.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 
 #include "clk-mtk.h"
 #include "clk-gate.h"
@@ -22,14 +24,14 @@ static const struct mtk_gate_regs mipi0a_cg_regs = {
 		.id = _id,				\
 		.name = _name,				\
 		.parent_name = _parent,			\
-		.regs = &mipi0a_cg_regs,			\
+		.regs = &mipi0a_cg_regs,		\
 		.shift = _shift,			\
 		.ops = &mtk_clk_gate_ops_no_setclr_inv,	\
 	}
 
-static const struct mtk_gate mipi0a_clks[] = {
+static const struct mtk_gate mipi0a_clks[] __initconst = {
 	GATE_MIPI0A(CLK_MIPI0A_CSR_CSI_EN_0A,
-		    "mipi0a_csr_0a", "f_fseninf_ck", 1),
+		"mipi0a_csr_0a", "f_fseninf_ck", 1),
 };
 
 static int clk_mt6765_mipi0a_probe(struct platform_device *pdev)
@@ -39,15 +41,19 @@ static int clk_mt6765_mipi0a_probe(struct platform_device *pdev)
 	struct device_node *node = pdev->dev.of_node;
 
 	clk_data = mtk_alloc_clk_data(CLK_MIPI0A_NR_CLK);
+	if (!clk_data)
+		return -ENOMEM;
 
 	mtk_clk_register_gates(node, mipi0a_clks,
 			       ARRAY_SIZE(mipi0a_clks), clk_data);
 
 	r = of_clk_add_provider(node, of_clk_src_onecell_get, clk_data);
 
-	if (r)
+	if (r) {
+		kfree(clk_data);
 		pr_err("%s(): could not register clock provider: %d\n",
-		       __func__, r);
+				__func__, r);
+	}
 
 	return r;
 }
@@ -65,4 +71,15 @@ static struct platform_driver clk_mt6765_mipi0a_drv = {
 	},
 };
 
-builtin_platform_driver(clk_mt6765_mipi0a_drv);
+static int __init clk_mt6765_mipi0a_init(void)
+{
+	return platform_driver_register(&clk_mt6765_mipi0a_drv);
+}
+
+static void __exit clk_mt6765_mipi0a_exit(void)
+{
+}
+
+postcore_initcall(clk_mt6765_mipi0a_init);
+module_exit(clk_mt6765_mipi0a_exit);
+MODULE_LICENSE("GPL");

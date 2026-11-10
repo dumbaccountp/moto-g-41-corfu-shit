@@ -322,28 +322,11 @@ static bool validate_desc(unsigned char *hdr, int protocol,
 
 bool snd_usb_validate_audio_desc(void *p, int protocol)
 {
-	unsigned char *c = p;
-	bool valid;
-
-	valid = validate_desc(p, protocol, audio_validators);
-	if (!valid && snd_usb_skip_validation) {
-		print_hex_dump(KERN_ERR, "USB-audio: buggy audio desc: ",
-			       DUMP_PREFIX_NONE, 16, 1, c, c[0], true);
-		valid = true;
-	}
-	return valid;
+	return validate_desc(p, protocol, audio_validators);
 }
 
 bool snd_usb_validate_midi_desc(void *p)
 {
-	unsigned char *c = p;
-	bool valid;
-
-	valid = validate_desc(p, UAC_VERSION_1, midi_validators);
-	if (!valid && snd_usb_skip_validation) {
-		print_hex_dump(KERN_ERR, "USB-audio: buggy midi desc: ",
-			       DUMP_PREFIX_NONE, 16, 1, c, c[0], true);
-		valid = true;
-	}
-	return valid;
+	return validate_desc(p, UAC_VERSION_1, midi_validators);
 }
+

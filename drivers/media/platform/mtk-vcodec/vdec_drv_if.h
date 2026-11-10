@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016 MediaTek Inc.
- * Author: PC Chen <pc.chen@mediatek.com>
- *                 Tiffany Lin <tiffany.lin@mediatek.com>
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef _VDEC_DRV_IF_H_
@@ -29,6 +27,18 @@ struct vdec_inst {
 };
 
 /**
+ * struct vdec_fb_status  - decoder frame buffer status
+ * @FB_ST_NORMAL        : initial state
+ * @FB_ST_DISPLAY       : frmae buffer is ready to be displayed
+ * @FB_ST_FREE          : frame buffer is not used by decoder any more
+ */
+enum vdec_fb_status {
+	FB_ST_NORMAL            = 0,
+	FB_ST_DISPLAY           = (1 << 0),
+	FB_ST_FREE              = (1 << 1)
+};
+
+/**
  * struct vdec_fb_node  - decoder frame buffer node
  * @list        : list to hold this node
  * @fb  : point to frame buffer (vdec_fb), fb could point to frame buffer and
@@ -38,11 +48,6 @@ struct vdec_fb_node {
 	struct list_head list;
 	struct vdec_fb *fb;
 };
-
-extern struct mtk_video_fmt
-	mtk_vdec_formats[MTK_MAX_DEC_CODECS_SUPPORT];
-extern struct mtk_codec_framesizes
-	mtk_vdec_framesizes[MTK_MAX_DEC_CODECS_SUPPORT];
 
 /**
  * vdec_if_init() - initialize decode driver

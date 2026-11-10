@@ -189,7 +189,7 @@ pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
 	return pte;
 }
 
-pte_t *huge_pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
+pte_t *huge_pte_alloc(struct mm_struct *mm,
 			unsigned long addr, unsigned long sz)
 {
 	pgd_t *pgdp;
@@ -254,15 +254,25 @@ follow_huge_pud(struct mm_struct *mm, unsigned long address,
 	return pud_page(*pud) + ((address & ~PUD_MASK) >> PAGE_SHIFT);
 }
 
-bool __init arch_hugetlb_valid_size(unsigned long size)
+static __init int setup_hugepagesz(char *opt)
 {
-	if (MACHINE_HAS_EDAT1 && size == PMD_SIZE)
-		return true;
-	else if (MACHINE_HAS_EDAT2 && size == PUD_SIZE)
-		return true;
-	else
-		return false;
+	unsigned long size;
+	char *string = opt;
+
+	size = memparse(opt, &opt);
+	if (MACHINE_HAS_EDAT1 && size == PMD_SIZE) {
+		hugetlb_add_hstate(PMD_SHIFT - PAGE_SHIFT);
+	} else if (MACHINE_HAS_EDAT2 && size == PUD_SIZE) {
+		hugetlb_add_hstate(PUD_SHIFT - PAGE_SHIFT);
+	} else {
+		hugetlb_bad_size();
+		pr_err("hugepagesz= specifies an unsupported page size %s\n",
+			string);
+		return 0;
+	}
+	return 1;
 }
+__setup("hugepagesz=", setup_hugepagesz);
 
 static unsigned long hugetlb_get_unmapped_area_bottomup(struct file *file,
 		unsigned long addr, unsigned long len,
@@ -319,6 +329,7 @@ unsigned long hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 	struct hstate *h = hstate_file(file);
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
+	int rc;
 
 	if (len & ~huge_page_mask(h))
 		return -EINVAL;
@@ -345,9 +356,15 @@ unsigned long hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 	else
 		addr = hugetlb_get_unmapped_area_topdown(file, addr, len,
 				pgoff, flags);
-	if (offset_in_page(addr))
+	if (addr & ~PAGE_MASK)
 		return addr;
 
 check_asce_limit:
-	return check_asce_limit(mm, addr, len);
+	if (addr + len > current->mm->context.asce_limit &&
+	    addr + len <= TASK_SIZE) {
+		rc = crst_table_upgrade(mm, addr + len);
+		if (rc)
+			return (unsigned long) rc;
+	}
+	return addr;
 }

@@ -1,6 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Freescale Semiconductor, Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/cpuidle.h>
@@ -14,24 +17,22 @@
 #include "hardware.h"
 
 static int num_idle_cpus = 0;
-static DEFINE_RAW_SPINLOCK(cpuidle_lock);
+static DEFINE_SPINLOCK(cpuidle_lock);
 
 static int imx6q_enter_wait(struct cpuidle_device *dev,
 			    struct cpuidle_driver *drv, int index)
 {
-	raw_spin_lock(&cpuidle_lock);
+	spin_lock(&cpuidle_lock);
 	if (++num_idle_cpus == num_online_cpus())
 		imx6_set_lpm(WAIT_UNCLOCKED);
-	raw_spin_unlock(&cpuidle_lock);
+	spin_unlock(&cpuidle_lock);
 
-	rcu_idle_enter();
 	cpu_do_idle();
-	rcu_idle_exit();
 
-	raw_spin_lock(&cpuidle_lock);
+	spin_lock(&cpuidle_lock);
 	if (num_idle_cpus-- == num_online_cpus())
 		imx6_set_lpm(WAIT_CLOCKED);
-	raw_spin_unlock(&cpuidle_lock);
+	spin_unlock(&cpuidle_lock);
 
 	return index;
 }
@@ -46,7 +47,7 @@ static struct cpuidle_driver imx6q_cpuidle_driver = {
 		{
 			.exit_latency = 50,
 			.target_residency = 75,
-			.flags = CPUIDLE_FLAG_TIMER_STOP | CPUIDLE_FLAG_RCU_IDLE,
+			.flags = CPUIDLE_FLAG_TIMER_STOP,
 			.enter = imx6q_enter_wait,
 			.name = "WAIT",
 			.desc = "Clock off",
@@ -64,13 +65,13 @@ static struct cpuidle_driver imx6q_cpuidle_driver = {
  */
 void imx6q_cpuidle_fec_irqs_used(void)
 {
-	cpuidle_driver_state_disabled(&imx6q_cpuidle_driver, 1, true);
+	imx6q_cpuidle_driver.states[1].disabled = true;
 }
 EXPORT_SYMBOL_GPL(imx6q_cpuidle_fec_irqs_used);
 
 void imx6q_cpuidle_fec_irqs_unused(void)
 {
-	cpuidle_driver_state_disabled(&imx6q_cpuidle_driver, 1, false);
+	imx6q_cpuidle_driver.states[1].disabled = false;
 }
 EXPORT_SYMBOL_GPL(imx6q_cpuidle_fec_irqs_unused);
 

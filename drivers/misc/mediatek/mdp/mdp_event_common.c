@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2015 MediaTek Inc.
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 
-#include <linux/soc/mediatek/mtk-cmdq-ext.h>
-#include "cmdq_device.h"
+#include <linux/soc/mediatek/mtk-cmdq.h>
+#include "mdp_cmdq_device.h"
 
 #define DECLAR_EVENT(event_enum, dts_name) \
 	{event_enum, #event_enum, #dts_name},

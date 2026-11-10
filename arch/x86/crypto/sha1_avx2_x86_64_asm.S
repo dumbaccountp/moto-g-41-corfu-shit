@@ -634,7 +634,7 @@ _loop3:
  * param: function's name
  */
 .macro SHA1_VECTOR_ASM  name
-	SYM_FUNC_START(\name)
+	ENTRY(\name)
 
 	push	%rbx
 	push	%r12
@@ -674,9 +674,9 @@ _loop3:
 	pop	%r12
 	pop	%rbx
 
-	RET
+	ret
 
-	SYM_FUNC_END(\name)
+	ENDPROC(\name)
 .endm
 
 .section .rodata

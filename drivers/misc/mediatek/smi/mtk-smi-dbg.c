@@ -3,6 +3,8 @@
  * Copyright (c) 2019 MediaTek Inc.
  * Author: Ming-Fan Chen <ming-fan.chen@mediatek.com>
  */
+
+#include <linux/clk.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/io.h>
@@ -14,13 +16,9 @@
 #include <linux/sched/clock.h>
 #include <linux/slab.h>
 #include <soc/mediatek/smi.h>
-#if IS_ENABLED(CONFIG_MTK_EMI)
-#include <soc/mediatek/emi.h>
-#endif
-#include "mtk_iommu.h"
-//#include <dt-bindings/memory/mtk-smi-larb-port.h>
 
 #define DRV_NAME	"mtk-smi-dbg"
+#define DBG_PRINT_NR	(5)
 
 /* LARB */
 #define SMI_LARB_STAT			(0x0)
@@ -30,7 +28,6 @@
 #define SMI_LARB_CON			(0x10)
 #define SMI_LARB_CON_SET		(0x14)
 #define SMI_LARB_CON_CLR		(0x18)
-#define SMI_LARB_VC_PRI_MODE		(0x20)
 #define SMI_LARB_CMD_THRT_CON		(0x24)
 #define SMI_LARB_SW_FLAG		(0x40)
 #define SMI_LARB_BWL_EN			(0x50)
@@ -54,7 +51,6 @@
 #define SMI_LARB_REQ_DET		(0xc4)
 #define SMI_LARB_EXT_ONGOING		(0xc8)
 #define SMI_LARB_INT_ONGOING		(0xcc)
-#define SMI_LARB_DBG_CON		(0xf0)
 #define SMI_LARB_WRR_PORT(p)		(0x100 + ((p) << 2))
 #define SMI_LARB_OSTDL_PORT(p)		(0x200 + ((p) << 2))
 #define SMI_LARB_OSTD_MON_PORT(p)	(0x280 + ((p) << 2))
@@ -74,15 +70,10 @@
 #define SMI_LARB_MON_CP_MAX		(0x430)
 #define SMI_LARB_MON_COS_MAX		(0x434)
 
-#define INT_SMI_LARB_CMD_THRT_CON	(0x500 + (SMI_LARB_CMD_THRT_CON))
-#define INT_SMI_LARB_DBG_CON		(0x500 + (SMI_LARB_DBG_CON))
-#define INT_SMI_LARB_OSTD_MON_PORT(p)	(0x500 + SMI_LARB_OSTD_MON_PORT(p))
-
-#define SMI_LARB_REGS_NR		(194)
+#define SMI_LARB_REGS_NR		(126)
 static u32	smi_larb_regs[SMI_LARB_REGS_NR] = {
 	SMI_LARB_STAT, SMI_LARB_IRQ_EN, SMI_LARB_IRQ_STATUS, SMI_LARB_SLP_CON,
-	SMI_LARB_CON, SMI_LARB_CON_SET, SMI_LARB_CON_CLR, SMI_LARB_VC_PRI_MODE,
-	SMI_LARB_CMD_THRT_CON,
+	SMI_LARB_CON, SMI_LARB_CON_SET, SMI_LARB_CON_CLR, SMI_LARB_CMD_THRT_CON,
 	SMI_LARB_SW_FLAG, SMI_LARB_BWL_EN, SMI_LARB_BWL_CON, SMI_LARB_OSTDL_EN,
 	SMI_LARB_ULTRA_DIS, SMI_LARB_PREULTRA_DIS,
 	SMI_LARB_FORCE_ULTRA, SMI_LARB_FORCE_PREULTRA,
@@ -91,7 +82,7 @@ static u32	smi_larb_regs[SMI_LARB_REGS_NR] = {
 	SMI_LARB_OSTD_UDF_VIO, SMI_LARB_OSTD_CRS_VIO,
 	SMI_LARB_FIFO_STAT, SMI_LARB_BUS_STAT, SMI_LARB_CMD_THRT_STAT,
 	SMI_LARB_MON_REQ, SMI_LARB_REQ_MASK, SMI_LARB_REQ_DET,
-	SMI_LARB_EXT_ONGOING, SMI_LARB_INT_ONGOING, SMI_LARB_DBG_CON,
+	SMI_LARB_EXT_ONGOING, SMI_LARB_INT_ONGOING,
 	SMI_LARB_WRR_PORT(0), SMI_LARB_WRR_PORT(1), SMI_LARB_WRR_PORT(2),
 	SMI_LARB_WRR_PORT(3), SMI_LARB_WRR_PORT(4), SMI_LARB_WRR_PORT(5),
 	SMI_LARB_WRR_PORT(6), SMI_LARB_WRR_PORT(7), SMI_LARB_WRR_PORT(8),
@@ -135,47 +126,11 @@ static u32	smi_larb_regs[SMI_LARB_REGS_NR] = {
 	SMI_LARB_OSTD_MON_PORT(26), SMI_LARB_OSTD_MON_PORT(27),
 	SMI_LARB_OSTD_MON_PORT(28), SMI_LARB_OSTD_MON_PORT(29),
 	SMI_LARB_OSTD_MON_PORT(30), SMI_LARB_OSTD_MON_PORT(31),
-	SMI_LARB_NON_SEC_CON(0), SMI_LARB_NON_SEC_CON(1),
-	SMI_LARB_NON_SEC_CON(2), SMI_LARB_NON_SEC_CON(3),
-	SMI_LARB_NON_SEC_CON(4), SMI_LARB_NON_SEC_CON(5),
-	SMI_LARB_NON_SEC_CON(6), SMI_LARB_NON_SEC_CON(7),
-	SMI_LARB_NON_SEC_CON(8), SMI_LARB_NON_SEC_CON(9),
-	SMI_LARB_NON_SEC_CON(10), SMI_LARB_NON_SEC_CON(11),
-	SMI_LARB_NON_SEC_CON(12), SMI_LARB_NON_SEC_CON(13),
-	SMI_LARB_NON_SEC_CON(14), SMI_LARB_NON_SEC_CON(15),
-	SMI_LARB_NON_SEC_CON(16), SMI_LARB_NON_SEC_CON(17),
-	SMI_LARB_NON_SEC_CON(18), SMI_LARB_NON_SEC_CON(19),
-	SMI_LARB_NON_SEC_CON(20), SMI_LARB_NON_SEC_CON(21),
-	SMI_LARB_NON_SEC_CON(22), SMI_LARB_NON_SEC_CON(23),
-	SMI_LARB_NON_SEC_CON(24), SMI_LARB_NON_SEC_CON(25),
-	SMI_LARB_NON_SEC_CON(26), SMI_LARB_NON_SEC_CON(27),
-	SMI_LARB_NON_SEC_CON(28), SMI_LARB_NON_SEC_CON(29),
-	SMI_LARB_NON_SEC_CON(30), SMI_LARB_NON_SEC_CON(31),
-	INT_SMI_LARB_CMD_THRT_CON, INT_SMI_LARB_DBG_CON,
-	INT_SMI_LARB_OSTD_MON_PORT(0), INT_SMI_LARB_OSTD_MON_PORT(1),
-	INT_SMI_LARB_OSTD_MON_PORT(2), INT_SMI_LARB_OSTD_MON_PORT(3),
-	INT_SMI_LARB_OSTD_MON_PORT(4), INT_SMI_LARB_OSTD_MON_PORT(5),
-	INT_SMI_LARB_OSTD_MON_PORT(6), INT_SMI_LARB_OSTD_MON_PORT(7),
-	INT_SMI_LARB_OSTD_MON_PORT(8), INT_SMI_LARB_OSTD_MON_PORT(9),
-	INT_SMI_LARB_OSTD_MON_PORT(10), INT_SMI_LARB_OSTD_MON_PORT(11),
-	INT_SMI_LARB_OSTD_MON_PORT(12), INT_SMI_LARB_OSTD_MON_PORT(13),
-	INT_SMI_LARB_OSTD_MON_PORT(14), INT_SMI_LARB_OSTD_MON_PORT(15),
-	INT_SMI_LARB_OSTD_MON_PORT(16), INT_SMI_LARB_OSTD_MON_PORT(17),
-	INT_SMI_LARB_OSTD_MON_PORT(18), INT_SMI_LARB_OSTD_MON_PORT(19),
-	INT_SMI_LARB_OSTD_MON_PORT(20), INT_SMI_LARB_OSTD_MON_PORT(21),
-	INT_SMI_LARB_OSTD_MON_PORT(22), INT_SMI_LARB_OSTD_MON_PORT(23),
-	INT_SMI_LARB_OSTD_MON_PORT(24), INT_SMI_LARB_OSTD_MON_PORT(25),
-	INT_SMI_LARB_OSTD_MON_PORT(26), INT_SMI_LARB_OSTD_MON_PORT(27),
-	INT_SMI_LARB_OSTD_MON_PORT(28), INT_SMI_LARB_OSTD_MON_PORT(29),
-	INT_SMI_LARB_OSTD_MON_PORT(30), INT_SMI_LARB_OSTD_MON_PORT(31)
 };
 
 /* COMM */
 #define SMI_L1LEN		(0x100)
 #define SMI_L1ARB(m)		(0x104 + ((m) << 2))
-#define SMI_MON_AXI_ENA		(0x1a0)
-#define SMI_MON_AXI_CLR		(0x1a4)
-#define SMI_MON_AXI_ACT_CNT	(0x1c0)
 #define SMI_BUS_SEL		(0x220)
 #define SMI_WRR_REG0		(0x228)
 #define SMI_WRR_REG1		(0x22c)
@@ -183,8 +138,6 @@ static u32	smi_larb_regs[SMI_LARB_REGS_NR] = {
 #define SMI_M4U_TH		(0x234)
 #define SMI_FIFO_TH1		(0x238)
 #define SMI_FIFO_TH2		(0x23c)
-#define SMI_PREULTRA_MASK0	(0x240)
-#define SMI_PREULTRA_MASK1	(0x244)
 
 #define SMI_DCM			(0x300)
 #define SMI_ELA			(0x304)
@@ -201,24 +154,10 @@ static u32	smi_larb_regs[SMI_LARB_REGS_NR] = {
 #define SMI_COMMON_CLAMP_EN_CLR	(0x3c8)
 
 #define SMI_DEBUG_S(s)		(0x400 + ((s) << 2))
-#define SMI_DEBUG_EXT(slave)	(0x420 + ((slave) << 2))
 #define SMI_DEBUG_M0		(0x430)
 #define SMI_DEBUG_M1		(0x434)
-#define SMI_DEBUG_EXT4		(0x438)
-#define SMI_DEBUG_EXT5		(0x43c)
 #define SMI_DEBUG_MISC		(0x440)
 #define SMI_DUMMY		(0x444)
-#define SMI_DEBUG_EXT6		(0x448)
-#define SMI_DEBUG_EXT7		(0x44c)
-
-#define SMI_AST_EN	(0x700)
-#define SMI_AST_CLR	(0x704)
-#define SMI_SW_TRIG	(0x708)
-#define SMI_AST_COND	(0x70c)
-#define SMI_TIMEOUT	(0x710)
-#define SMI_TIMEOUT_CNT	(0x714)
-#define SMI_AST_STA	(0x718)
-#define SMI_AST_STA_CLR	(0x71c)
 
 #define SMI_MON_ENA(m)		((m) ? (0x600 + (((m) - 1) * 0x50)) : 0x1a0)
 #define SMI_MON_CLR(m)		(SMI_MON_ENA(m) + 0x4)
@@ -234,15 +173,13 @@ static u32	smi_larb_regs[SMI_LARB_REGS_NR] = {
 #define SMI_MON_CP_MAX(m)	(SMI_MON_ENA(m) + 0x3c)
 #define SMI_MON_COS_MAX(m)	(SMI_MON_ENA(m) + 0x40)
 
-#define SMI_COMM_REGS_NR	(66)
+#define SMI_COMM_REGS_NR	(41)
 static u32	smi_comm_regs[SMI_COMM_REGS_NR] = {
 	SMI_L1LEN,
 	SMI_L1ARB(0), SMI_L1ARB(1), SMI_L1ARB(2), SMI_L1ARB(3),
 	SMI_L1ARB(4), SMI_L1ARB(5), SMI_L1ARB(6), SMI_L1ARB(7),
-	SMI_MON_AXI_ENA, SMI_MON_AXI_CLR, SMI_MON_AXI_ACT_CNT,
 	SMI_BUS_SEL, SMI_WRR_REG0, SMI_WRR_REG1,
 	SMI_READ_FIFO_TH, SMI_M4U_TH, SMI_FIFO_TH1, SMI_FIFO_TH2,
-	SMI_PREULTRA_MASK0, SMI_PREULTRA_MASK1,
 	SMI_DCM, SMI_ELA,
 	SMI_M1_RULTRA_WRR0, SMI_M1_RULTRA_WRR1, SMI_M1_WULTRA_WRR0,
 	SMI_M1_WULTRA_WRR1, SMI_M2_RULTRA_WRR0, SMI_M2_RULTRA_WRR1,
@@ -250,59 +187,35 @@ static u32	smi_comm_regs[SMI_COMM_REGS_NR] = {
 	SMI_COMMON_CLAMP_EN, SMI_COMMON_CLAMP_EN_SET, SMI_COMMON_CLAMP_EN_CLR,
 	SMI_DEBUG_S(0), SMI_DEBUG_S(1), SMI_DEBUG_S(2), SMI_DEBUG_S(3),
 	SMI_DEBUG_S(4), SMI_DEBUG_S(5), SMI_DEBUG_S(6), SMI_DEBUG_S(7),
-	SMI_DEBUG_EXT(0), SMI_DEBUG_EXT(1), SMI_DEBUG_EXT(2), SMI_DEBUG_EXT(3),
-	SMI_DEBUG_EXT(4), SMI_DEBUG_EXT(5), SMI_DEBUG_EXT(6), SMI_DEBUG_EXT(7),
-	SMI_DEBUG_M0, SMI_DEBUG_M1, SMI_DEBUG_EXT4, SMI_DEBUG_EXT5,
-	SMI_DEBUG_MISC, SMI_DUMMY, SMI_DEBUG_EXT6, SMI_DEBUG_EXT7,
-	SMI_AST_EN, SMI_AST_CLR, SMI_SW_TRIG, SMI_AST_COND,
-	SMI_TIMEOUT, SMI_TIMEOUT_CNT, SMI_AST_STA, SMI_AST_STA_CLR
+	SMI_DEBUG_M0, SMI_DEBUG_M1, SMI_DEBUG_MISC, SMI_DUMMY,
 };
 
-/* RSI */
-#define RSI_INTLV_CON			(0x0)
-#define RSI_DCM_CON			(0x4)
-#define RSI_DS_PM_CON			(0x8)
-#define RSI_MISC_CON			(0xc)
-#define RSI_STA				(0x10)
-#define RSI_TEST_CON			(0x60)
-#define RSI_AWOSTD_M0			(0x80)
-#define RSI_AWOSTD_M1			(0x84)
+/* MMSYS */
+#define MMSYS_CG_CON0			(0x100)
+#define MMSYS_CG_CON1			(0x110)
+#define MMSYS_HW_DCM_1ST_DIS0		(0x120)
+#define MMSYS_HW_DCM_1ST_DIS_SET0	(0x124)
+#define MMSYS_HW_DCM_2ND_DIS0		(0x130)
+#define MMSYS_SW0_RST_B			(0x140)
+#define DISP_GALS_DBG(x)		(0x520 + ((x) << 2))
+#define MMSYS_GALS_DBG(x)		(0x914 + ((x) << 2))
 
-#define RSI_AWOSTD_S			(0x90)
-#define RSI_WOSTD_M0			(0xa0)
-#define RSI_WOSTD_M1			(0xa4)
-#define RSI_WOSTD_S			(0xb0)
-#define RSI_AROSTD_M0			(0xc0)
-#define RSI_AROSTD_M1			(0xc4)
-#define RSI_AROSTD_S			(0xd0)
-
-#define RSI_WLAST_OWE_CNT_M0		(0xe0)
-#define RSI_WLAST_OWE_CNT_M1		(0xe4)
-#define RSI_WLAST_OWE_CNT_S		(0xf0)
-
-#define RSI_WDAT_CNT_M0			(0x100)
-#define RSI_WDAT_CNT_M1			(0x104)
-#define RSI_WDAT_CNT_S			(0x110)
-#define RSI_RDAT_CNT_M0			(0x120)
-#define RSI_RDAT_CNT_M1			(0x124)
-#define RSI_RDAT_CNT_S			(0x130)
-#define RSI_AXI_DBG_M0			(0x140)
-#define RSI_AXI_DBG_M1			(0x144)
-#define RSI_AXI_DBG_S			(0x150)
-#define RSI_AWOSTD_PSEUDO		(0x180)
-#define RSI_AROSTD_PSEUDO		(0x184)
-
-#define SMI_RSI_REGS_NR	(29)
-static u32	smi_rsi_regs[SMI_RSI_REGS_NR] = {
-	RSI_INTLV_CON, RSI_DCM_CON, RSI_DS_PM_CON, RSI_MISC_CON,
-	RSI_STA, RSI_TEST_CON, RSI_AWOSTD_M0, RSI_AWOSTD_M1,
-	RSI_AWOSTD_S, RSI_WOSTD_M0, RSI_WOSTD_M1, RSI_WOSTD_S,
-	RSI_AROSTD_M0, RSI_AROSTD_M1, RSI_AROSTD_S, RSI_WLAST_OWE_CNT_M0,
-	RSI_WLAST_OWE_CNT_M1, RSI_WLAST_OWE_CNT_S, RSI_WDAT_CNT_M0,
-	RSI_WDAT_CNT_M1, RSI_WDAT_CNT_S, RSI_RDAT_CNT_M0,
-	RSI_RDAT_CNT_M1, RSI_RDAT_CNT_S, RSI_AXI_DBG_M0,
-	RSI_AXI_DBG_M1, RSI_AXI_DBG_S, RSI_AWOSTD_PSEUDO, RSI_AROSTD_PSEUDO
+#define SMI_MMSYS_REGS_NR		(30)
+static u32	smi_mmsys_regs[SMI_MMSYS_REGS_NR] = {
+	MMSYS_CG_CON0, MMSYS_CG_CON1,
+	MMSYS_HW_DCM_1ST_DIS0, MMSYS_HW_DCM_1ST_DIS_SET0,
+	MMSYS_HW_DCM_2ND_DIS0, MMSYS_SW0_RST_B,
+	DISP_GALS_DBG(0), DISP_GALS_DBG(1), DISP_GALS_DBG(2), DISP_GALS_DBG(3),
+	DISP_GALS_DBG(4), DISP_GALS_DBG(5), DISP_GALS_DBG(6), DISP_GALS_DBG(7),
+	DISP_GALS_DBG(8), DISP_GALS_DBG(9), DISP_GALS_DBG(10),
+	DISP_GALS_DBG(11), DISP_GALS_DBG(12), DISP_GALS_DBG(13),
+	DISP_GALS_DBG(14), DISP_GALS_DBG(15),
+	MMSYS_GALS_DBG(0), MMSYS_GALS_DBG(1), MMSYS_GALS_DBG(2),
+	MMSYS_GALS_DBG(3), MMSYS_GALS_DBG(4), MMSYS_GALS_DBG(5),
+	MMSYS_GALS_DBG(6), MMSYS_GALS_DBG(7),
 };
+
+enum {TYPE_LARB, TYPE_COMM, TYPE_MMSYS, TYPE_NR};
 
 #define SMI_MON_BUS_NR		(4)
 #define SMI_MON_CNT_NR		(9)
@@ -331,118 +244,85 @@ struct mtk_smi_dbg_node {
 	struct device	*dev;
 	void __iomem	*va;
 	phys_addr_t	pa;
-	struct device	*comm;
-	u32	id;
-
-	u32	regs_nr;
-	u32	*regs;
-
-	u32	mon[SMI_MON_BUS_NR];
+	u32		nr_clks;
+	struct clk	**clks;
+	u32		nr_regs;
+	u32		*regs;
+	u32		mon[SMI_MON_BUS_NR];
+	u8		busy;
+	struct mtk_smi_dbg_node	*next;
 };
 
 struct mtk_smi_dbg {
-	bool			probe;
 	struct dentry		*fs;
 	struct mtk_smi_dbg_node	larb[MTK_LARB_NR_MAX];
 	struct mtk_smi_dbg_node	comm[MTK_LARB_NR_MAX];
-	struct mtk_smi_dbg_node	rsi[MTK_LARB_NR_MAX];
-
+	struct mtk_smi_dbg_node mmsys;
 	u64			exec;
 	u8			frame;
-	struct notifier_block suspend_nb;
 };
 static struct mtk_smi_dbg	*gsmi;
-static u32 smi_force_on;
 
-static void mtk_smi_dbg_print(struct mtk_smi_dbg *smi, const bool larb,
-				const bool rsi, const u32 id, bool skip_pm_runtime)
+static void mtk_smi_dbg_print(struct mtk_smi_dbg_node *node, const u8 type)
 {
-	struct mtk_smi_dbg_node	node = rsi ? smi->rsi[id] : (larb ? smi->larb[id] : smi->comm[id]);
-	const char		*name = rsi ? "rsi" : (larb ? "LARB" : "COMM");
-	const u32		regs_nr = node.regs_nr;
-
 	char	buf[LINK_MAX + 1] = {0};
-	u32	val, comm_id = 0;
-	s32	i, len, ret = 0;
-	bool	dump_with = false;
+	u32	val[DBG_PRINT_NR];
+	u32	reg = type ? SMI_DEBUG_MISC : SMI_LARB_STAT;
+	s32	diff, i, j, len, ret, rpm;
 
-	if (!node.dev || !node.va)
+	if (!node->dev || !node->va)
 		return;
 
-	if (!skip_pm_runtime) {
-		if (!rsi) {
-			ret = pm_runtime_get_if_in_use(node.dev);
-			dev_info(node.dev, "===== %s%u rpm:%d =====\n"
-				, name, id, ret);
-		} else
-			dev_info(node.dev, "===== %s%u =====\n", name, id);
-		if (ret <= 0 || rsi) {
-			if (of_property_read_u32(node.dev->of_node,
-				"mediatek,dump-with-comm", &comm_id))
-				return;
-			if (pm_runtime_get_if_in_use(smi->comm[comm_id].dev) <= 0)
-				return;
-			dump_with = true;
+	/* TODO */
+	pm_runtime_get_sync(node->dev);
+	rpm = pm_runtime_get_if_in_use(node->dev);
+	if (rpm <= 0)
+		return;
+
+	node->busy = 0;
+	for (i = 0, len = 0; i < node->nr_regs; i++) {
+		memset(val, 0, sizeof(val));
+		for (j = 0, diff = 0; j < DBG_PRINT_NR; j++) {
+			val[j] = readl_relaxed(node->va + node->regs[i]);
+			if (j && val[j] != val[j - 1])
+				diff += 1;
+			if (node->regs[i] == reg)
+				node->busy += (type ^ val[j]);
 		}
-	} else {
-		dev_info(node.dev, "===== %s%u rpm:skip =====\n"
-			, name, id);
-	}
-
-	for (i = 0, len = 0; i < regs_nr; i++) {
-
-		val = readl_relaxed(node.va + node.regs[i]);
-		if (!val)
+		if (!diff && !val[0])
 			continue;
 
-		ret = snprintf(buf + len, LINK_MAX - len, " %#x=%#x,",
-			node.regs[i], val);
+		if (diff)
+			ret = snprintf(buf + len, LINK_MAX - len,
+				" %#x=%#x %#x %#x %#x %#x,", node->regs[i],
+				val[0], val[1], val[2], val[3], val[4]);
+		else
+			ret = snprintf(buf + len, LINK_MAX - len,
+				" %#x=%#x,", node->regs[i], val[0]);
+
 		if (ret < 0 || ret >= LINK_MAX - len) {
-			ret = snprintf(buf + len, LINK_MAX - len, "%c", '\0');
-			if (ret < 0)
-				dev_notice(node.dev, "smi dbg print error:%d\n", ret);
+			snprintf(buf + len, LINK_MAX - len, "%c", '\0');
+			dev_info(node->dev, "%s\n", buf);
 
-			dev_info(node.dev, "%s\n", buf);
-
+			memset(buf, '\0', sizeof(buf));
 			len = 0;
-			memset(buf, '\0', sizeof(char) * ARRAY_SIZE(buf));
-			ret = snprintf(buf + len, LINK_MAX - len, " %#x=%#x,",
-				node.regs[i], val);
-			if (ret < 0)
-				dev_notice(node.dev, "smi dbg print error:%d\n", ret);
-		}
-		len += ret;
+			i -= 1;
+		} else
+			len += ret;
 	}
-	ret = snprintf(buf + len, LINK_MAX - len, "%c", '\0');
-	if (ret < 0)
-		dev_notice(node.dev, "smi dbg print error:%d\n", ret);
-
-	dev_info(node.dev, "%s\n", buf);
-
-	if (!skip_pm_runtime) {
-		if (dump_with) {
-			pm_runtime_put(smi->comm[comm_id].dev);
-			return;
-		}
-		pm_runtime_put(node.dev);
-	}
+	dev_info(node->dev, "========== rpm:%d busy:%d/%d ==========\n",
+		rpm, node->busy, DBG_PRINT_NR);
+	pm_runtime_put_sync(node->dev);
 }
 
 static void mtk_smi_dbg_hang_detect_single(
 	struct mtk_smi_dbg *smi, const bool larb, const u32 id)
 {
-	struct mtk_smi_dbg_node	node = larb ? smi->larb[id] : smi->comm[id];
-	s32			i;
+	struct mtk_smi_dbg_node	*node = larb ? &smi->larb[id] : &smi->comm[id];
 
-	dev_info(node.dev, "%s: larb:%d id:%u\n", __func__, larb, id);
-	mtk_smi_dbg_print(smi, larb, false, id, false);
-	if (larb)
-		for (i = 0; i < ARRAY_SIZE(smi->comm); i++) {
-			if (smi->comm[i].dev == smi->larb[id].comm) {
-				mtk_smi_dbg_print(smi, !larb, false, i, false);
-				break;
-			}
-		}
+	dev_info(node->dev, "%s: larb:%d id:%u\n", __func__, larb, id);
+	mtk_smi_dbg_print(node, larb ? TYPE_LARB : TYPE_COMM);
+	mtk_smi_dbg_print(node->next, larb ? TYPE_COMM : TYPE_MMSYS);
 }
 
 static void mtk_smi_dbg_conf_set_run(
@@ -552,8 +432,7 @@ static void mtk_smi_dbg_conf_stop_clr(
 
 static void mtk_smi_dbg_monitor_run(struct mtk_smi_dbg *smi)
 {
-	s32	i, larb_on[MTK_LARB_NR_MAX] = {0};
-	s32	comm_on[MTK_LARB_NR_MAX] = {0};
+	s32	i, larb_on[MTK_LARB_NR_MAX], comm_on[MTK_LARB_NR_MAX];
 
 	smi->exec = sched_clock();
 	smi->frame = smi->frame ? smi->frame : 10;
@@ -623,262 +502,6 @@ static void mtk_smi_dbg_monitor_set(struct mtk_smi_dbg *smi, const u64 val)
 			mon[0], mon[1], mon[2], mon[3]);
 }
 
-static s32 mtk_smi_dbg_parse(struct platform_device *pdev,
-	struct mtk_smi_dbg_node node[], const bool larb, const u32 id)
-{
-	struct resource	*res;
-	void __iomem	*va;
-
-	if (!pdev || !node || id >= MTK_LARB_NR_MAX)
-		return -EINVAL;
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -EINVAL;
-	node[id].pa = res->start;
-
-	va = devm_ioremap(&pdev->dev, res->start, 0x1000);
-	if (IS_ERR(va))
-		return PTR_ERR(va);
-	node[id].va = va;
-
-	node[id].regs_nr = larb ? SMI_LARB_REGS_NR : SMI_COMM_REGS_NR;
-	node[id].regs = larb ? smi_larb_regs : smi_comm_regs;
-	memset(node[id].mon, ~0, sizeof(u32) * SMI_MON_BUS_NR);
-
-	dev_info(node[id].dev, "larb:%d id:%u pa:%pa va:%p regs_nr:%u\n",
-		larb, id, &node[id].pa, node[id].va, node[id].regs_nr);
-	return 0;
-}
-
-static char	*mtk_smi_dbg_comp[] = {
-	"mediatek,smi-larb", "mediatek,smi-common", "mediatek,smi-rsi"
-};
-
-static int smi_dbg_suspend_cb(struct notifier_block *nb,
-		unsigned long value, void *v)
-{
-	bool is_larb = (v != NULL);
-
-	pr_notice("[SMI] %s: %d - %ld\n", __func__, is_larb, value);
-	mtk_smi_dbg_print(gsmi, is_larb, false, value, true);
-	return 0;
-}
-
-static s32 mtk_smi_dbg_probe(struct mtk_smi_dbg *smi)
-{
-	//struct device_node	*node = NULL, *comm;
-	struct device_node	*node = NULL;
-	struct platform_device	*pdev;
-	struct resource	*res;
-	void __iomem	*va;
-	s32			larb_nr = 0, comm_nr = 0, rsi_nr = 0, id, ret;
-
-	pr_info("%s: comp[%d]:%s\n", __func__, 0, mtk_smi_dbg_comp[0]);
-
-	for_each_compatible_node(node, NULL, mtk_smi_dbg_comp[0]) {
-
-		if (of_property_read_u32(node, "mediatek,larb-id", &id))
-			id = larb_nr;
-		larb_nr += 1;
-
-		pdev = of_find_device_by_node(node);
-		of_node_put(node);
-		if (!pdev)
-			return -EINVAL;
-		smi->larb[id].dev = &pdev->dev;
-		smi->larb[id].id = id;
-
-		ret = mtk_smi_dbg_parse(pdev, smi->larb, true, id);
-		if (ret)
-			return ret;
-	}
-
-	for_each_compatible_node(node, NULL, mtk_smi_dbg_comp[1]) {
-
-		if (of_property_read_u32(node, "mediatek,common-id", &id))
-			id = comm_nr;
-		comm_nr += 1;
-
-		pdev = of_find_device_by_node(node);
-		of_node_put(node);
-		if (!pdev)
-			return -EINVAL;
-		smi->comm[id].dev = &pdev->dev;
-		smi->comm[id].id = id;
-
-		ret = mtk_smi_dbg_parse(pdev, smi->comm, false, id);
-		if (ret)
-			return ret;
-	}
-
-	for_each_compatible_node(node, NULL, mtk_smi_dbg_comp[2]) {
-
-		if (of_property_read_u32(node, "mediatek,rsi-id", &id))
-			id = rsi_nr;
-		rsi_nr += 1;
-
-		pdev = of_find_device_by_node(node);
-		of_node_put(node);
-		if (!pdev)
-			return -EINVAL;
-		smi->rsi[id].dev = &pdev->dev;
-		smi->rsi[id].id = id;
-
-		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-		if (!res)
-			return -EINVAL;
-		smi->rsi[id].pa = res->start;
-
-		va = devm_ioremap(&pdev->dev, res->start, 0x1000);
-		if (IS_ERR(va))
-			return PTR_ERR(va);
-		smi->rsi[id].va = va;
-
-		smi->rsi[id].regs_nr = SMI_RSI_REGS_NR;
-		smi->rsi[id].regs = smi_rsi_regs;
-
-	}
-	smi->suspend_nb.notifier_call = smi_dbg_suspend_cb;
-	mtk_smi_driver_register_notifier(&smi->suspend_nb);
-	return 0;
-}
-
-static RAW_NOTIFIER_HEAD(smi_notifier_list);
-int mtk_smi_dbg_register_notifier(struct notifier_block *nb)
-{
-	return raw_notifier_chain_register(&smi_notifier_list, nb);
-}
-EXPORT_SYMBOL_GPL(mtk_smi_dbg_register_notifier);
-
-int mtk_smi_dbg_unregister_notifier(struct notifier_block *nb)
-{
-	return raw_notifier_chain_unregister(&smi_notifier_list, nb);
-}
-EXPORT_SYMBOL_GPL(mtk_smi_dbg_unregister_notifier);
-
-s32 mtk_smi_dbg_hang_detect(const char *user)
-{
-	struct mtk_smi_dbg	*smi = gsmi;
-	struct mtk_smi_dbg_node	node;
-	s32			i, j, ret, busy = 0, time = 5, PRINT_NR = 1;
-	u32			val;
-
-	pr_info("%s: check caller:%s\n", __func__, user);
-
-	if (!smi->probe) {
-		ret = mtk_smi_dbg_probe(smi);
-		if (ret)
-			return ret;
-
-		smi->probe = true;
-	}
-#if IS_ENABLED(CONFIG_MTK_EMI)
-	mtk_emidbg_dump();
-#endif
-	//mtk_dump_reg_for_hang_issue(0, 0);
-	//mtk_dump_reg_for_hang_issue(0, 1);
-
-	raw_notifier_call_chain(&smi_notifier_list, 0, NULL);
-
-	//check LARB status
-	for (i = 0; i < ARRAY_SIZE(smi->larb); i++) {
-		node = smi->larb[i];
-		if (!node.dev || !node.va)
-			continue;
-		if (pm_runtime_get_if_in_use(node.dev) <= 0)
-			continue;
-		busy = 0;
-		for (j = 0; j < time; j++) {
-			val = readl_relaxed(node.va + SMI_LARB_STAT);
-			busy += val ? 1 : 0;
-		}
-		if (busy == time) {
-			PRINT_NR = 5;
-			dev_info(node.dev, "===== %pa.%s:%u %s:%d/%d =====\n",
-				&node.pa, "LARB", i, "busy", busy, time);
-		}
-		pm_runtime_put(node.dev);
-	}
-
-	//check COMM status
-	for (i = 0; i < ARRAY_SIZE(smi->comm); i++) {
-		node = smi->comm[i];
-		if (!node.dev || !node.va)
-			continue;
-		if (pm_runtime_get_if_in_use(node.dev) <= 0)
-			continue;
-		busy = 0;
-		for (j = 0; j < time; j++) {
-			val = readl_relaxed(node.va + SMI_DEBUG_MISC);
-			busy += !val ? 1 : 0;
-		}
-		if (busy == time) {
-			PRINT_NR = 5;
-			dev_info(node.dev, "===== %pa.%s:%u %s:%d/%d =====\n",
-			&node.pa, "COMM", i, "busy", busy, time);
-		}
-		pm_runtime_put(node.dev);
-	}
-
-	if (PRINT_NR == 1)
-		pr_info("%s: ===== SMI MM bus NOT hang =====:%s\n", __func__, user);
-
-	for (j = 0; j < PRINT_NR; j++) {
-		for (i = 0; i < ARRAY_SIZE(smi->larb); i++)
-			mtk_smi_dbg_print(smi, true, false, i, false);
-
-		for (i = 0; i < ARRAY_SIZE(smi->comm); i++)
-			mtk_smi_dbg_print(smi, false, false, i, false);
-
-		for (i = 0; i < ARRAY_SIZE(smi->rsi); i++)
-			mtk_smi_dbg_print(smi, true, true, i, false);
-	}
-
-	mtk_smi_dump_last_pd(user);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(mtk_smi_dbg_hang_detect);
-
-
-
-
-s32 mtk_smi_dbg_cg_status(void)
-{
-	struct mtk_smi_dbg	*smi = gsmi;
-	struct mtk_smi_dbg_node	node;
-	s32			i, ret = 0;
-
-	if (!smi->probe) {
-		ret = mtk_smi_dbg_probe(smi);
-		if (ret)
-			return ret;
-
-		smi->probe = true;
-	}
-
-	//check LARB status
-	for (i = 0; i < ARRAY_SIZE(smi->larb); i++) {
-		node = smi->larb[i];
-		if (!node.dev || !node.va)
-			continue;
-		mtk_smi_check_larb_ref_cnt(node.dev);
-	}
-
-	//check COMM status
-	for (i = 0; i < ARRAY_SIZE(smi->comm); i++) {
-		node = smi->comm[i];
-		if (!node.dev || !node.va)
-			continue;
-		mtk_smi_check_comm_ref_cnt(node.dev);
-	}
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(mtk_smi_dbg_cg_status);
-
-
 static int mtk_smi_dbg_get(void *data, u64 *val)
 {
 	pr_info("%s: val:%llu\n", __func__, *val);
@@ -889,17 +512,12 @@ static int mtk_smi_dbg_set(void *data, u64 val)
 {
 	struct mtk_smi_dbg	*smi = (struct mtk_smi_dbg *)data;
 	u64			exval;
-	s32			ret;
 
-	pr_info("%s: val:%#llx\n", __func__, val);
-
-	if (!smi->probe) {
-		ret = mtk_smi_dbg_probe(smi);
-		if (ret)
-			return ret;
-
-		smi->probe = true;
+	if (!smi) {
+		pr_info("%s: not init yet\n", __func__);
+		return -EFAULT;
 	}
+	pr_info("%s: val:%#llx\n", __func__, val);
 
 	switch (val & 0x7) {
 	case SET_OPS_DUMP:
@@ -947,6 +565,206 @@ static int mtk_smi_dbg_set(void *data, u64 val)
 DEFINE_SIMPLE_ATTRIBUTE(
 	mtk_smi_dbg_fops, mtk_smi_dbg_get, mtk_smi_dbg_set, "%llu");
 
+static s32
+mtk_smi_dbg_node_enable(struct mtk_smi_dbg_node *node, const bool enable)
+{
+	s32	i, j, ret = 0;
+
+	if (enable)
+		for (i = 0; i < node->nr_clks; i++) {
+			ret = clk_prepare_enable(node->clks[i]);
+			if (ret) {
+				for (j = i - 1; j >= 0; j--)
+					clk_disable_unprepare(node->clks[j]);
+				break;
+			}
+		}
+	else
+		for (i = node->nr_clks - 1; i >= 0; i--)
+			clk_disable_unprepare(node->clks[i]);
+	return ret;
+}
+
+s32 mtk_smi_dbg_larb_prepare_enable(const u32 id, const char *user)
+{
+	struct mtk_smi_dbg	*smi = gsmi;
+	s32			ret;
+
+	if (!smi) {
+		pr_info("%s: not init yet\n", __func__);
+		return -EFAULT;
+	}
+	if (id >= MTK_LARB_NR_MAX || !smi->larb[id].dev) {
+		pr_info("%s: invalid larb-id:%u from user:%s\n", id, user);
+		return -EINVAL;
+	}
+
+	if (smi->larb[id].next && smi->larb[id].next->clks) {
+		ret = mtk_smi_dbg_node_enable(smi->larb[id].next, true);
+		if (ret)
+			return ret;
+	}
+	ret = mtk_smi_dbg_node_enable(&smi->larb[id], true);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mtk_smi_dbg_larb_prepare_enable);
+
+void mtk_smi_dbg_larb_disable_unprepare(const u32 id, const char *user)
+{
+	struct mtk_smi_dbg	*smi = gsmi;
+
+	if (!smi) {
+		pr_info("%s: not init yet\n", __func__);
+		return;
+	}
+	if (id >= MTK_LARB_NR_MAX || !smi->larb[id].dev) {
+		pr_info("%s: invalid larb-id:%u from user:%s\n", id, user);
+		return;
+	}
+
+	mtk_smi_dbg_node_enable(&smi->larb[id], false);
+	if (smi->larb[id].next && smi->larb[id].next->clks)
+		mtk_smi_dbg_node_enable(smi->larb[id].next, false);
+}
+EXPORT_SYMBOL_GPL(mtk_smi_dbg_larb_disable_unprepare);
+
+s32 mtk_smi_dbg_hang_detect(const char *user)
+{
+	struct mtk_smi_dbg	*smi = gsmi;
+	s32			i;
+
+	if (!smi) {
+		pr_info("%s: not init yet\n", __func__);
+		return -EFAULT;
+	}
+	pr_info("%s: caller:%s\n", __func__, user);
+
+	for (i = 0; i < ARRAY_SIZE(smi->larb); i++)
+		mtk_smi_dbg_print(&smi->larb[i], TYPE_LARB);
+
+	for (i = 0; i < ARRAY_SIZE(smi->comm); i++)
+		mtk_smi_dbg_print(&smi->comm[i], TYPE_COMM);
+	mtk_smi_dbg_print(&smi->mmsys, TYPE_MMSYS);
+
+	/* TODO */
+	return 0;
+}
+EXPORT_SYMBOL_GPL(mtk_smi_dbg_hang_detect);
+
+static s32 mtk_smi_dbg_parse(
+struct mtk_smi_dbg_node *node, struct platform_device *pdev, const u8 type)
+{
+	struct resource	*res;
+	struct property	*prop;
+	const char	*name;
+	s32		i = 0, ret;
+
+	node->dev = &pdev->dev;
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -EINVAL;
+	node->pa = res->start;
+	node->va = devm_ioremap(node->dev, res->start, 0x1000);
+	if (IS_ERR(node->va))
+		return PTR_ERR(node->va);
+
+	node->nr_regs = type ? (type == TYPE_MMSYS ?
+		SMI_MMSYS_REGS_NR : SMI_COMM_REGS_NR) : SMI_LARB_REGS_NR;
+	node->regs = type ? (type == TYPE_MMSYS ?
+		smi_mmsys_regs : smi_comm_regs) : smi_larb_regs;
+	memset(node->mon, ~0, sizeof(node->mon));
+	dev_info(node->dev, "pa:%pa va:%#x regs:%u\n",
+		&node->pa, node->va, node->nr_regs);
+
+	ret = of_property_count_strings(node->dev->of_node, "clock-names");
+	if (ret < 0)
+		return ret;
+	node->nr_clks = (u32)ret;
+
+	node->clks = devm_kcalloc(
+		node->dev, node->nr_clks, sizeof(*node->clks), GFP_KERNEL);
+	if (!node->clks)
+		return -ENOMEM;
+
+	of_property_for_each_string(
+		node->dev->of_node, "clock-names", prop, name) {
+		node->clks[i] = devm_clk_get(node->dev, name);
+		if (IS_ERR(node->clks[i])) {
+			dev_info(node->dev, "%d:%s clk_get failed\n", i, name);
+			break;
+		}
+		dev_dbg(node->dev, "clks[%d]:%s\n", i, name);
+		i += 1;
+	}
+	return 0;
+}
+
+static char	*mtk_smi_dbg_comp[] = {
+	"mediatek,mt6761-smi-larb", "mediatek,mt6779-smi-larb", ""
+};
+
+static s32 mtk_smi_dbg_probe(struct mtk_smi_dbg *smi)
+{
+	struct device_node	*node, *next;
+	struct platform_device	*pdev;
+	u32			nr_larbs = 0, nr_comms = 0;
+	s32			id, i = 0, j, ret;
+
+	while (strncmp(mtk_smi_dbg_comp[i], "", 1)) {
+		pr_debug("%s: comp[%d]:%s\n", __func__, i, mtk_smi_dbg_comp[i]);
+		for_each_compatible_node(node, NULL, mtk_smi_dbg_comp[i]) {
+			if (!node)
+				break;
+			if (of_property_read_u32(node, "mediatek,larb-id", &id))
+				id = nr_larbs;
+			pdev = of_find_device_by_node(node);
+			of_node_put(node);
+			if (!pdev)
+				return -EINVAL;
+			dev_info(&pdev->dev, "larb-id:%u\n", id);
+			ret = mtk_smi_dbg_parse(
+				&smi->larb[id], pdev, TYPE_LARB);
+			if (ret)
+				return ret;
+			nr_larbs += 1;
+
+			next = of_parse_phandle(node, "mediatek,smi", 0);
+			if (!next)
+				return -EINVAL;
+			pdev = of_find_device_by_node(next);
+			of_node_put(next);
+			if (!pdev)
+				return -EINVAL;
+			for (j = 0; j < nr_comms; j++)
+				if (&pdev->dev == smi->comm[j].dev)
+					break;
+			smi->larb[id].next = &smi->comm[j];
+			if (j < nr_comms)
+				continue;
+			dev_info(&pdev->dev, "comm-id:%u\n", j);
+			ret = mtk_smi_dbg_parse(&smi->comm[j], pdev, TYPE_COMM);
+			if (ret)
+				return ret;
+			nr_comms += 1;
+
+			smi->comm[j].next = &smi->mmsys;
+			if (smi->mmsys.dev)
+				continue;
+			next = of_parse_phandle(next, "subsys", 0);
+			if (!next)
+				continue;
+			pdev = of_find_device_by_node(next);
+			of_node_put(next);
+			if (!pdev)
+				continue;
+			dev_info(&pdev->dev, "smi-subsys\n");
+			mtk_smi_dbg_parse(&smi->mmsys, pdev, TYPE_MMSYS);
+		}
+		i += 1;
+	}
+	return 0;
+}
+
 static int __init mtk_smi_dbg_init(void)
 {
 	struct mtk_smi_dbg	*smi;
@@ -961,135 +779,10 @@ static int __init mtk_smi_dbg_init(void)
 	if (IS_ERR(smi->fs))
 		return PTR_ERR(smi->fs);
 
-	if (!mtk_smi_dbg_probe(smi))
-		smi->probe = true;
-	//mtk_smi_dbg_hang_detect(DRV_NAME);
-	pr_debug("%s: smi:%p fs:%p\n", __func__, smi, smi->fs);
+	mtk_smi_dbg_probe(smi);
+	mtk_smi_dbg_hang_detect(DRV_NAME);
 	return 0;
 }
+late_initcall(mtk_smi_dbg_init);
 
-int smi_ut_dump_get(char *buf, const struct kernel_param *kp)
-{
-	struct mtk_smi_dbg	*smi = gsmi;
-	s32 i, ret;
-
-	for (i = 0; i < ARRAY_SIZE(smi->larb); i++) {
-		if (!smi->larb[i].dev)
-			continue;
-		ret = mtk_smi_larb_get(smi->larb[i].dev);
-		if (ret < 0)
-			dev_notice(smi->larb[i].dev, "smi_larb%d get fail:%d\n", i, ret);
-	}
-
-	mtk_smi_dbg_hang_detect("SMI UT");
-
-	for (i = 0; i < ARRAY_SIZE(smi->larb); i++) {
-		if (!smi->larb[i].dev)
-			continue;
-		mtk_smi_larb_put(smi->larb[i].dev);
-	}
-
-	return 0;
-}
-
-static struct kernel_param_ops smi_ut_dump_ops = {
-	.get = smi_ut_dump_get,
-};
-module_param_cb(smi_ut_dump, &smi_ut_dump_ops, NULL, 0644);
-MODULE_PARM_DESC(smi_ut_dump, "dump smi current setting");
-
-int smi_get_larb_dump(const char *val, const struct kernel_param *kp)
-{
-	struct mtk_smi_dbg	*smi = gsmi;
-	s32		result, larb_id, ret;
-
-	result = kstrtoint(val, 0, &larb_id);
-	if (result || larb_id < 0) {
-		pr_notice("SMI get larb dump failed: %d\n", result);
-		return result;
-	}
-	ret = mtk_smi_larb_get(smi->larb[larb_id].dev);
-	if (ret < 0)
-		dev_notice(smi->larb[larb_id].dev, "smi_larb%d get fail:%d\n", larb_id, ret);
-
-	mtk_smi_dbg_hang_detect("SMI larb get and dump");
-
-	return 0;
-}
-
-static struct kernel_param_ops smi_get_larb_dump_ops = {
-	.set = smi_get_larb_dump,
-};
-module_param_cb(smi_larb_enable_dump, &smi_get_larb_dump_ops, NULL, 0644);
-MODULE_PARM_DESC(smi_larb_enable_dump, "enable smi larb and dump current setting");
-
-int smi_put_larb(const char *val, const struct kernel_param *kp)
-{
-	struct mtk_smi_dbg	*smi = gsmi;
-	s32		result, larb_id;
-
-	result = kstrtoint(val, 0, &larb_id);
-	if (result || larb_id < 0) {
-		pr_notice("SMI put larb failed: %d\n", result);
-		return result;
-	}
-	mtk_smi_larb_put(smi->larb[larb_id].dev);
-
-	return 0;
-}
-
-static struct kernel_param_ops smi_put_larb_ops = {
-	.set = smi_put_larb,
-};
-module_param_cb(smi_larb_disable, &smi_put_larb_ops, NULL, 0644);
-MODULE_PARM_DESC(smi_larb_disable, "disable smi larb");
-
-module_init(mtk_smi_dbg_init);
 MODULE_LICENSE("GPL v2");
-
-int smi_larb_force_all_on(char *buf, const struct kernel_param *kp)
-{
-	struct mtk_smi_dbg	*smi = gsmi;
-	s32 i, ret;
-
-	for (i = 0; i < ARRAY_SIZE(smi->larb); i++) {
-		if (!smi->larb[i].dev)
-			continue;
-		ret = mtk_smi_larb_get(smi->larb[i].dev);
-		if (ret < 0)
-			dev_notice(smi->larb[i].dev, "smi_larb%d get fail:%d\n", i, ret);
-	}
-	smi_force_on = 1;
-	pr_notice("[smi] larb force all on\n");
-	return 0;
-}
-
-static struct kernel_param_ops smi_larb_force_all_on_ops = {
-	.get = smi_larb_force_all_on,
-};
-module_param_cb(smi_force_all_on, &smi_larb_force_all_on_ops, NULL, 0644);
-MODULE_PARM_DESC(smi_force_all_on, "smi larb force all on");
-
-int smi_larb_force_all_put(char *buf, const struct kernel_param *kp)
-{
-	struct mtk_smi_dbg	*smi = gsmi;
-	s32 i;
-
-	if (smi_force_on) {
-		for (i = 0; i < ARRAY_SIZE(smi->larb); i++) {
-			if (!smi->larb[i].dev)
-				continue;
-			mtk_smi_larb_put(smi->larb[i].dev);
-		}
-		smi_force_on = 0;
-		pr_notice("[smi] larb force all put\n");
-	}
-
-	return 0;
-}
-
-static struct kernel_param_ops smi_larb_force_all_put_ops = {
-	.get = smi_larb_force_all_put,
-};
-module_param_cb(smi_force_all_put, &smi_larb_force_all_put_ops, NULL, 0644);
-MODULE_PARM_DESC(smi_force_all_put, "smi larb force all put");

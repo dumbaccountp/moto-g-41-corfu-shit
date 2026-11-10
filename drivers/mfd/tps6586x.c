@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Core driver for TI TPS6586x PMIC family
  *
@@ -10,6 +9,10 @@
  * Mike Rapoport <mike@compulab.co.il>
  * Copyright (C) 2006-2008 Marvell International Ltd.
  * Eric Miao <eric.miao@marvell.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/interrupt.h>
@@ -309,19 +312,18 @@ static const struct irq_domain_ops tps6586x_domain_ops = {
 static irqreturn_t tps6586x_irq(int irq, void *data)
 {
 	struct tps6586x *tps6586x = data;
-	uint32_t acks;
-	__le32 val;
+	u32 acks;
 	int ret = 0;
 
 	ret = tps6586x_reads(tps6586x->dev, TPS6586X_INT_ACK1,
-			     sizeof(acks), (uint8_t *)&val);
+			     sizeof(acks), (uint8_t *)&acks);
 
 	if (ret < 0) {
 		dev_err(tps6586x->dev, "failed to read interrupt status\n");
 		return IRQ_NONE;
 	}
 
-	acks = le32_to_cpu(val);
+	acks = le32_to_cpu(acks);
 
 	while (acks) {
 		int i = __ffs(acks);

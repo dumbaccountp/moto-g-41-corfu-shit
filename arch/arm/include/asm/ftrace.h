@@ -11,12 +11,13 @@
 #define MCOUNT_INSN_SIZE	4 /* sizeof mcount call */
 
 #ifndef __ASSEMBLY__
+extern void mcount(void);
 extern void __gnu_mcount_nc(void);
 
 #ifdef CONFIG_DYNAMIC_FTRACE
 struct dyn_arch_ftrace {
-#ifdef CONFIG_ARM_MODULE_PLTS
-	struct module *mod;
+#ifdef CONFIG_OLD_MCOUNT
+	bool	old_mcount;
 #endif
 };
 
@@ -25,6 +26,9 @@ static inline unsigned long ftrace_call_adjust(unsigned long addr)
 	/* With Thumb-2, the recorded addresses have the lsb set */
 	return addr & ~1;
 }
+
+extern void ftrace_caller_old(void);
+extern void ftrace_call_old(void);
 #endif
 
 #endif

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
  * (C) COPYRIGHT 2015-2021 ARM Limited. All rights reserved.
@@ -81,9 +81,9 @@ static int pm_callback_power_on(struct kbase_device *kbdev)
 	dev_dbg(kbdev->dev, "pm_callback_power_on %p\n",
 			(void *)kbdev->dev->pm_domain);
 
+	error = pm_runtime_get_sync(kbdev->dev);
 	enable_gpu_power_control(kbdev);
 
-	error = pm_runtime_get_sync(kbdev->dev);
 	if (error == 1) {
 		/*
 		 * Let core know that the chip has not been

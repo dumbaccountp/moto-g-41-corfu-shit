@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2021 MediaTek Inc.
- *
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 
-#ifndef _DT_BINDINGS_GCE_MT6833_H
-#define _DT_BINDINGS_GCE_MT6833_H
+#ifndef _DT_BINDINGS_GCE_MT6853_H
+#define _DT_BINDINGS_GCE_MT6853_H
+
+#include "mt6382-gce.h"
 
 /* assign timeout 0 also means default */
 #define CMDQ_NO_TIMEOUT		0xffffffff
@@ -277,7 +278,17 @@
 #define CMDQ_EVENT_DSI0_SOF				398
 #define CMDQ_EVENT_DISP_WDMA0_SOF			399
 #define CMDQ_EVENT_DISP_PWM0_SOF			400
-
+#if 0
+#define CMDQ_EVENT_MUTEX_SOF_17				401
+#define CMDQ_EVENT_MUTEX_SOF_18				402
+#define CMDQ_EVENT_MUTEX_SOF_19				403
+#define CMDQ_EVENT_MUTEX_SOF_20				404
+#define CMDQ_EVENT_MUTEX_SOF_21				405
+#define CMDQ_EVENT_MUTEX_SOF_22				406
+#define CMDQ_EVENT_MUTEX_SOF_23				407
+#define CMDQ_EVENT_MUTEX_SOF_24				408
+#define CMDQ_EVENT_MUTEX_SOF_25				409
+#endif
 #define CMDQ_EVENT_DSI0_FRAME_DONE			410
 #define CMDQ_EVENT_DISP_WDMA0_FRAME_DONE		411
 #define CMDQ_EVENT_DISP_SPR0_FRAME_DONE			412
@@ -365,9 +376,6 @@
 
 /* DISP sw token */
 #define CMDQ_SYNC_TOKEN_SODI				671
-
-#define CMDQ_SYNC_TOKEN_DISP_VA_START			692
-#define CMDQ_SYNC_TOKEN_DISP_VA_END			693
 
 /* GPR access tokens (for register backup)
  * There are 15 32-bit GPR, 3 GPR form a set

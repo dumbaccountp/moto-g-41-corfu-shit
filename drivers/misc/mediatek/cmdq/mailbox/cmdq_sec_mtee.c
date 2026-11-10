@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
- */
+*/
 
 #include <linux/arm-smccc.h>
-#include <linux/soc/mediatek/mtk-cmdq-ext.h>
+#include <linux/soc/mediatek/mtk-cmdq.h>
 #include "cmdq_sec_mtee.h"
 
 static bool cmdq_mtee;
@@ -32,7 +32,7 @@ s32 cmdq_sec_init_context(struct cmdq_sec_tee_context *tee)
 	s32 status;
 
 	cmdq_msg("[SEC] enter %s", __func__);
-#if IS_ENABLED(CONFIG_MICROTRUST_TEE_SUPPORT)
+#if defined(CONFIG_MICROTRUST_TEE_SUPPORT)
 	while (!is_teei_ready()) {
 		cmdq_msg("[SEC] Microtrust TEE is not ready, wait...");
 		msleep(1000);
@@ -109,14 +109,14 @@ s32 cmdq_sec_mtee_allocate_wsm(struct cmdq_sec_mtee_context *tee,
 	status = KREE_RegisterSharedmem(tee->wsm_pHandle,
 		&tee->wsm_handle, &tee->wsm_param);
 	if (status != TZ_RESULT_SUCCESS) {
-		cmdq_err("%s: session:%#x handle:%#x size:%#x buffer:%p",
+		cmdq_err("%s: session:%#x handle:%#x size:%#x buffer:%p:%p",
 			__func__, tee->wsm_pHandle, tee->wsm_handle,
-			tee->wsm_param.size, *wsm_buffer);
+			tee->wsm_param.size, *wsm_buffer, *wsm_buffer);
 		return status;
 	}
-	cmdq_log("%s: session:%#x handle:%#x size:%#x buffer:%p",
+	cmdq_log("%s: session:%#x handle:%#x size:%#x buffer:%p:%p",
 		__func__, tee->wsm_pHandle, tee->wsm_handle,
-		tee->wsm_param.size, *wsm_buffer);
+		tee->wsm_param.size, *wsm_buffer, *wsm_buffer);
 
 	*wsm_buf_ex = kzalloc(size_ex, GFP_KERNEL);
 	if (!*wsm_buf_ex)
@@ -127,13 +127,13 @@ s32 cmdq_sec_mtee_allocate_wsm(struct cmdq_sec_mtee_context *tee,
 	status = KREE_RegisterSharedmem(tee->wsm_pHandle,
 		&tee->wsm_ex_handle, &tee->wsm_ex_param);
 	if (status != TZ_RESULT_SUCCESS)
-		cmdq_err("%s: session:%#x handle:%#x size:%#x buffer:%p",
+		cmdq_err("%s: session:%#x handle:%#x size:%#x buffer:%p:%p",
 			__func__, tee->wsm_pHandle, tee->wsm_ex_handle,
-			tee->wsm_ex_param.size, *wsm_buf_ex);
+			tee->wsm_ex_param.size, *wsm_buf_ex, *wsm_buf_ex);
 	else
-		cmdq_log("%s: session:%#x handle:%#x size:%#x buffer:%p",
+		cmdq_log("%s: session:%#x handle:%#x size:%#x buffer:%p:%p",
 			__func__, tee->wsm_pHandle, tee->wsm_ex_handle,
-			tee->wsm_ex_param.size, *wsm_buf_ex);
+			tee->wsm_ex_param.size, *wsm_buf_ex, *wsm_buf_ex);
 
 	*wsm_buf_ex2 = kzalloc(size_ex2, GFP_KERNEL);
 	if (!*wsm_buf_ex2)
@@ -144,13 +144,13 @@ s32 cmdq_sec_mtee_allocate_wsm(struct cmdq_sec_mtee_context *tee,
 	status = KREE_RegisterSharedmem(tee->wsm_pHandle,
 		&tee->wsm_ex2_handle, &tee->wsm_ex2_param);
 	if (status != TZ_RESULT_SUCCESS)
-		cmdq_err("%s: session:%#x handle:%#x size:%#x buffer:%p",
+		cmdq_err("%s: session:%#x handle:%#x size:%#x buffer:%p:%p",
 			__func__, tee->wsm_pHandle, tee->wsm_ex2_handle,
-			tee->wsm_ex2_param.size, *wsm_buf_ex2);
+			tee->wsm_ex2_param.size, *wsm_buf_ex2, *wsm_buf_ex2);
 	else
-		cmdq_log("%s: session:%#x handle:%#x size:%#x buffer:%p",
+		cmdq_log("%s: session:%#x handle:%#x size:%#x buffer:%p:%p",
 			__func__, tee->wsm_pHandle, tee->wsm_ex2_handle,
-			tee->wsm_ex2_param.size, *wsm_buf_ex2);
+			tee->wsm_ex2_param.size, *wsm_buf_ex2, *wsm_buf_ex2);
 
 	return status;
 }
@@ -251,5 +251,3 @@ s32 cmdq_sec_mtee_execute_session(struct cmdq_sec_mtee_context *tee,
 		cmdq_msg("%s:%d cmd:%u", __func__, status, cmd);
 	return status;
 }
-
-MODULE_LICENSE("GPL v2");

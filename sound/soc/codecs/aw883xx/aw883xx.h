@@ -4,27 +4,14 @@
 #include <linux/version.h>
 #include <sound/control.h>
 #include <sound/soc.h>
-#include "aw883xx_device.h"
+#include "aw_device.h"
 
-/*#define AW_QCOM_PLATFORM*/
-#define AW_MTK_PLATFORM
-/*#define AW_SPRD_PLATFORM*/
 
-#define AW_SYNC_LOAD
 
 #define AW883XX_CHIP_ID_REG	(0x00)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 1)
 #define AW_KERNEL_VER_OVER_4_19_1
-#endif
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
-#define AW_KERNEL_VER_OVER_5_4_0
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
-#endif
-
-#ifndef CONFIG_AW883XX_RAMP_SUPPORT
-#define CONFIG_AW883XX_RAMP_SUPPORT 1
 #endif
 
 /* i2c transaction on Linux limited to 64k
@@ -54,14 +41,7 @@ MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 #define AW883XX_DSP_16_DATA_MASK	(0x0000ffff)
 
 #define AW_GET_IV_CNT_MAX		(6)
-
-#ifdef CONFIG_AW883XX_RAMP_SUPPORT
-#define AW_KCONTROL_NUM			(6)
-#else
-#define AW_KCONTROL_NUM			(4)
-#endif
-
-#define AW_HW_MONITOR_DELAY		(1000)
+#define AW_KCONTROL_NUM			(2)
 
 enum {
 	AWRW_I2C_ST_NONE = 0,
@@ -121,14 +101,10 @@ enum aw883xx_init {
 };
 
 enum aw_re_range {
-	AW_RE_MIN = 1000,
+	AW_RE_MIN = 0,
 	AW_RE_MAX = 40000,
 };
 
-enum {
-	AW_RENAME_DISABLE = 0,
-	AW_RENAME_ENABLE,
-};
 
 /********************************************
  *
@@ -170,13 +146,10 @@ struct aw883xx {
 
 	unsigned char phase_sync;	/*phase sync*/
 	uint32_t allow_pw;
-	uint32_t rename_flag;
 	uint8_t pstream;
-	unsigned char fw_retry_cnt;
 
 	uint8_t dbg_en_prof;
 	uint8_t i2c_log_en;
-	uint8_t spin_flag;
 
 	struct list_head list;
 
@@ -188,7 +161,7 @@ struct aw883xx {
 
 	uint8_t reg_addr;
 	uint16_t dsp_addr;
-	uint16_t chip_id;
+	uint16_t chipid;
 	struct aw883xx_i2c_packet i2c_packet;
 };
 
@@ -211,5 +184,6 @@ int aw883xx_dsp_read(struct aw883xx *aw883xx,
 		uint16_t dsp_addr, uint32_t *dsp_data, uint8_t data_type);
 int aw883xx_get_dev_num(void);
 int aw883xx_get_version(char *buf, int size);
+
 
 #endif

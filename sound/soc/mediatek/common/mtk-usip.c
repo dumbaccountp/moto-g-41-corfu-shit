@@ -9,17 +9,17 @@
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
-#include <linux/of.h>
-#include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/notifier.h>
 
 #include <mtk_ccci_common.h>
-#if IS_ENABLED(CONFIG_MTK_AUDIODSP_SUPPORT)
+#ifdef CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT
 #include <adsp_helper.h>
 #include "audio_messenger_ipi.h"
 #include "audio_task.h"
+#include "adsp_ipi.h"
 #include "audio_speech_msg_id.h"
+#include "mtk-dsp-common.h"
 #endif
 
 #define USIP_EMP_IOC_MAGIC 'D'
@@ -28,12 +28,6 @@
 #define SET_USIP_ADSP_PHONE_CALL_ENH_CONFIG _IOWR(USIP_EMP_IOC_MAGIC, 0xF2, unsigned long long)
 
 #define NUM_MPU_REGION 3
-
-#if IS_ENABLED(CONFIG_MTK_AUDIODSP_SUPPORT)
-static void usip_send_emi_info_to_dsp(void);
-static void usip_send_emi_info_to_dsp_ble_ul(void);
-static void usip_send_emi_info_to_dsp_ble_dl(void);
-#endif
 
 int EMI_TABLE[3][3]
 	= {{0, 0, 0x30000}, {1, 0x30000, 0x8000}, {2, 0x38000, 0x28000} };
@@ -79,7 +73,7 @@ static long usip_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 			pr_info("no phy addr from ccci");
 			ret = -ENODEV;
 		} else if (copy_to_user((void __user *)arg, &size_for_spe,
-			   sizeof(size_for_spe))) {
+			sizeof(size_for_spe))) {
 			pr_warn("Fail copy to user Ptr:%p, r_sz:%zu",
 				(char *)&size_for_spe, sizeof(size_for_spe));
 			ret = -1;
@@ -107,11 +101,6 @@ static long usip_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 		pr_info("%s(): in SET_USIP_ADSP_PHONE_CALL_ENH_CONFIG: %d",
 			__func__,
 			usip.adsp_phone_call_enh_config);
-#if IS_ENABLED(CONFIG_MTK_AUDIODSP_SUPPORT)
-		usip_send_emi_info_to_dsp();
-		usip_send_emi_info_to_dsp_ble_ul();
-		usip_send_emi_info_to_dsp_ble_dl();
-#endif
 		break;
 	default:
 		pr_debug("%s(), default\n", __func__);
@@ -120,7 +109,7 @@ static long usip_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 static long usip_compat_ioctl(struct file *fp, unsigned int cmd,
 			      unsigned long arg)
 {
@@ -131,7 +120,7 @@ static long usip_compat_ioctl(struct file *fp, unsigned int cmd,
 	ret = fp->f_op->unlocked_ioctl(fp, cmd, arg);
 	if (ret < 0)
 		pr_err("%s(), fail, ret %ld, cmd 0x%x, arg %lu\n",
-		       __func__, ret, cmd, arg);
+				__func__, ret, cmd, arg);
 	return ret;
 }
 #endif
@@ -223,104 +212,7 @@ static void usip_get_addr(void)
 	}
 #endif
 }
-
-#if IS_ENABLED(CONFIG_MTK_AUDIODSP_SUPPORT)
-static void usip_send_emi_info_to_dsp_ble_dl(void)
-{
-	int send_result = 0;
-	struct ipi_msg_t ipi_msg;
-	long long usip_emi_info[2]; //idx0 for addr, idx1 for size
-	phys_addr_t offset = 0;
-
-	if (usip.addr_phy == 0) {
-		pr_info("%s(), cannot get emi addr from ccci", __func__);
-		return;
-	}
-
-	offset = EMI_TABLE[SP_EMI_ADSP_USIP_PHONECALL][SP_EMI_OFFSET];
-	usip_emi_info[0] = usip.addr_phy + offset;
-	usip_emi_info[1] = EMI_TABLE[SP_EMI_ADSP_USIP_PHONECALL][SP_EMI_SIZE] +
-			EMI_TABLE[SP_EMI_ADSP_USIP_SMARTPA][SP_EMI_SIZE];
-	pr_debug("%s(), usip_emi_info[0] 0x%x, usip_emi_info[1] 0x%x\n",
-		__func__, usip_emi_info[0], usip_emi_info[1]);
-
-	ipi_msg.magic      = IPI_MSG_MAGIC_NUMBER;
-	ipi_msg.task_scene = TASK_SCENE_BLECALLDL;
-	ipi_msg.source_layer  = AUDIO_IPI_LAYER_FROM_KERNEL;
-	ipi_msg.target_layer  = AUDIO_IPI_LAYER_TO_DSP;
-	ipi_msg.data_type  = AUDIO_IPI_PAYLOAD;
-	ipi_msg.ack_type   = AUDIO_IPI_MSG_BYPASS_ACK;
-	ipi_msg.msg_id     = IPI_MSG_A2D_GET_EMI_ADDRESS;
-	ipi_msg.param1     = sizeof(usip_emi_info);
-	ipi_msg.param2     = 0;
-
-	// Send EMI Address to Hifi3 Via IPI
-	adsp_register_feature(BLE_CALL_DL_FEATURE_ID);
-	send_result = audio_send_ipi_msg(
-					 &ipi_msg, TASK_SCENE_BLECALLDL,
-					 AUDIO_IPI_LAYER_TO_DSP,
-					 AUDIO_IPI_PAYLOAD,
-					 AUDIO_IPI_MSG_BYPASS_ACK,
-					 IPI_MSG_A2D_GET_EMI_ADDRESS,
-					 sizeof(usip_emi_info),
-					 0,
-					 (char *)&usip_emi_info);
-	adsp_deregister_feature(BLE_CALL_DL_FEATURE_ID);
-
-	if (send_result != 0)
-		pr_info("%s(), BLE scp_ipi send fail\n", __func__);
-	else
-		pr_debug("%s(), BLE scp_ipi send succeed\n", __func__);
-}
-
-static void usip_send_emi_info_to_dsp_ble_ul(void)
-{
-	int send_result = 0;
-	struct ipi_msg_t ipi_msg;
-	long long usip_emi_info[2]; //idx0 for addr, idx1 for size
-	phys_addr_t offset = 0;
-
-	if (usip.addr_phy == 0) {
-		pr_info("%s(), cannot get emi addr from ccci", __func__);
-		return;
-	}
-
-	offset = EMI_TABLE[SP_EMI_ADSP_USIP_PHONECALL][SP_EMI_OFFSET];
-	usip_emi_info[0] = usip.addr_phy + offset;
-	usip_emi_info[1] = EMI_TABLE[SP_EMI_ADSP_USIP_PHONECALL][SP_EMI_SIZE] +
-		EMI_TABLE[SP_EMI_ADSP_USIP_SMARTPA][SP_EMI_SIZE];
-	pr_debug("%s(), usip_emi_info[0] 0x%x, usip_emi_info[1] 0x%x\n",
-		__func__, usip_emi_info[0], usip_emi_info[1]);
-
-	ipi_msg.magic      = IPI_MSG_MAGIC_NUMBER;
-	ipi_msg.task_scene = TASK_SCENE_BLECALLUL;
-	ipi_msg.source_layer  = AUDIO_IPI_LAYER_FROM_KERNEL;
-	ipi_msg.target_layer  = AUDIO_IPI_LAYER_TO_DSP;
-	ipi_msg.data_type  = AUDIO_IPI_PAYLOAD;
-	ipi_msg.ack_type   = AUDIO_IPI_MSG_BYPASS_ACK;
-	ipi_msg.msg_id     = IPI_MSG_A2D_GET_EMI_ADDRESS;
-	ipi_msg.param1     = sizeof(usip_emi_info);
-	ipi_msg.param2     = 0;
-
-	// Send EMI Address to Hifi3 Via IPI
-	adsp_register_feature(BLE_CALL_UL_FEATURE_ID);
-	send_result = audio_send_ipi_msg(
-					 &ipi_msg, TASK_SCENE_BLECALLUL,
-					 AUDIO_IPI_LAYER_TO_DSP,
-					 AUDIO_IPI_PAYLOAD,
-					 AUDIO_IPI_MSG_BYPASS_ACK,
-					 IPI_MSG_A2D_GET_EMI_ADDRESS,
-					 sizeof(usip_emi_info),
-					 0,
-					 (char *)&usip_emi_info);
-	adsp_deregister_feature(BLE_CALL_UL_FEATURE_ID);
-
-	if (send_result != 0)
-		pr_info("%s(), BLE scp_ipi send fail\n", __func__);
-	else
-		pr_debug("%s(), BLE scp_ipi send succeed\n", __func__);
-}
-
+#ifdef CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT
 static void usip_send_emi_info_to_dsp(void)
 {
 	int send_result = 0;
@@ -346,8 +238,7 @@ static void usip_send_emi_info_to_dsp(void)
 
 	offset = EMI_TABLE[SP_EMI_ADSP_USIP_PHONECALL][SP_EMI_OFFSET];
 	usip_emi_info[0] = usip.addr_phy + offset;
-	usip_emi_info[1] = EMI_TABLE[SP_EMI_ADSP_USIP_PHONECALL][SP_EMI_SIZE] +
-		EMI_TABLE[SP_EMI_ADSP_USIP_SMARTPA][SP_EMI_SIZE];
+	usip_emi_info[1] = EMI_TABLE[SP_EMI_ADSP_USIP_PHONECALL][SP_EMI_SIZE];
 
 	ipi_msg.magic      = IPI_MSG_MAGIC_NUMBER;
 	ipi_msg.task_scene = TASK_SCENE_PHONE_CALL;
@@ -376,26 +267,6 @@ static void usip_send_emi_info_to_dsp(void)
 		pr_info("%s(), scp_ipi send fail\n", __func__);
 	else
 		pr_debug("%s(), scp_ipi send succeed\n", __func__);
-
-	/* Send EMI Address to Hifi3 Via IPI*/
-	if ((usip.adsp_phone_call_enh_config & 0x2) == 0x2) {
-		ipi_msg.task_scene = TASK_SCENE_PHONE_CALL_SUB;
-		adsp_register_feature(VOICE_CALL_SUB_FEATURE_ID);
-		send_result = audio_send_ipi_msg(
-					 &ipi_msg, TASK_SCENE_PHONE_CALL_SUB,
-					 AUDIO_IPI_LAYER_TO_DSP,
-					 AUDIO_IPI_PAYLOAD,
-					 AUDIO_IPI_MSG_BYPASS_ACK,
-					 IPI_MSG_A2D_GET_EMI_ADDRESS,
-					 sizeof(usip_emi_info),
-					 0,
-					 (char *)&usip_emi_info);
-		adsp_deregister_feature(VOICE_CALL_SUB_FEATURE_ID);
-		if (send_result != 0)
-			pr_info("%s(), scp_ipi send sub fail\n", __func__);
-		else
-			pr_debug("%s(), scp_ipi send sub succeed\n", __func__);
-	}
 }
 
 static int audio_call_event_receive(struct notifier_block *this,
@@ -407,8 +278,6 @@ static int audio_call_event_receive(struct notifier_block *this,
 		break;
 	case ADSP_EVENT_READY:
 		usip_send_emi_info_to_dsp();
-		usip_send_emi_info_to_dsp_ble_ul();
-		usip_send_emi_info_to_dsp_ble_dl();
 		break;
 	default:
 		pr_info("event %lu err", event);
@@ -420,7 +289,7 @@ static struct notifier_block audio_call_notifier = {
 	.notifier_call = audio_call_event_receive,
 	.priority = VOICE_CALL_FEATURE_PRI,
 };
-#endif /* end of CONFIG_MTK_AUDIODSP_SUPPORT */
+#endif /* end of CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT */
 
 static int usip_open(struct inode *inode, struct file *file)
 {
@@ -429,10 +298,8 @@ static int usip_open(struct inode *inode, struct file *file)
 
 	if (!usip.memory_ready) {
 		usip_get_addr();
-#if IS_ENABLED(CONFIG_MTK_AUDIODSP_SUPPORT)
+#ifdef CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT
 		usip_send_emi_info_to_dsp();
-		usip_send_emi_info_to_dsp_ble_ul();
-		usip_send_emi_info_to_dsp_ble_dl();
 #endif
 	}
 
@@ -443,7 +310,7 @@ static const struct file_operations usip_fops = {
 	.owner = THIS_MODULE,
 	.open = usip_open,
 	.unlocked_ioctl = usip_ioctl,
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 	.compat_ioctl = usip_compat_ioctl,
 #endif
 	.mmap = usip_mmap,
@@ -456,53 +323,7 @@ static struct miscdevice usip_miscdevice = {
 	.fops       = &usip_fops,
 };
 #endif
-static const struct of_device_id usip_dt_match[] = {
-	{ .compatible = "mediatek,speech_usip_mem", },
-	{},
-};
 
-static int speech_usip_dev_probe(struct platform_device *pdev)
-{
-	/* get adsp phone call config*/
-/*
-
-#if IS_ENABLED(CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT)
-	usip.adsp_phone_call_enh_config=1;
-#else
-	usip.adsp_phone_call_enh_config=0;
-#endif
-*/
-
-	int ret = of_property_read_u32(pdev->dev.of_node,
-				   "adsp_phone_call_enh_enable",
-				   &(usip.adsp_phone_call_enh_config));
-
-	if (ret != 0)
-		pr_info("%s adsp_phone_call_enh_enable error\n", __func__);
-	else
-		pr_debug("%s adsp_phone_call_enh_enable is %d\n", __func__, usip.adsp_phone_call_enh_config);
-#if IS_ENABLED(CONFIG_MTK_AUDIODSP_SUPPORT)
-	usip_send_emi_info_to_dsp();
-	usip_send_emi_info_to_dsp_ble_ul();
-	usip_send_emi_info_to_dsp_ble_dl();
-#endif
-	return 0;
-}
-
-static int speech_usip_dev_remove(struct platform_device *pdev)
-{
-	return 0;
-}
-
-static struct platform_driver speech_usip_mem = {
-	.driver = {
-		   .name = "speech_usip_mem",
-		   .owner = THIS_MODULE,
-		   .of_match_table = usip_dt_match,
-	},
-	.probe = speech_usip_dev_probe,
-	.remove = speech_usip_dev_remove,
-};
 
 static int __init usip_init(void)
 {
@@ -525,12 +346,19 @@ static int __init usip_init(void)
 
 	/* init usip info */
 	usip.memory_addr = 0x11220000L;
+#ifdef CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT
+	usip.adsp_phone_call_enh_config = 1;
+#else
+	usip.adsp_phone_call_enh_config = 0;
+#endif
 
-
-#if IS_ENABLED(CONFIG_MTK_AUDIODSP_SUPPORT)
+#ifdef CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT
+#ifdef AUDIO_DSP_V1
+	adsp_A_register_notify(&audio_call_notifier);
+#else
 	adsp_register_notify(&audio_call_notifier);
 #endif
-	ret = platform_driver_register(&speech_usip_mem);
+#endif
 
 	return ret;
 }

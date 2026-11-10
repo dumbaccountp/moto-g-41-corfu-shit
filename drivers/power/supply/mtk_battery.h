@@ -8,16 +8,15 @@
 #define __MTK_BATTERY_INTF_H__
 
 #include <linux/alarmtimer.h>
-#include <linux/atomic.h>
 #include <linux/extcon.h>
 #include <linux/hrtimer.h>
 #include <linux/nvmem-consumer.h>
 #include <linux/power_supply.h>
 #include <linux/sysfs.h>
 #include <linux/wait.h>
-#include <linux/ktime.h>
-#include <linux/power/moto_chg_tcmd.h>
 #include "mtk_gauge.h"
+
+#include <linux/power/moto_chg_tcmd.h>
 
 
 #define NETLINK_FGD 26
@@ -26,7 +25,6 @@
 #define UNIT_TRANS_1000	1000
 #define UNIT_TRANS_60	60
 #define MAX_TABLE		10
-#define MAX_CHARGE_RDC 5
 
 #define BMLOG_ERROR_LEVEL   3
 #define BMLOG_WARNING_LEVEL 4
@@ -113,21 +111,7 @@ enum battery_property {
 	BAT_PROP_INIT_DONE,
 	BAT_PROP_FG_RESET,
 	BAT_PROP_LOG_LEVEL,
-	BAT_PROP_TEMP_TH_GAP,
-	BAT_PROP_BATTERY_CYCLE,
 };
-
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-struct usb_data {
-	struct power_supply_desc psd;
-	struct power_supply_config psy_cfg;
-	struct power_supply *psy;
-	struct power_supply *chg_psy;
-
-	int usb_online;
-	int charger_vol;
-};
-#endif
 
 struct battery_data {
 	struct power_supply_desc psd;
@@ -143,18 +127,6 @@ struct battery_data {
 	/* Add for Battery Service */
 	int bat_batt_vol;
 	int bat_batt_temp;
-//#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-//	int charger_vol;
-//#endif
-	struct moto_chg_tcmd_client bat_tcmd_client;//moto add
-};
-
-struct VersionControl {
-	int androidVersion;
-	int daemon_cmds;
-	int kernel_cmds;
-	int custom_data_len;
-	int custom_table_len;
 };
 
 enum fg_daemon_cmds {
@@ -163,8 +135,6 @@ enum fg_daemon_cmds {
 	FG_DAEMON_CMD_GET_CUSTOM_SETTING,
 	FG_DAEMON_CMD_GET_CUSTOM_TABLE,
 	FG_DAEMON_CMD_SEND_CUSTOM_TABLE,
-	FG_DAEMON_CMD_SEND_VERSION_CONTROL,
-	FG_DAEMON_CMD_GET_VERSION_CONTROL,
 
 	FG_DAEMON_CMD_IS_BAT_EXIST,
 	FG_DAEMON_CMD_GET_INIT_FLAG,
@@ -273,11 +243,6 @@ enum fg_daemon_cmds {
 	FG_DAEMON_CMD_GET_DIFF_SOC_SET,
 	FG_DAEMON_CMD_SET_ZCV_INTR_EN,
 	FG_DAEMON_CMD_GET_IS_FORCE_FULL,
-	FG_DAEMON_CMD_GET_ZCV_INTR_CURR,
-	FG_DAEMON_CMD_GET_CHARGE_POWER_SEL,
-	FG_DAEMON_CMD_COMMUNICATION_INT,
-	FG_DAEMON_CMD_SET_BATTERY_CAPACITY,
-	FG_DAEMON_CMD_GET_BH_DATA,
 
 	FG_DAEMON_CMD_FROM_USER_NUMBER
 
@@ -299,9 +264,6 @@ enum Fg_kernel_cmds {
 	FG_KERNEL_CMD_REQ_CHANGE_AGING_DATA,
 	FG_KERNEL_CMD_AG_LOG_TEST,
 	FG_KERNEL_CMD_CHG_DECIMAL_RATE,
-	FG_KERNEL_CMD_FORCE_BAT_TEMP,
-	FG_KERNEL_CMD_SEND_BH_DATA,
-	FG_KERNEL_CMD_GET_DYNAMIC_CV,
 
 	FG_KERNEL_CMD_FROM_USER_NUMBER
 
@@ -335,30 +297,12 @@ enum gauge_event {
 	GAUGE_EVT_MAX
 };
 
-
-enum charge_sel {
-	CHARGE_NORMAL,
-	CHARGE_R1,
-	CHARGE_R2,
-	CHARGE_R3,
-	CHARGE_R4,
-};
-
-struct fuelgauge_charger_struct {
-	int rdc[MAX_CHARGE_RDC];
-};
-
-struct fuelgauge_charge_pseudo100_s {
-	int pseudo[MAX_CHARGE_RDC];
-};
-
-
 struct fuelgauge_profile_struct {
-	int mah;
+	unsigned int mah;
 	unsigned short voltage;
 	unsigned short resistance; /* Ohm*/
-	int percentage;
-	struct fuelgauge_charger_struct charge_r;
+	unsigned short resistance2; /* Ohm*/
+	unsigned short percentage;
 };
 
 struct fuel_gauge_table {
@@ -373,7 +317,6 @@ struct fuel_gauge_table {
 	int shutdown_hl_zcv;
 
 	int size;
-	struct fuelgauge_charge_pseudo100_s r_pseudo100;
 	struct fuelgauge_profile_struct fg_profile[100];
 };
 
@@ -429,15 +372,9 @@ struct fuel_gauge_custom_data {
 	int car_tune_value;
 	int fg_meter_resistance;
 	int com_fg_meter_resistance;
-	int curr_measure_20a;
-	int unit_multiple;
 	int r_fg_value;
 	int com_r_fg_value;
 	int mtk_chr_exist;
-
-	/* Dynamic cv*/
-	int dynamic_cv_factor;
-	int charger_ieoc;
 
 	/* Aging Compensation 1*/
 	int aging_one_en;
@@ -543,7 +480,6 @@ struct fuel_gauge_custom_data {
 	/* ZCV update */
 	int zcv_suspend_time;
 	int sleep_current_avg;
-	int zcv_com_vol_limit;
 
 	int dc_ratio_sel;
 	int dc_r_cnt;
@@ -563,17 +499,6 @@ struct fuel_gauge_custom_data {
 	int ui_full_limit_soc4;
 	int ui_full_limit_ith4;
 	int ui_full_limit_time;
-
-	int ui_full_limit_fc_soc0;
-	int ui_full_limit_fc_ith0;
-	int ui_full_limit_fc_soc1;
-	int ui_full_limit_fc_ith1;
-	int ui_full_limit_fc_soc2;
-	int ui_full_limit_fc_ith2;
-	int ui_full_limit_fc_soc3;
-	int ui_full_limit_fc_ith3;
-	int ui_full_limit_fc_soc4;
-	int ui_full_limit_fc_ith4;
 
 	/* using voltage to limit uisoc in 1% case */
 	int ui_low_limit_en;
@@ -625,21 +550,6 @@ struct fuel_gauge_custom_data {
 	int power_on_car_nochr;
 	int shutdown_car_ratio;
 
-	/* battery health */
-	int aging_diff_max_threshold;
-	int aging_diff_max_level;
-	int aging_factor_t_min;
-	int cycle_diff;
-	int aging_count_min;
-	int default_score;
-	int default_score_quantity;
-	int fast_cycle_set;
-	int level_max_change_bat;
-	int diff_max_change_bat;
-	int aging_tracking_start;
-	int max_aging_data;
-	int max_fast_data;
-	int fast_data_threshold_score;
 	int min_uisoc_at_kpoc;
 
 	/* log_level */
@@ -653,7 +563,7 @@ struct fgd_cmd_param_t_custom {
 	struct fuel_gauge_table_custom_data fg_table_cust_data;
 };
 
-struct fg_temp {
+struct fuelgauge_temperature {
 	signed int BatteryTemp;
 	signed int TemperatureR;
 };
@@ -666,13 +576,11 @@ struct gauge_consumer {
 	long end;
 	int variable;
 
-	int (*callback)(struct mtk_battery *gm,
-		struct gauge_consumer *consumer);
+	int (*callback)(struct gauge_consumer *consumer);
 	struct list_head list;
 };
 
 struct mtk_coulomb_service {
-	struct mtk_battery *gm;
 	struct list_head coulomb_head_plus;
 	struct list_head coulomb_head_minus;
 	struct mutex coulomb_lock;
@@ -682,8 +590,6 @@ struct mtk_coulomb_service {
 	struct wakeup_source *wlock;
 	wait_queue_head_t wait_que;
 	bool coulomb_thread_timeout;
-	atomic_t in_sleep;
-	struct notifier_block pm_nb;
 	int fgclog_level;
 	int pre_coulomb;
 	bool init;
@@ -831,9 +737,12 @@ struct simulator_log {
 #define INIT_VOLTAGE 3450
 #ifdef MTK_BASE
 #define BATTERY_SHUTDOWN_TEMPERATURE 60
+#elif defined(CONFIG_MTK_DISABLE_BAT_HIGH_TEMP_PROTECT)
+#define BATTERY_SHUTDOWN_TEMPERATURE 100
 #else
-#define BATTERY_SHUTDOWN_TEMPERATURE 80
+#define BATTERY_SHUTDOWN_TEMPERATURE 70
 #endif
+
 struct shutdown_condition {
 	bool is_overheat;
 	bool is_soc_zero_percent;
@@ -848,7 +757,7 @@ struct shutdown_controller {
 	bool overheat;
 	wait_queue_head_t  wait_que;
 	struct shutdown_condition shutdown_status;
-	ktime_t pre_time[SHUTDOWN_FACTOR_MAX];
+	struct timespec pre_time[SHUTDOWN_FACTOR_MAX];
 	int avgvbat;
 	bool lowbatteryshutdown;
 	int batdata[AVGVBAT_ARRAY_SIZE];
@@ -883,41 +792,13 @@ struct BAT_EC_Struct {
 	int debug_kill_daemontest;
 };
 
-#define ZCV_LOG_LEN 10
-
-struct zcv_log {
-	struct timespec64 time;
-	int car;
-	int dtime;
-	int dcar;
-	int avgcurrent;
-};
-
-struct zcv_filter {
-	int fidx;
-	int lidx;
-	int size;
-	int zcvtime;
-	int zcvcurrent;
-	struct zcv_log log[ZCV_LOG_LEN];
-};
-
-
-struct ag_center_data_st {
-	int data[43];
-	struct timespec64 times[3];
-};
-
 struct mtk_battery {
 	/*linux driver related*/
 	wait_queue_head_t  wait_que;
 	unsigned int fg_update_flag;
 	struct hrtimer fg_hrtimer;
 	struct mutex ops_lock;
-	struct mutex fg_update_lock;
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	struct usb_data usb_data;
-#endif
+
 	struct battery_data bs_data;
 	struct mtk_coulomb_service cs;
 	struct mtk_gauge *gauge;
@@ -944,30 +825,19 @@ struct mtk_battery {
 	bool ntc_disable_nafg;
 	bool cmd_disable_nafg;
 
+/*battery full*/
+	bool is_force_full;
+
 	/*battery plug in out*/
 	int chr_type;
 	bool disable_plug_int;
 
-	/*battery full*/
-	bool is_force_full;
-	int charge_power_sel;
-
 	/*battery status*/
-	int vbat0_flag;
-	int present;
-	int imix;
-	int baton;
-	int vbat;
-	int ibat;
-	int tbat;
 	int soc;
 	int ui_soc;
-	ktime_t uisoc_oldtime;
+	struct timespec uisoc_oldtime;
 	int d_saved_car;
-	struct zcv_filter zcvf;
-
-	/*battery health*/
-	struct ag_center_data_st bh_data;
+	int tbat_precise;
 
 	/*battery interrupt*/
 	/* coulomb interrupt */
@@ -987,7 +857,7 @@ struct mtk_battery {
 	struct gauge_consumer uisoc_minus;
 
 	/* charge full interrupt */
-	struct timespec64 chr_full_handler_time;
+	struct timespec chr_full_handler_time;
 	bool b_EOC;
 
 	/* battery temperature interrupt */
@@ -1003,7 +873,7 @@ struct mtk_battery {
 
 	/*nafg monitor */
 	int last_nafg_cnt;
-	ktime_t last_nafg_update_time;
+	struct timespec last_nafg_update_time;
 	bool is_nafg_broken;
 
 	/* information from LK */
@@ -1014,10 +884,6 @@ struct mtk_battery {
 	int pl_shutdown_time;
 	int pl_two_sec_reboot;
 	int plug_miss_count;
-
-	/* suspend, resume notify */
-	bool in_sleep;
-	struct notifier_block pm_nb;
 
 	/* gauge timer */
 	struct alarm tracking_timer;
@@ -1035,13 +901,12 @@ struct mtk_battery {
 	int bat_cycle_thr;
 	int bat_cycle_car;
 	int bat_cycle_ncar;
-	int bat_cycle_count;
 
 	/* power misc */
 	struct shutdown_controller sdc;
 
 	/*sw average current*/
-	ktime_t sw_iavg_time;
+	struct timespec sw_iavg_time;
 	int sw_iavg_car;
 	int sw_iavg;
 	int sw_iavg_ht;
@@ -1079,11 +944,6 @@ struct mtk_battery {
 	struct fuel_gauge_custom_data fg_cust_data;
 	struct fuel_gauge_table_custom_data fg_table_cust_data;
 	struct fgd_cmd_param_t_custom fg_data;
-
-	/*daemon version control*/
-	struct VersionControl fg_version;
-	int fg_mode;
-
 	/* hwocv swocv */
 	int ext_hwocv_swocv;
 	int ext_hwocv_swocv_lt;
@@ -1091,15 +951,16 @@ struct mtk_battery {
 	/* battery temperature table */
 	int no_bat_temp_compensate;
 	int enable_tmp_intr_suspend;
-	int fg_current_pn_label;
 	struct battery_temperature_table rbat;
-	struct fg_temp *tmp_table;
+	struct fuelgauge_temperature *tmp_table;
 
 	void (*shutdown)(struct mtk_battery *gm);
 	int (*suspend)(struct mtk_battery *gm, pm_message_t state);
 	int (*resume)(struct mtk_battery *gm);
 
 	int log_level;
+
+	struct moto_chg_tcmd_client bat_tcmd_client;
 };
 
 struct mtk_battery_sysfs_field_info {
@@ -1115,10 +976,8 @@ struct mtk_battery_sysfs_field_info {
 extern void gauge_coulomb_service_init(struct mtk_battery *gm);
 extern void gauge_coulomb_consumer_init(struct gauge_consumer *coulomb,
 	struct device *dev, char *name);
-extern void gauge_coulomb_start(struct mtk_battery *gm,
-	struct gauge_consumer *coulomb, int car);
-extern void gauge_coulomb_stop(struct mtk_battery *gm,
-	struct gauge_consumer *coulomb);
+extern void gauge_coulomb_start(struct gauge_consumer *coulomb, int car);
+extern void gauge_coulomb_stop(struct gauge_consumer *coulomb);
 extern void gauge_coulomb_dump_list(struct mtk_battery *gm);
 extern void gauge_coulomb_before_reset(struct mtk_battery *gm);
 extern void gauge_coulomb_after_reset(struct mtk_battery *gm);
@@ -1163,8 +1022,6 @@ extern void disable_fg(struct mtk_battery *gm);
 extern int get_shutdown_cond(struct mtk_battery *gm);
 extern int get_shutdown_cond_flag(struct mtk_battery *gm);
 extern void set_shutdown_cond_flag(struct mtk_battery *gm, int val);
-extern bool set_charge_power_sel(enum charge_sel select);
-extern int dump_pseudo100(enum charge_sel select);
 /*mtk_battery.c end */
 
 /* mtk_battery_algo.c */
@@ -1172,6 +1029,8 @@ extern void battery_algo_init(struct mtk_battery *gm);
 extern void do_fg_algo(struct mtk_battery *gm, unsigned int intr_num);
 extern void fg_bat_temp_int_internal(struct mtk_battery *gm);
 /* mtk_battery_algo.c end */
-extern void disable_all_irq(struct mtk_battery *gm);
+
+extern int mmi_chrg_rate_check(void);
 extern int mmi_batt_health_check(void);
+
 #endif /* __MTK_BATTERY_INTF_H__ */

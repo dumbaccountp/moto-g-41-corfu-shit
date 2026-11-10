@@ -3,7 +3,6 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * (C) Copyright 2020 Hewlett Packard Enterprise Development LP
  * Copyright (c) 2004-2008 Silicon Graphics, Inc.  All Rights Reserved.
  */
 
@@ -94,8 +93,13 @@ xpc_get_rsvd_page_pa(int nasid)
 		if (ret != xpNeedMoreInfo)
 			break;
 
+		/* !!! L1_CACHE_ALIGN() is only a sn2-bte_copy requirement */
+		if (is_shub())
+			len = L1_CACHE_ALIGN(len);
+
 		if (len > buf_len) {
-			kfree(buf_base);
+			if (buf_base != NULL)
+				kfree(buf_base);
 			buf_len = L1_CACHE_ALIGN(len);
 			buf = xpc_kmalloc_cacheline_aligned(buf_len, GFP_KERNEL,
 							    &buf_base);
@@ -434,7 +438,7 @@ xpc_discovery(void)
 	 */
 	region_size = xp_region_size;
 
-	if (is_uv_system())
+	if (is_uv())
 		max_regions = 256;
 	else {
 		max_regions = 64;
@@ -442,13 +446,14 @@ xpc_discovery(void)
 		switch (region_size) {
 		case 128:
 			max_regions *= 2;
-			fallthrough;
+			/* fall through */
 		case 64:
 			max_regions *= 2;
-			fallthrough;
+			/* fall through */
 		case 32:
 			max_regions *= 2;
 			region_size = 16;
+			DBUG_ON(!is_shub2());
 		}
 	}
 

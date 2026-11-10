@@ -126,8 +126,8 @@ static int mddp_f_e_tag_packet(
 
 	if ((neigh == NULL) || !(neigh->nud_state & NUD_VALID)) {
 		MDDP_F_LOG(MDDP_LL_WARN,
-			"%s: Add MDDP Etag Fail, neigh is null or nud_state is not VALID\n",
-			__func__);
+				"%s: Add MDDP Etag Fail, neigh[%x]\n",
+				__func__, neigh);
 		if (neigh)
 			neigh_release(neigh);
 		return -1;
@@ -452,9 +452,9 @@ static netdev_tx_t mddp_netops_start_xmit(struct sk_buff *skb, struct net_device
 	return mddp_wan_netdev_ops_save->ndo_start_xmit(skb, dev);
 }
 
-static void mddp_netops_tx_timeout(struct net_device *dev, unsigned int txqueue)
+static void mddp_netops_tx_timeout(struct net_device *dev)
 {
-	mddp_wan_netdev_ops_save->ndo_tx_timeout(dev, txqueue);
+	mddp_wan_netdev_ops_save->ndo_tx_timeout(dev);
 }
 
 static int mddp_netops_do_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
@@ -468,9 +468,9 @@ static int mddp_netops_change_mtu(struct net_device *dev, int new_mtu)
 }
 
 static u16 mddp_netops_select_queue(struct net_device *dev, struct sk_buff *skb,
-				    struct net_device *sb_dev)
+				    struct net_device *sb_dev, select_queue_fallback_t fallback)
 {
-	return mddp_wan_netdev_ops_save->ndo_select_queue(dev, skb, sb_dev);
+	return mddp_wan_netdev_ops_save->ndo_select_queue(dev, skb, sb_dev, fallback);
 }
 
 static const struct net_device_ops mddp_wan_netdev_ops = {

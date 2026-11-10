@@ -1,10 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2013 - Virtual Open Systems
  * Author: Antonios Motakis <a.motakis@virtualopensystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2, as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
-
-#define dev_fmt(fmt)	"VFIO: " fmt
 
 #include <linux/device.h>
 #include <linux/acpi.h>
@@ -57,7 +63,7 @@ static int vfio_platform_acpi_probe(struct vfio_platform_device *vdev,
 
 	adev = ACPI_COMPANION(dev);
 	if (!adev) {
-		dev_err(dev, "ACPI companion device not found for %s\n",
+		pr_err("VFIO: ACPI companion device not found for %s\n",
 			vdev->name);
 		return -ENODEV;
 	}
@@ -72,11 +78,12 @@ static int vfio_platform_acpi_call_reset(struct vfio_platform_device *vdev,
 				  const char **extra_dbg)
 {
 #ifdef CONFIG_ACPI
+	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 	struct device *dev = vdev->device;
 	acpi_handle handle = ACPI_HANDLE(dev);
 	acpi_status acpi_ret;
 
-	acpi_ret = acpi_evaluate_object(handle, "_RST", NULL, NULL);
+	acpi_ret = acpi_evaluate_object(handle, "_RST", NULL, &buffer);
 	if (ACPI_FAILURE(acpi_ret)) {
 		if (extra_dbg)
 			*extra_dbg = acpi_format_exception(acpi_ret);
@@ -288,7 +295,7 @@ err_irq:
 	vfio_platform_regions_cleanup(vdev);
 err_reg:
 	mutex_unlock(&driver_lock);
-	module_put(vdev->parent_module);
+	module_put(THIS_MODULE);
 	return ret;
 }
 
@@ -407,7 +414,7 @@ static ssize_t vfio_platform_read_mmio(struct vfio_platform_region *reg,
 
 	if (!reg->ioaddr) {
 		reg->ioaddr =
-			ioremap(reg->addr, reg->size);
+			ioremap_nocache(reg->addr, reg->size);
 
 		if (!reg->ioaddr)
 			return -ENOMEM;
@@ -484,7 +491,7 @@ static ssize_t vfio_platform_write_mmio(struct vfio_platform_region *reg,
 
 	if (!reg->ioaddr) {
 		reg->ioaddr =
-			ioremap(reg->addr, reg->size);
+			ioremap_nocache(reg->addr, reg->size);
 
 		if (!reg->ioaddr)
 			return -ENOMEM;
@@ -630,7 +637,7 @@ static int vfio_platform_of_probe(struct vfio_platform_device *vdev,
 	ret = device_property_read_string(dev, "compatible",
 					  &vdev->compat);
 	if (ret)
-		dev_err(dev, "Cannot retrieve compat for %s\n", vdev->name);
+		pr_err("VFIO: Cannot retrieve compat for %s\n", vdev->name);
 
 	return ret;
 }
@@ -672,14 +679,14 @@ int vfio_platform_probe_common(struct vfio_platform_device *vdev,
 
 	ret = vfio_platform_get_reset(vdev);
 	if (ret && vdev->reset_required) {
-		dev_err(dev, "No reset function found for device %s\n",
-			vdev->name);
+		pr_err("VFIO: No reset function found for device %s\n",
+		       vdev->name);
 		return ret;
 	}
 
 	group = vfio_iommu_group_get(dev);
 	if (!group) {
-		dev_err(dev, "No IOMMU group for device %s\n", vdev->name);
+		pr_err("VFIO: No IOMMU group for device %s\n", vdev->name);
 		ret = -EINVAL;
 		goto put_reset;
 	}

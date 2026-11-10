@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef __N3D_H__
 #define __N3D_H__
 
+#include <linux/atomic.h>
 #include <linux/mutex.h>
 
 #include "n3d_clk.h"
@@ -15,19 +16,16 @@
 
 #define N3D_DEV_NAME "seninf_n3d"
 
-#define SENINF_N3D_USE_RPM
-
 struct SENINF_N3D {
 	dev_t dev_no;
 	struct cdev *pchar_dev;
 	struct class *pclass;
-	struct device *dev;
 
 	struct SENINF_N3D_CLK clk;
 	struct base_reg regs;
 
 	struct mutex n3d_mutex;
-	int is_powered;
+	atomic_t n3d_open_cnt;
 
 	struct sensor_info *sync_sensors[MAX_NUM_OF_SUPPORT_SENSOR];
 	unsigned int fl_result[MAX_NUM_OF_SUPPORT_SENSOR];
@@ -35,11 +33,6 @@ struct SENINF_N3D {
 	int sync_state;
 	struct FrameSync *fsync_mgr;
 	int irq_id;
-
-#ifdef SENINF_N3D_USE_RPM
-	int pm_domain_cnt;
-	struct device **pm_domain_devs;
-#endif
 };
 
 #endif

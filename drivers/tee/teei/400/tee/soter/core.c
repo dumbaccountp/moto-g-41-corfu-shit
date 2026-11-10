@@ -22,8 +22,7 @@
 #include <linux/uaccess.h>
 
 #define IMSG_TAG "[tz_driver]"
-#include "imsg_log.h"
-
+#include <imsg_log.h>
 
 #include "soter_private.h"
 #include "soter_smc.h"
@@ -93,7 +92,7 @@ static void soter_release(struct tee_context *ctx)
 	struct soter_context_data *ctxdata = ctx->data;
 	struct tee_shm *shm;
 	struct optee_msg_arg *arg = NULL;
-	phys_addr_t parg = 0;
+	phys_addr_t parg;
 	struct soter_session *sess;
 	struct soter_session *sess_tmp;
 
@@ -230,7 +229,7 @@ soter_config_shm_memremap(void **memremaped_shm)
 	if (size < 2 * SOTER_SHM_NUM_PRIV_PAGES * PAGE_SIZE) {
 		IMSG_ERROR("too small shared memory area\n");
 #ifndef TEEI_DTS_RESERVED_MEM
-		kfree(reserved_mem);
+	kfree(reserved_mem);
 #endif
 		return ERR_PTR(-EINVAL);
 	}
@@ -280,7 +279,7 @@ static void soter_remove(struct soter_priv *soter)
 	kfree(soter);
 }
 
-int soter_driver_init(void)
+static int __init soter_driver_init(void)
 {
 	struct tee_shm_pool *pool = NULL;
 	struct tee_device *teedev = NULL;
@@ -326,12 +325,28 @@ err:
 		isee_shm_pool_free(pool);
 	return rc;
 }
-EXPORT_SYMBOL_GPL(soter_driver_init);
+module_init(soter_driver_init);
 
-void soter_driver_exit(void)
+static void __exit soter_driver_exit(void)
 {
 	if (soter_priv)
 		soter_remove(soter_priv);
 	soter_priv = NULL;
 }
-EXPORT_SYMBOL_GPL(soter_driver_exit);
+module_exit(soter_driver_exit);
+
+#ifdef TEEI_DTS_RESERVED_MEM
+static int __init shared_mem_pool_setup(struct reserved_mem *rmem)
+{
+	reserved_mem = rmem;
+	return 0;
+}
+RESERVEDMEM_OF_DECLARE(soter_shared_mem, "microtrust,shared_mem",
+						shared_mem_pool_setup);
+#endif
+
+MODULE_AUTHOR("Microtrust");
+MODULE_DESCRIPTION("Soter driver");
+MODULE_SUPPORTED_DEVICE("");
+MODULE_VERSION("1.0");
+MODULE_LICENSE("GPL v2");

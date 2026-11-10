@@ -1,8 +1,21 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/kernel/unwind.c
  *
  * Copyright (C) 2008 ARM Limited
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  *
  * Stack unwinding support for ARM
  *
@@ -390,7 +403,7 @@ int unwind_frame(struct stackframe *frame)
 
 	idx = unwind_find_idx(frame->pc);
 	if (!idx) {
-		pr_warn("unwind: Index not found %08lx\n", frame->pc);
+		/* pr_warn("unwind: Index not found %08lx\n", frame->pc); */
 		return -URC_FAILURE;
 	}
 
@@ -444,7 +457,7 @@ int unwind_frame(struct stackframe *frame)
 		ctrl.vrs[PC] = ctrl.vrs[LR];
 
 	/* check for infinite loop */
-	if (frame->pc == ctrl.vrs[PC] && frame->sp == ctrl.vrs[SP])
+	if (frame->pc == ctrl.vrs[PC])
 		return -URC_FAILURE;
 
 	frame->fp = ctrl.vrs[FP];
@@ -452,11 +465,13 @@ int unwind_frame(struct stackframe *frame)
 	frame->lr = ctrl.vrs[LR];
 	frame->pc = ctrl.vrs[PC];
 
+	if (!kernel_text_address(frame->pc))
+		return -URC_FAILURE;
+
 	return URC_OK;
 }
 
-void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk,
-		      const char *loglvl)
+void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 {
 	struct stackframe frame;
 
@@ -494,7 +509,7 @@ void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk,
 		urc = unwind_frame(&frame);
 		if (urc < 0)
 			break;
-		dump_backtrace_entry(where, frame.pc, frame.sp - 4, loglvl);
+		dump_backtrace_entry(where, frame.pc, frame.sp - 4);
 	}
 }
 

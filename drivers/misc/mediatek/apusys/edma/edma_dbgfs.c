@@ -135,14 +135,25 @@ static ssize_t edma_debuglv_store(struct device *dev,
 			   struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
-	unsigned int input = 0;
-	int ret;
+	unsigned int input = 0, portNum;
+	int ret, i;
+	struct edma_device *edma_device = dev_get_drvdata(dev);
+	struct edma_sub *edma_sub;
 
 	ret = kstrtouint(buf, 10, &input);
 
 	dev_notice(dev, "set debug lv = %d\n", input);
 
 	g_edma_log_lv = input;
+
+	if (input >= 10 && input < 18) {
+		portNum = input - 10;
+		for (i = 0; i < edma_device->edma_sub_num; i++) {
+			edma_sub = edma_device->edma_sub[i];
+			edma_sub->dbg_portID = input - 10;
+		}
+		dev_notice(dev, "set portNum = %d\n", portNum);
+	}
 
 	return count;
 }

@@ -1,6 +1,7 @@
-config MTK_CAMERA_RSC_ISP6S
+config MTK_CAMERA_ISP_RSC_SUPPORT
 	tristate "[RSC]Rolling Shutter Cancellation Support"
-	depends on MTK_CAMERA_ISP_SUPPORT
+	default n
+	depends on MTK_CAMERA_ISP
 	help
 	  Rolling Shutter Cancellation. Enable to compensate
 	  any distortion due to the interplay of moving objects

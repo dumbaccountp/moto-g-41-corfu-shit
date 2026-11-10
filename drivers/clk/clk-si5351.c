@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * clk-si5351.c: Silicon Laboratories Si5351A/B/C I2C Clock Generator
  *
@@ -7,9 +6,14 @@
  *
  * References:
  * [1] "Si5351A/B/C Data Sheet"
- *     https://www.silabs.com/Support%20Documents/TechnicalDocs/Si5351.pdf
+ *     http://www.silabs.com/Support%20Documents/TechnicalDocs/Si5351.pdf
  * [2] "Manually Generating an Si5351 Register Map"
- *     https://www.silabs.com/Support%20Documents/TechnicalDocs/AN619.pdf
+ *     http://www.silabs.com/Support%20Documents/TechnicalDocs/AN619.pdf
+ *
+ * This program is free software; you can redistribute  it and/or modify it
+ * under  the terms of  the GNU General  Public License as published by the
+ * Free Software Foundation;  either version 2 of the  License, or (at your
+ * option) any later version.
  */
 
 #include <linux/module.h>
@@ -1211,8 +1215,8 @@ static int si5351_dt_parse(struct i2c_client *client,
 	/* per clkout properties */
 	for_each_child_of_node(np, child) {
 		if (of_property_read_u32(child, "reg", &num)) {
-			dev_err(&client->dev, "missing reg property of %pOFn\n",
-				child);
+			dev_err(&client->dev, "missing reg property of %s\n",
+				child->name);
 			goto put_child;
 		}
 
@@ -1366,7 +1370,7 @@ static int si5351_i2c_probe(struct i2c_client *client,
 	enum si5351_variant variant = (enum si5351_variant)id->driver_data;
 	struct si5351_platform_data *pdata;
 	struct si5351_driver_data *drvdata;
-	struct clk_init_data init;
+	struct clk_init_data init = {};
 	const char *parent_names[4];
 	u8 num_parents, num_clocks;
 	int ret, n;

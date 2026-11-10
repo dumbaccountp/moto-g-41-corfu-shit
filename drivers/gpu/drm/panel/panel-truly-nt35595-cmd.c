@@ -1,15 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
- */
+*/
 
 #include <linux/backlight.h>
+#include <drm/drmP.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
-#include <drm/drm_modes.h>
-#include <linux/delay.h>
-#include <drm/drm_connector.h>
-#include <drm/drm_device.h>
 
 #include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
@@ -20,12 +17,14 @@
 
 #include <linux/module.h>
 #include <linux/of_platform.h>
+#include <linux/of_graph.h>
 #include <linux/platform_device.h>
 
 #define CONFIG_MTK_PANEL_EXT
 #if defined(CONFIG_MTK_PANEL_EXT)
-#include "../mediatek/mediatek_v2/mtk_panel_ext.h"
-#include "../mediatek/mediatek_v2/mtk_drm_graphics_base.h"
+#include "../mediatek/mtk_panel_ext.h"
+#include "../mediatek/mtk_log.h"
+#include "../mediatek/mtk_drm_graphics_base.h"
 #endif
 
 #ifdef CONFIG_MTK_ROUND_CORNER_SUPPORT
@@ -899,6 +898,7 @@ static const struct drm_display_mode default_mode = {
 	.vsync_start = 1920 + 10,
 	.vsync_end = 1920 + 10 + 2,
 	.vtotal = 1920 + 10 + 2 + 8,
+	.vrefresh = 60,
 };
 
 #if defined(CONFIG_MTK_PANEL_EXT)
@@ -926,14 +926,14 @@ static int panel_ata_check(struct drm_panel *panel)
 	if (ret < 0)
 		pr_err("%s error\n", __func__);
 
-	pr_info("ATA read data %x %x %x\n", data[0], data[1], data[2]);
+	DDPINFO("ATA read data %x %x %x\n", data[0], data[1], data[2]);
 
 	if (data[0] == id[0] &&
 			data[1] == id[1] &&
 			data[2] == id[2])
 		return 1;
 
-	pr_info("ATA expect read data is %x %x %x\n",
+	DDPINFO("ATA expect read data is %x %x %x\n",
 			id[0], id[1], id[2]);
 
 	return 0;
@@ -993,24 +993,24 @@ struct panel_desc {
 	} delay;
 };
 
-static int lcm_get_modes(struct drm_panel *panel, struct drm_connector *connector)
+static int lcm_get_modes(struct drm_panel *panel)
 {
 	struct drm_display_mode *mode;
 
-	mode = drm_mode_duplicate(connector->dev, &default_mode);
+	mode = drm_mode_duplicate(panel->drm, &default_mode);
 	if (!mode) {
-		dev_err(connector->dev->dev, "failed to add mode %ux%ux@%u\n",
+		dev_err(panel->drm->dev, "failed to add mode %ux%ux@%u\n",
 			default_mode.hdisplay, default_mode.vdisplay,
-			drm_mode_vrefresh(&default_mode));
+			default_mode.vrefresh);
 		return -ENOMEM;
 	}
 
 	drm_mode_set_name(mode);
 	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
-	drm_mode_probed_add(connector, mode);
+	drm_mode_probed_add(panel->connector, mode);
 
-	connector->display_info.width_mm = 64;
-	connector->display_info.height_mm = 129;
+	panel->connector->display_info.width_mm = 64;
+	panel->connector->display_info.height_mm = 129;
 
 	return 1;
 }
@@ -1029,6 +1029,25 @@ static int lcm_probe(struct mipi_dsi_device *dsi)
 	struct lcm *ctx;
 	struct device_node *backlight;
 	int ret;
+	struct device_node *dsi_node, *remote_node = NULL, *endpoint = NULL;
+
+	dsi_node = of_get_parent(dev->of_node);
+	if (dsi_node) {
+		endpoint = of_graph_get_next_endpoint(dsi_node, NULL);
+		if (endpoint) {
+			remote_node = of_graph_get_remote_port_parent(endpoint);
+			if (!remote_node) {
+				pr_info("No panel connected,skip probe lcm\n");
+				return -ENODEV;
+			}
+			pr_info("device node name:%s\n", remote_node->name);
+		}
+	}
+	if (remote_node != dev->of_node) {
+		pr_info("%s+ skip probe due to not current lcm\n", __func__);
+		return -ENODEV;
+	}
+
 
 	pr_info("%s+\n", __func__);
 	ctx = devm_kzalloc(dev, sizeof(struct lcm), GFP_KERNEL);
@@ -1079,9 +1098,13 @@ static int lcm_probe(struct mipi_dsi_device *dsi)
 	ctx->prepared = true;
 	ctx->enabled = true;
 
-	drm_panel_init(&ctx->panel, dev, &lcm_drm_funcs, DRM_MODE_CONNECTOR_DSI);
+	drm_panel_init(&ctx->panel);
+	ctx->panel.dev = dev;
+	ctx->panel.funcs = &lcm_drm_funcs;
 
-	drm_panel_add(&ctx->panel);
+	ret = drm_panel_add(&ctx->panel);
+	if (ret < 0)
+		return ret;
 
 	ret = mipi_dsi_attach(dsi);
 	if (ret < 0)
@@ -1101,17 +1124,9 @@ static int lcm_probe(struct mipi_dsi_device *dsi)
 static int lcm_remove(struct mipi_dsi_device *dsi)
 {
 	struct lcm *ctx = mipi_dsi_get_drvdata(dsi);
-#if defined(CONFIG_MTK_PANEL_EXT)
-	struct mtk_panel_ctx *ext_ctx = find_panel_ctx(&ctx->panel);
-#endif
 
 	mipi_dsi_detach(dsi);
 	drm_panel_remove(&ctx->panel);
-
-#if defined(CONFIG_MTK_PANEL_EXT)
-		mtk_panel_detach(ext_ctx);
-		mtk_panel_remove(ext_ctx);
-#endif
 
 	return 0;
 }

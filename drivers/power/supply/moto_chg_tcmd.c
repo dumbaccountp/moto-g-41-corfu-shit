@@ -102,7 +102,6 @@ static struct moto_chg_tcmd_client* chg_client;
 static struct moto_chg_tcmd_client* bat_client;
 static struct moto_chg_tcmd_client* pm_adc_client;
 static struct moto_chg_tcmd_client* ap_adc_client;
-static struct moto_chg_tcmd_client* wls_client;
 #endif
 
 /* NCP15WF104F03RC(100K) */
@@ -317,7 +316,6 @@ static ssize_t force_usb_suspend_store(struct device *dev, struct device_attribu
 	}
 
 	val = !val;
-
 	/*If charger driver has usb enable interface*/
 	if (chg_client->set_usb_enable) {
 		ret = chg_client->set_usb_enable(chg_client->data, val);
@@ -556,7 +554,7 @@ static ssize_t usb_voltage_show(struct device *dev, struct device_attribute *att
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct moto_chg_tcmd_data *data = platform_get_drvdata(pdev);
-	int val = 0;
+	int val;
 	int ret;
 
 	if (!chg_client) {
@@ -591,7 +589,7 @@ static ssize_t bat_temp_show(struct device *dev, struct device_attribute *attr, 
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct moto_chg_tcmd_data *data = platform_get_drvdata(pdev);
-	int val = 0;
+	int val;
 	int ret;
 
 	if (!bat_client) {
@@ -606,9 +604,10 @@ static ssize_t bat_temp_show(struct device *dev, struct device_attribute *attr, 
 		val = -EINVAL;
 		goto end;
 	}
-	data->bat_temp = val;
 
 end:
+	data->bat_temp = val;
+
 	return snprintf(buf, PAGE_SIZE, "%d\n", data->bat_temp);
 }
 
@@ -625,7 +624,7 @@ static ssize_t bat_voltage_show(struct device *dev, struct device_attribute *att
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct moto_chg_tcmd_data *data = platform_get_drvdata(pdev);
-	int val = 0;
+	int val;
 	int ret;
 
 	if (!bat_client) {
@@ -640,9 +639,10 @@ static ssize_t bat_voltage_show(struct device *dev, struct device_attribute *att
 		val = -EINVAL;
 		goto end;
 	}
-	data->bat_voltage = val;
 
 end:
+	data->bat_voltage = val;
+
 	return snprintf(buf, PAGE_SIZE, "%d\n", data->bat_voltage);
 }
 
@@ -659,7 +659,7 @@ static ssize_t bat_ocv_show(struct device *dev, struct device_attribute *attr, c
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct moto_chg_tcmd_data *data = platform_get_drvdata(pdev);
-	int val = 0;
+	int val;
 	int ret;
 
 	if (!bat_client) {
@@ -674,9 +674,10 @@ static ssize_t bat_ocv_show(struct device *dev, struct device_attribute *attr, c
 		val = ret;
 		goto end;
 	}
-	data->bat_ocv = val;
 
 end:
+	data->bat_ocv = val;
+
 	return snprintf(buf, PAGE_SIZE, "%d\n", data->bat_ocv);
 }
 
@@ -689,64 +690,9 @@ static ssize_t bat_ocv_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(bat_ocv, S_IWUSR | S_IRUGO,
 	bat_ocv_show, bat_ocv_store);
 
-static ssize_t bat_cycle_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int val = -1;
-	int ret = 0;
-
-	if (!bat_client) {
-		pr_err("%s bat client  is null\n", __func__);
-		goto end;
-	}
-
-	if (bat_client->get_bat_cycle) {
-		pr_err("%s get_bat_cycle is null\n", __func__);
-		goto end;
-	}
-
-	ret = bat_client->get_bat_cycle(bat_client->data, &val);
-	if (ret) {
-		pr_err("%s get bat cycle fail %d\n", __func__, ret);
-		goto end;
-	}
-
-end:
-	return snprintf(buf, PAGE_SIZE, "%d\n", val);
-}
-
-static ssize_t bat_cycle_store(struct device *dev, struct device_attribute *attr,
-									const char *buf, size_t count)
-{
-	int val = 0;
-	int ret = 0;
-
-	if (!bat_client) {
-		pr_err("%s bat client is null\n", __func__);
-		goto end;
-	}
-	ret = kstrtoint(buf, 10, &val);
-	if (ret) {
-		pr_info("%s, %s not a valide buf(%d)\n", __func__, buf, ret);
-		goto end;
-	}
-
-	if (!bat_client->set_bat_cycle) {
-		pr_err("%s set_bat_cycle is null\n", __func__);
-		goto end;
-	}
-
-	ret = bat_client->set_bat_cycle(bat_client->data, val);
-	if (ret) {
-		pr_err("%s set_bat_cycle fail %d\n", __func__, ret);
-		goto end;
-	}
-
-end:
-	return count;
-}
-static DEVICE_ATTR(bat_cycle, S_IWUSR | S_IRUGO,
-	bat_cycle_show, bat_cycle_store);
-
+#ifdef CONFIG_MOTO_CHG_WT6670F_SUPPORT
+extern int moto_tcmd_wt6670f_get_firmware_version(void);
+#endif
 
 static ssize_t chg_type_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -763,13 +709,18 @@ static ssize_t chg_type_show(struct device *dev, struct device_attribute *attr, 
 	ret = chg_client->get_charger_type(chg_client->data,
 					&type);
 	if (ret) {
-		pr_err("%s get chg type fail %d\n", __func__, ret);
+		pr_err("%s get bat vol fail %d\n", __func__, ret);
 		type = ret;
 		goto end;
 	}
-	data->chg_type = type;
 
 end:
+#ifdef CONFIG_MOTO_CHG_WT6670F_SUPPORT
+	data->chg_type = moto_tcmd_wt6670f_get_firmware_version();
+	pr_err("%s get type: %d\n", __func__,data->chg_type);
+#else
+	data->chg_type = type;
+#endif
 
 	return snprintf(buf, PAGE_SIZE, "%02d\n", data->chg_type);
 }
@@ -802,11 +753,11 @@ static ssize_t bat_id_show(struct device *dev, struct device_attribute *attr, ch
 		val = ret;
 		goto end;
 	}
-
 	ret = (val * 1000 / (data->batid_v_ref- val) ) * data->batid_r_pull/ 1000;
-	data->bat_id = ret;
 
 end:
+	data->bat_id = ret;
+
 	return snprintf(buf, PAGE_SIZE, "%d\n", data->bat_id);
 }
 
@@ -821,7 +772,7 @@ static DEVICE_ATTR(bat_id, S_IWUSR | S_IRUGO,
 
 static ssize_t factory_kill_disable_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	int ret = 0;
+	int ret;
 
 	if (!chg_client) {
 		pr_err("%s bat_client is null\n", __func__);
@@ -854,7 +805,7 @@ static ssize_t factory_kill_disable_store(struct device *dev, struct device_attr
 	}
 
 	chg_client->factory_kill_disable = !!val;
-
+	pr_info("%s, factory_kill_disable(%d)\n", __func__, chg_client->factory_kill_disable);
 end:
 	return count;
 }
@@ -1055,7 +1006,6 @@ static ssize_t adc_vbat_show(struct device *dev, struct device_attribute *attr, 
 	/*if ret is valid and its value is < 2500000 uv(the lowest battery voltage threshold)*/
 	if ((ret > 0) && (ret < 2500000))
 		ret *= 1000;
-
 end:
 	return snprintf(buf, PAGE_SIZE, "%d\n", ret);
 }
@@ -1070,54 +1020,6 @@ static ssize_t adc_vbat_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(adc_vbat, S_IWUSR | S_IRUGO,
 				adc_vbat_show, adc_vbat_store);
 
-static ssize_t wireless_en_store(struct device *dev,
-		struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	int ret;
-	int val;
-
-	if (!wls_client) {
-		pr_err("%s wls_client is null\n", __func__);
-		goto end;
-	}
-
-	ret = kstrtouint(buf, 10, &val);
-	if (ret) {
-		pr_info("%s, %s not a valide buf(%d)\n", __func__, buf, ret);
-		goto end;
-	}
-
-	if (wls_client->wls_en) {
-		ret = wls_client->wls_en(wls_client->data, !!val);
-		if (ret) {
-			pr_err("%s wls en fail %d\n", __func__, ret);
-		}
-	}
-
-end:
-	return count;
-}
-
-static DEVICE_ATTR(wireless_en, S_IRUGO|S_IWUSR,
-				NULL, wireless_en_store);
-
-static ssize_t wireless_chip_id_show(struct device *dev,
-		struct device_attribute *attr,
-		char *buf)
-{
-	int val = 0;
-	if (wls_client->get_chip_id) {
-		val = wls_client->get_chip_id(wls_client->data);
-		if (!val) {
-			pr_err("%s wls get chip id fail %d\n", __func__, val);
-		}
-	}
-	return sprintf(buf, "%x\n", val);
-}
-static DEVICE_ATTR(wireless_chip_id, S_IRUGO|S_IWUSR,
-				wireless_chip_id_show, NULL);
-
 static struct attribute *moto_chg_tcmd_attrs[] = {
 	&dev_attr_address.attr,
 	&dev_attr_data.attr,
@@ -1131,7 +1033,6 @@ static struct attribute *moto_chg_tcmd_attrs[] = {
 	&dev_attr_bat_voltage.attr,
 	&dev_attr_bat_ocv.attr,
 	&dev_attr_bat_id.attr,
-	&dev_attr_bat_cycle.attr,
 	&dev_attr_factory_kill_disable.attr,
 	&dev_attr_chg_type.attr,
 	&dev_attr_adc.attr,
@@ -1139,8 +1040,6 @@ static struct attribute *moto_chg_tcmd_attrs[] = {
 	&dev_attr_charger_temp.attr,
 	&dev_attr_pa_temp.attr,
 	&dev_attr_adc_vbat.attr,
-	&dev_attr_wireless_en.attr,
-	&dev_attr_wireless_chip_id.attr,
 	NULL,
 };
 
@@ -1202,9 +1101,6 @@ int moto_chg_tcmd_register(struct moto_chg_tcmd_client *client)
 		case MOTO_CHG_TCMD_CLIENT_AP_ADC:
 			ap_adc_client = client;
 			break;
-		case MOTO_CHG_TCMD_CLIENT_WLS:
-			wls_client = client;
-			break;
 		default :
 			pr_err("%s invalide client id %d\n",
 				__func__,
@@ -1215,7 +1111,6 @@ int moto_chg_tcmd_register(struct moto_chg_tcmd_client *client)
 
 	return 0;
 }
-EXPORT_SYMBOL(moto_chg_tcmd_register);
 
 static int moto_chg_tcmd_res_to_temp(struct moto_chg_tcmd_data *data,
 					int vol, int vol_ntc, int r_pull)

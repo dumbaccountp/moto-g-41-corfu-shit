@@ -1,8 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Mediatek DSA Tag support
  * Copyright (C) 2017 Landen Chao <landen.chao@mediatek.com>
  *		      Sean Wang <sean.wang@mediatek.com>
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/etherdevice.h>
@@ -42,6 +49,9 @@ static struct sk_buff *mtk_tag_xmit(struct sk_buff *skb,
 		xmit_tpid = MTK_HDR_XMIT_TAGGED_TPID_88A8;
 		break;
 	default:
+		if (skb_cow_head(skb, MTK_HDR_LEN) < 0)
+			return NULL;
+
 		xmit_tpid = MTK_HDR_XMIT_UNTAGGED;
 		skb_push(skb, MTK_HDR_LEN);
 		memmove(skb->data, skb->data + MTK_HDR_LEN, 2 * ETH_ALEN);
@@ -71,9 +81,8 @@ static struct sk_buff *mtk_tag_xmit(struct sk_buff *skb,
 static struct sk_buff *mtk_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 				   struct packet_type *pt)
 {
-	u16 hdr;
 	int port;
-	__be16 *phdr;
+	__be16 *phdr, hdr;
 	unsigned char *dest = eth_hdr(skb)->h_dest;
 	bool is_multicast_skb = is_multicast_ether_addr(dest) &&
 				!is_broadcast_ether_addr(dest);
@@ -109,15 +118,17 @@ static struct sk_buff *mtk_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 	return skb;
 }
 
-static const struct dsa_device_ops mtk_netdev_ops = {
-	.name		= "mtk",
-	.proto		= DSA_TAG_PROTO_MTK,
+static int mtk_tag_flow_dissect(const struct sk_buff *skb, __be16 *proto,
+				int *offset)
+{
+	*offset = 4;
+	*proto = ((__be16 *)skb->data)[1];
+
+	return 0;
+}
+
+const struct dsa_device_ops mtk_netdev_ops = {
 	.xmit		= mtk_tag_xmit,
 	.rcv		= mtk_tag_rcv,
-	.overhead	= MTK_HDR_LEN,
+	.flow_dissect	= mtk_tag_flow_dissect,
 };
-
-MODULE_LICENSE("GPL");
-MODULE_ALIAS_DSA_TAG_DRIVER(DSA_TAG_PROTO_MTK);
-
-module_dsa_tag_driver(mtk_netdev_ops);

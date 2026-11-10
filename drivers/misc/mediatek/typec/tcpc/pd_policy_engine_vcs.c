@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 #include "inc/pd_core.h"
 #include "inc/pd_dpm_core.h"
@@ -44,8 +44,8 @@ void pe_vcs_turn_off_vconn_entry(struct pd_port *pd_port)
 
 void pe_vcs_turn_on_vconn_entry(struct pd_port *pd_port)
 {
-#if CONFIG_USB_PD_REV30
-#if CONFIG_USB_PD_RESET_CABLE
+#ifdef CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_RESET_CABLE
 	dpm_reaction_set(pd_port, DPM_REACTION_CAP_RESET_CABLE);
 #endif	/* CONFIG_USB_PD_RESET_CABLE */
 #endif	/* CONFIG_USB_PD_REV30 */

@@ -14,14 +14,10 @@
 # additional debugging
 #TFA_DEBUG=1
 
-# MTK include path
-subdir-ccflags-y += -I$(srctree)/sound/soc/mediatek/audio_dsp
 subdir-ccflags-y += -I$(srctree)/sound/soc/mediatek/common
-subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/audio_ipi/include
-subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 
 # debugging support (also enables trace_printk)
-ccflags-y += -I$(srctree)/sound/soc/codecs/tfa98xx/inc
+ccflags-y += -Isound/soc/codecs/tfa98xx/inc
 ccflags-y += -DDEBUG -DTFA_NON_DSP_SOLUTION
 ccflags-y += -Werror
 ccflags-y += $(call cc-option,-Wno-date-time,)
@@ -36,5 +32,5 @@ ccflags-y += -DTFA_DEBUG -DDEBUG
 snd-soc-tfa98xx-objs += src/tfa_debug.o
 endif
 
-obj-$(CONFIG_SND_SOC_TFA9874) += snd-soc-tfa98xx.o
+obj-y += snd-soc-tfa98xx.o
 

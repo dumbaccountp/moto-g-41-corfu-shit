@@ -310,7 +310,7 @@ static irqreturn_t mcu_bp_isr(int irq, void *dev_id)
 				bpr->mst.rid = readl(bpm->base+0x8);
 				for (j = 0; j < bpm->data_len; j++)
 					bpr->mst.rdata[j] =
-						readl(bpm->base+0xC+(j<<2));
+						readl(bpm->base+0x10+(j<<2));
 			} else {
 				bpr->slv.is_err = true;
 				bpr->slv.parity_data = readl(bpm->base+0x4);
@@ -323,9 +323,18 @@ static irqreturn_t mcu_bp_isr(int irq, void *dev_id)
 				bpr->slv.wid = readl(bpm->base+0x20);
 				if (bpm->data_len == 2) {
 					bpr->slv.wdata[0] =
-						readl(bpm->base+0x24);
-					bpr->slv.wdata[1] =
 						readl(bpm->base+0x28);
+					bpr->slv.wdata[1] =
+						readl(bpm->base+0x2C);
+				} else {
+					bpr->slv.wdata[0] =
+						readl(bpm->base+0x30);
+					bpr->slv.wdata[1] =
+						readl(bpm->base+0x34);
+					bpr->slv.wdata[2] =
+						readl(bpm->base+0x38);
+					bpr->slv.wdata[3] =
+						readl(bpm->base+0x3C);
 				}
 			}
 		} else
@@ -370,11 +379,11 @@ static irqreturn_t infra_bp_isr(int irq, void *dev_id)
 			bpm = &infra_bp.bpm[i];
 			bpr = &infra_bp.bpm[i].bpr;
 
-			if (bpm->type == 0) { /* infra master */
+			if (!bpm->type) {
 				bpr->mst.is_err = true;
 				bpr->mst.parity_data = (status << 1) >> 16;
 				bpr->mst.rid = readl(bpm->base+0x4);
-			} else if (bpm->type == 1) { /* infra slave */
+			} else {
 				bpr->slv.is_err = true;
 				bpr->slv.parity_data = (status << 1) >> 10;
 				bpr->slv.awaddr[0] = readl(bpm->base+0x4);
@@ -386,16 +395,6 @@ static irqreturn_t infra_bp_isr(int irq, void *dev_id)
 				status = readl(bpm->base+0x10);
 				bpr->slv.araddr[1] = (status << 27) >> 27;
 				bpr->slv.arid = (status << 14) >> 19;
-			} else if (bpm->type == 2) { /* emi slave */
-				bpr->slv.is_err = true;
-				bpr->slv.parity_data = (status << 1) >> 4;
-				bpr->slv.araddr[0] = readl(bpm->base+0x4);
-				bpr->slv.arid = readl(bpm->base+0x8);
-				bpr->slv.araddr[1] = readl(bpm->base+0xC);
-				bpr->slv.wid = readl(bpm->base+0x10);
-				bpr->slv.awaddr[0] = readl(bpm->base+0x14);
-				bpr->slv.awid = readl(bpm->base+0x18);
-				bpr->slv.awaddr[1] = readl(bpm->base+0x1C);
 			}
 		} else
 			continue;

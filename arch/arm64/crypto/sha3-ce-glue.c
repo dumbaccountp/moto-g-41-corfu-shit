@@ -14,7 +14,6 @@
 #include <asm/simd.h>
 #include <asm/unaligned.h>
 #include <crypto/internal/hash.h>
-#include <crypto/internal/simd.h>
 #include <crypto/sha3.h>
 #include <linux/cpufeature.h>
 #include <linux/crypto.h>
@@ -28,8 +27,8 @@ MODULE_ALIAS_CRYPTO("sha3-256");
 MODULE_ALIAS_CRYPTO("sha3-384");
 MODULE_ALIAS_CRYPTO("sha3-512");
 
-asmlinkage int sha3_ce_transform(u64 *st, const u8 *data, int blocks,
-				 int md_len);
+asmlinkage void sha3_ce_transform(u64 *st, const u8 *data, int blocks,
+				  int md_len);
 
 static int sha3_update(struct shash_desc *desc, const u8 *data,
 		       unsigned int len)
@@ -37,7 +36,7 @@ static int sha3_update(struct shash_desc *desc, const u8 *data,
 	struct sha3_state *sctx = shash_desc_ctx(desc);
 	unsigned int digest_size = crypto_shash_digestsize(desc->tfm);
 
-	if (!crypto_simd_usable())
+	if (!may_use_simd())
 		return crypto_sha3_update(desc, data, len);
 
 	if ((sctx->partial + len) >= sctx->rsiz) {
@@ -59,15 +58,11 @@ static int sha3_update(struct shash_desc *desc, const u8 *data,
 		blocks = len / sctx->rsiz;
 		len %= sctx->rsiz;
 
-		while (blocks) {
-			int rem;
-
+		if (blocks) {
 			kernel_neon_begin();
-			rem = sha3_ce_transform(sctx->st, data, blocks,
-						digest_size);
+			sha3_ce_transform(sctx->st, data, blocks, digest_size);
 			kernel_neon_end();
-			data += (blocks - rem) * sctx->rsiz;
-			blocks = rem;
+			data += blocks * sctx->rsiz;
 		}
 	}
 
@@ -85,7 +80,7 @@ static int sha3_final(struct shash_desc *desc, u8 *out)
 	__le64 *digest = (__le64 *)out;
 	int i;
 
-	if (!crypto_simd_usable())
+	if (!may_use_simd())
 		return crypto_sha3_final(desc, out);
 
 	sctx->buf[sctx->partial++] = 0x06;

@@ -21,7 +21,6 @@ enum {
 	MT6360_PMIC_BUCK2,
 	MT6360_PMIC_LDO6,
 	MT6360_PMIC_LDO7,
-	MT6360_PMIC_MAX,
 };
 
 enum {
@@ -34,7 +33,6 @@ enum {
 #define MT6360_MAX_REGULATOR		(4)
 
 /* PMIC register defininition */
-#define MT6360_PMIC_BUCK1_SEQOFFDLY	(0x07)
 #define MT6360_PMIC_BUCK1_VOSEL		(0x10)
 #define MT6360_PMIC_BUCK1_EN_CTRL2	(0x17)
 #define MT6360_PMIC_BUCK2_VOSEL		(0x20)
@@ -56,9 +54,6 @@ enum {
 #define MT6360_LDO_LDO1_EN_CTRL2	(0x17)
 #define MT6360_LDO_LDO1_CTRL3		(0x1B)
 #define MT6360_LDO_REGMAX		(0x1C)
-
-/* mask and shift definition */
-#define MT6360_MASK_SDCARD_DET_EN	BIT(6)
 
 #define MT6360_OPMODE_LP		(2)
 #define MT6360_OPMODE_ULP		(3)
@@ -296,50 +291,25 @@ static const struct regulator_ops mt6360_pmic_regulator_ops = {
 	.mode_get_mask = _modegmask,					\
 }
 
-static int mt6360_ldo_enable(struct regulator_dev *rdev)
-{
-	struct mt6360_regulator_info *mri = rdev_get_drvdata(rdev);
-	const struct regulator_desc *desc = rdev->desc;
-	int id = rdev_get_id(rdev), ret;
-
-	ret = regmap_update_bits(mri->regmap, desc->enable_reg,
-				 desc->enable_mask, 0xff);
-	if (ret < 0) {
-		dev_notice(mri->dev, "%s: fail\n", __func__);
-		return ret;
-	}
-
-	/* when LDO5 enable, enable SDCARD_DET */
-	if (id == MT6360_LDO_LDO5)
-		ret = regmap_update_bits(mri->regmap, MT6360_LDO_LDO5_CTRL0,
-					 MT6360_MASK_SDCARD_DET_EN, 0xff);
-	return ret;
-}
-
-static int mt6360_ldo_disable(struct regulator_dev *rdev)
-{
-	struct mt6360_regulator_info *mri = rdev_get_drvdata(rdev);
-	const struct regulator_desc *desc = rdev->desc;
-	int id = rdev_get_id(rdev), ret;
-
-	ret = regmap_update_bits(mri->regmap, desc->enable_reg,
-				 desc->enable_mask, 0);
-	if (ret < 0) {
-		dev_notice(mri->dev, "%s: fail\n", __func__);
-		return ret;
-	}
-
-	/* when LDO5 disable, disable SDCARD_DET */
-	if (id == MT6360_LDO_LDO5)
-		ret = regmap_update_bits(mri->regmap, MT6360_LDO_LDO5_CTRL0,
-					 MT6360_MASK_SDCARD_DET_EN, 0);
-	return ret;
-}
+static const struct mt6360_regulator_desc mt6360_pmic_descs[] =  {
+	MT6360_PMIC_DESC(BUCK1, 300000, 5000, 201, MT6360_PMIC_BUCK1_VOSEL,
+			 0xff, MT6360_PMIC_BUCK1_EN_CTRL2, 0x40,
+			 MT6360_PMIC_BUCK1_EN_CTRL2, 0x30, 0x03),
+	MT6360_PMIC_DESC(BUCK2, 300000, 5000, 201, MT6360_PMIC_BUCK2_VOSEL,
+			 0xff, MT6360_PMIC_BUCK2_EN_CTRL2, 0x40,
+			 MT6360_PMIC_BUCK2_EN_CTRL2, 0x30, 0x03),
+	MT6360_PMIC_DESC(LDO6, 500000, 10000, 161, MT6360_PMIC_LDO6_CTRL3,
+			 0xff, MT6360_PMIC_LDO6_EN_CTRL2, 0x40,
+			 MT6360_PMIC_LDO6_EN_CTRL2, 0x30, 0x03),
+	MT6360_PMIC_DESC(LDO7, 500000, 10000, 161, MT6360_PMIC_LDO7_CTRL3,
+			 0xff, MT6360_PMIC_LDO7_EN_CTRL2, 0x40,
+			 MT6360_PMIC_LDO7_EN_CTRL2, 0x30, 0x03),
+};
 
 static const struct regulator_ops mt6360_ldo_regulator_ops = {
 	.list_voltage = regulator_list_voltage_linear_range,
-	.enable = mt6360_ldo_enable,
-	.disable = mt6360_ldo_disable,
+	.enable = regulator_enable_regmap,
+	.disable = regulator_disable_regmap,
 	.is_enabled = regulator_is_enabled_regmap,
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
@@ -347,7 +317,7 @@ static const struct regulator_ops mt6360_ldo_regulator_ops = {
 	.get_mode = mt6360_regulator_get_mode,
 };
 
-static const struct linear_range ldo_volt_ranges1[] = {
+static const struct regulator_linear_range ldo_volt_ranges1[] = {
 	REGULATOR_LINEAR_RANGE(1200000, 0x00, 0x09, 10000),
 	REGULATOR_LINEAR_RANGE(1300000, 0x0a, 0x10, 0),
 	REGULATOR_LINEAR_RANGE(1310000, 0x11, 0x19, 10000),
@@ -382,7 +352,7 @@ static const struct linear_range ldo_volt_ranges1[] = {
 	REGULATOR_LINEAR_RANGE(3600000, 0xfa, 0xff, 0),
 };
 
-static const struct linear_range ldo_volt_ranges2[] = {
+static const struct regulator_linear_range ldo_volt_ranges2[] = {
 	REGULATOR_LINEAR_RANGE(2700000, 0x00, 0x09, 10000),
 	REGULATOR_LINEAR_RANGE(2800000, 0x0a, 0x10, 0),
 	REGULATOR_LINEAR_RANGE(2810000, 0x11, 0x19, 10000),
@@ -401,47 +371,12 @@ static const struct linear_range ldo_volt_ranges2[] = {
 	REGULATOR_LINEAR_RANGE(3600000, 0x7a, 0x7f, 0),
 };
 
-static const struct linear_range ldo_volt_ranges3[] = {
-	REGULATOR_LINEAR_RANGE(500000, 0x00, 0x09, 10000),
-	REGULATOR_LINEAR_RANGE(600000, 0x0a, 0x10, 0),
-	REGULATOR_LINEAR_RANGE(610000, 0x11, 0x19, 10000),
-	REGULATOR_LINEAR_RANGE(700000, 0x1a, 0x20, 0),
-	REGULATOR_LINEAR_RANGE(710000, 0x21, 0x29, 10000),
-	REGULATOR_LINEAR_RANGE(800000, 0x2a, 0x30, 0),
-	REGULATOR_LINEAR_RANGE(810000, 0x31, 0x39, 10000),
-	REGULATOR_LINEAR_RANGE(900000, 0x3a, 0x40, 0),
-	REGULATOR_LINEAR_RANGE(910000, 0x41, 0x49, 10000),
-	REGULATOR_LINEAR_RANGE(1000000, 0x4a, 0x50, 0),
-	REGULATOR_LINEAR_RANGE(1010000, 0x51, 0x59, 10000),
-	REGULATOR_LINEAR_RANGE(1100000, 0x5a, 0x60, 0),
-	REGULATOR_LINEAR_RANGE(1110000, 0x61, 0x69, 10000),
-	REGULATOR_LINEAR_RANGE(1200000, 0x6a, 0x70, 0),
-	REGULATOR_LINEAR_RANGE(1210000, 0x71, 0x79, 10000),
-	REGULATOR_LINEAR_RANGE(1300000, 0x7a, 0x80, 0),
-	REGULATOR_LINEAR_RANGE(1310000, 0x81, 0x89, 10000),
-	REGULATOR_LINEAR_RANGE(1400000, 0x8a, 0x90, 0),
-	REGULATOR_LINEAR_RANGE(1410000, 0x91, 0x99, 10000),
-	REGULATOR_LINEAR_RANGE(1500000, 0x9a, 0xa0, 0),
-	REGULATOR_LINEAR_RANGE(1510000, 0xa1, 0xa9, 10000),
-	REGULATOR_LINEAR_RANGE(1600000, 0xaa, 0xb0, 0),
-	REGULATOR_LINEAR_RANGE(1610000, 0xb1, 0xb9, 10000),
-	REGULATOR_LINEAR_RANGE(1700000, 0xba, 0xc0, 0),
-	REGULATOR_LINEAR_RANGE(1710000, 0xc1, 0xc9, 10000),
-	REGULATOR_LINEAR_RANGE(1800000, 0xca, 0xd0, 0),
-	REGULATOR_LINEAR_RANGE(1810000, 0xd1, 0xd9, 10000),
-	REGULATOR_LINEAR_RANGE(1900000, 0xda, 0xe0, 0),
-	REGULATOR_LINEAR_RANGE(1910000, 0xe1, 0xe9, 10000),
-	REGULATOR_LINEAR_RANGE(2000000, 0xea, 0xf0, 0),
-	REGULATOR_LINEAR_RANGE(2010000, 0xf1, 0xf9, 10000),
-	REGULATOR_LINEAR_RANGE(2100000, 0xfa, 0xff, 0),
-};
-
-#define MT6360_LDO_DESC(_name, _id, _vranges, _vcnt, _vreg, _vmask, _enreg, \
+#define MT6360_LDO_DESC(_name, _vranges, _vcnt, _vreg, _vmask, _enreg, \
 		      _enmask, _ctrlreg, _modesmask, _modegmask, _offon_delay) \
 {									\
 	.desc = {							\
 		.name = #_name,						\
-		.id =  _id,						\
+		.id =  MT6360_LDO_##_name,				\
 		.owner = THIS_MODULE,					\
 		.ops = &mt6360_ldo_regulator_ops,			\
 		.of_match = of_match_ptr(#_name),			\
@@ -461,34 +396,19 @@ static const struct linear_range ldo_volt_ranges3[] = {
 	.mode_get_mask = _modegmask,					\
 }
 
-static const struct mt6360_regulator_desc mt6360_pmic_descs[] =  {
-	MT6360_PMIC_DESC(BUCK1, 300000, 5000, 201, MT6360_PMIC_BUCK1_VOSEL,
-			 0xff, MT6360_PMIC_BUCK1_EN_CTRL2, 0x40,
-			 MT6360_PMIC_BUCK1_EN_CTRL2, 0x30, 0x03),
-	MT6360_PMIC_DESC(BUCK2, 300000, 5000, 201, MT6360_PMIC_BUCK2_VOSEL,
-			 0xff, MT6360_PMIC_BUCK2_EN_CTRL2, 0x40,
-			 MT6360_PMIC_BUCK2_EN_CTRL2, 0x30, 0x03),
-	MT6360_LDO_DESC(LDO6, MT6360_PMIC_LDO6, ldo_volt_ranges3, 256,
-			MT6360_PMIC_LDO6_CTRL3, 0xff, MT6360_PMIC_LDO6_EN_CTRL2,
-			0x40, MT6360_PMIC_LDO6_EN_CTRL2, 0x30, 0x03, 0),
-	MT6360_LDO_DESC(LDO7, MT6360_PMIC_LDO7, ldo_volt_ranges3, 256,
-			MT6360_PMIC_LDO7_CTRL3, 0xff, MT6360_PMIC_LDO7_EN_CTRL2,
-			0x40, MT6360_PMIC_LDO6_EN_CTRL2, 0x30, 0x03, 0),
-};
-
 static const struct mt6360_regulator_desc mt6360_ldo_descs[] =  {
-	MT6360_LDO_DESC(LDO1, MT6360_LDO_LDO1, ldo_volt_ranges1, 256,
-			MT6360_LDO_LDO1_CTRL3, 0xff, MT6360_LDO_LDO1_EN_CTRL2,
-			0x40, MT6360_LDO_LDO1_EN_CTRL2, 0x30, 0x03, 0),
-	MT6360_LDO_DESC(LDO2, MT6360_LDO_LDO2, ldo_volt_ranges1, 256,
-			MT6360_LDO_LDO2_CTRL3, 0xff, MT6360_LDO_LDO2_EN_CTRL2,
-			0x40, MT6360_LDO_LDO2_EN_CTRL2, 0x30, 0x03, 0),
-	MT6360_LDO_DESC(LDO3, MT6360_LDO_LDO3, ldo_volt_ranges1, 256,
-			MT6360_LDO_LDO3_CTRL3, 0xff, MT6360_LDO_LDO3_EN_CTRL2,
-			0x40, MT6360_LDO_LDO3_EN_CTRL2, 0x30, 0x03, 100),
-	MT6360_LDO_DESC(LDO5, MT6360_LDO_LDO5, ldo_volt_ranges2, 128,
-			MT6360_LDO_LDO5_CTRL3, 0xff, MT6360_LDO_LDO5_EN_CTRL2,
-			0x40, MT6360_LDO_LDO5_EN_CTRL2, 0x30, 0x03, 100),
+	MT6360_LDO_DESC(LDO1, ldo_volt_ranges1, 256, MT6360_LDO_LDO1_CTRL3,
+			0xff, MT6360_LDO_LDO1_EN_CTRL2, 0x40,
+			MT6360_LDO_LDO1_EN_CTRL2, 0x30, 0x03, 0),
+	MT6360_LDO_DESC(LDO2, ldo_volt_ranges1, 256, MT6360_LDO_LDO2_CTRL3,
+			0xff, MT6360_LDO_LDO2_EN_CTRL2, 0x40,
+			MT6360_LDO_LDO2_EN_CTRL2, 0x30, 0x03, 0),
+	MT6360_LDO_DESC(LDO3, ldo_volt_ranges1, 256, MT6360_LDO_LDO3_CTRL3,
+			0xff, MT6360_LDO_LDO3_EN_CTRL2, 0x40,
+			MT6360_LDO_LDO3_EN_CTRL2, 0x30, 0x03, 100),
+	MT6360_LDO_DESC(LDO5, ldo_volt_ranges2, 128, MT6360_LDO_LDO5_CTRL3,
+			0xff, MT6360_LDO_LDO5_EN_CTRL2, 0x40,
+			MT6360_LDO_LDO5_EN_CTRL2, 0x30, 0x03, 100),
 };
 
 static int mt6360_regulator_reg_write(void *context,
@@ -532,8 +452,7 @@ static const struct regmap_config mt6360_pmic_regmap_config = {
 	.reg_read = mt6360_regulator_reg_read,
 	.reg_write = mt6360_regulator_reg_write,
 	.max_register = MT6360_PMIC_REGMAX,
-	.use_single_read = true,
-	.use_single_write = true,
+	.use_single_rw = true,
 };
 
 static const struct regmap_config mt6360_ldo_regmap_config = {
@@ -542,8 +461,7 @@ static const struct regmap_config mt6360_ldo_regmap_config = {
 	.reg_read = mt6360_regulator_reg_read,
 	.reg_write = mt6360_regulator_reg_write,
 	.max_register = MT6360_LDO_REGMAX,
-	.use_single_read = true,
-	.use_single_write = true,
+	.use_single_rw = true,
 };
 
 static const struct mt6360_regulator_devdata mt6360_pmic_devdata = {
@@ -579,7 +497,7 @@ MODULE_DEVICE_TABLE(of, mt6360_regulator_of_id);
 
 static int mt6360_regulator_probe(struct platform_device *pdev)
 {
-	struct mt6360_pmu_data *pmu_info = dev_get_drvdata(pdev->dev.parent);
+	struct mt6360_pmu_info *pmu_info = dev_get_drvdata(pdev->dev.parent);
 	struct mt6360_regulator_devdata *devdata;
 	struct mt6360_regulator_info *mri;
 	struct regulator_config config = {};
@@ -638,28 +556,6 @@ static int mt6360_regulator_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static void mt6360_regulator_shutdown(struct platform_device *pdev)
-{
-	struct mt6360_regulator_info *mri = platform_get_drvdata(pdev);
-	int i, ret;
-	u8 pwr_off_seq[MT6360_PMIC_MAX] = { 0x06, 0x04, 0x00, 0x02 };
-
-	dev_dbg(mri->dev, "%s\n", __func__);
-	if (mri == NULL)
-		return;
-	if (mri->i2c->addr == MT6360_PMIC_SLAVEID) {
-		for (i = 0; i < MT6360_PMIC_MAX; i++) {
-			ret = regmap_write(mri->regmap,
-					   MT6360_PMIC_BUCK1_SEQOFFDLY + i,
-					   pwr_off_seq[i]);
-			if (ret < 0)
-				dev_notice(mri->dev,
-					   "%s: set pwr off seq buck(%d) fail\n",
-					   __func__, i);
-		}
-	}
-}
-
 static const struct platform_device_id mt6360_regulator_id[] = {
 	{ "mt6360_pmic", (kernel_ulong_t)&mt6360_pmic_devdata },
 	{ "mt6360_ldo", (kernel_ulong_t)&mt6360_ldo_devdata },
@@ -673,7 +569,6 @@ static struct platform_driver mt6360_regulator_driver = {
 		.of_match_table = of_match_ptr(mt6360_regulator_of_id),
 	},
 	.probe = mt6360_regulator_probe,
-	.shutdown = mt6360_regulator_shutdown,
 	.id_table = mt6360_regulator_id,
 };
 module_platform_driver(mt6360_regulator_driver);

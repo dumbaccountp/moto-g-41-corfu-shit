@@ -72,5 +72,7 @@ imgsensor_sensor_control(
 		struct IMGSENSOR_SENSOR *psensor,
 		enum MSDK_SCENARIO_ID_ENUM ScenarioId);
 
+extern struct IMGSENSOR_HW_CFG imgsensor_custom_config[];
+
 #endif
 

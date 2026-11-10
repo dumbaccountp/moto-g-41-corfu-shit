@@ -30,10 +30,11 @@
 #include <sec_osal.h>
 #include <sec_export.h>
 #endif
+#include "mt-plat/mtk_boot_common.h"
 #include "mt-plat/mtk_ccci_common.h"
 #include "ccci_util_log.h"
 #include "ccci_util_lib_main.h"
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#if defined(CONFIG_MTK_AEE_FEATURE)
 #include <mt-plat/aee.h>
 #endif
 #define ENABLE_MEM_SIZE_CHECK
@@ -69,8 +70,7 @@ static char invalid_img_str[32];
 
 static char *get_md_img_cap_str(int md_img_type)
 {
-	if ((unsigned int)md_img_type >= ARRAY_SIZE(md_img_type_str) ||
-		md_img_type < 0) {
+	if ((unsigned int)md_img_type >= ARRAY_SIZE(md_img_type_str) || md_img_type < 0) {
 		scnprintf(invalid_img_str, 32, "err_img_type%d", md_img_type);
 		return invalid_img_str;
 	}
@@ -116,6 +116,7 @@ char *ccci_get_ap_platform(void)
 
 	return s_ap_platform_info;
 }
+EXPORT_SYMBOL(ccci_get_ap_platform);
 
 /*--- MD header check ------------ */
 static int check_dsp_header(int md_id, void *parse_addr,
@@ -127,7 +128,7 @@ static int check_dsp_header(int md_id, void *parse_addr,
 static int check_md_header_v3(int md_id, void *parse_addr,
 	struct ccci_image_info *image)
 {
-	int ret;
+	int ret = 0;
 	bool md_type_check = false;
 	bool md_plat_check = false;
 	bool md_sys_match = false;
@@ -270,7 +271,7 @@ static int check_md_header_v3(int md_id, void *parse_addr,
 					"MD%d mem size(0x%x)<header size(0x%x),please check memory config in <chip>.dtsi",
 					md_id + 1, image->size,
 					head->md_img_size);
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#if defined(CONFIG_MTK_AEE_FEATURE)
 				aed_md_exception_api(NULL, 0,
 					(const int *)info,
 					sizeof(info),
@@ -360,7 +361,7 @@ EXIT_CHECK_V3:
 static int md_check_header_parser(int md_id, void *parse_addr,
 	struct ccci_image_info *image)
 {
-	int ret;
+	int ret = 0;
 	bool md_type_check = false;
 	bool md_plat_check = false;
 	bool md_sys_match = false;
@@ -535,7 +536,7 @@ static int md_check_header_parser(int md_id, void *parse_addr,
 					"MD%d mem cfg size(0x%x)<header size(0x%x),please check memory config in <chip>.dtsi",
 					md_id + 1, image->size,
 					head->md_img_size);
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#if defined(CONFIG_MTK_AEE_FEATURE)
 				aed_md_exception_api(NULL, 0,
 					(const int *)info, sizeof(info),
 					(const char *)title,
@@ -843,7 +844,7 @@ void get_md_postfix(int md_id, const char k[], char buf[], char buf_ex[])
 	/* X */
 	X = md_id + 1;
 
-	if ((img_type != 0) && (md_id == MD_SYS1)) {
+	if ((img_type > 0) && (md_id == MD_SYS1)) {
 		if (buf) {
 			scnprintf(buf, IMG_POSTFIX_LEN,
 				"%d_%s_n", X, get_md_img_cap_str(img_type));
@@ -929,6 +930,7 @@ int ccci_load_firmware(int md_id, void *img_inf,
 	char *img_str = md_img_info_str[md_id];
 	static const int md_type_val = 3; //only MT6580 using this
 
+
 	if (dev == NULL) {
 		CCCI_UTIL_ERR_MSG_WITH_ID(md_id,
 			"dev == NULL\n");
@@ -963,15 +965,15 @@ int ccci_load_firmware(int md_id, void *img_inf,
 		if (img->type == IMG_MD)
 			scnprintf(img_name, IMG_NAME_LEN,
 				"modem_%d_%s_n.img",
-				md_id+1, get_md_img_cap_str(md_type_val));
+				md_id+1, md_img_type_str[md_type_val]);
 		else if (img->type == IMG_DSP)
 			scnprintf(img_name, IMG_NAME_LEN,
 				"dsp_%d_%s_n.bin",
-				md_id+1, get_md_img_cap_str(md_type_val));
+				md_id+1, md_img_type_str[md_type_val]);
 		else if (img->type == IMG_ARMV7)
 			scnprintf(img_name, IMG_NAME_LEN,
 				"armv7_%d_%s_n.bin",
-				md_id+1, get_md_img_cap_str(md_type_val));
+				md_id+1, md_img_type_str[md_type_val]);
 		else {
 			CCCI_UTIL_ERR_MSG_WITH_ID(md_id,
 				"[Error]Invalid img type%d\n",
@@ -1007,7 +1009,7 @@ int ccci_load_firmware(int md_id, void *img_inf,
 			"Firmware:read_size=%d, size_per_read=%d\n",
 			read_size, size_per_read);
 		/* size_per_read 8 bytes aligned remap memory */
-		start = ioremap_wc((load_addr + read_size),
+		start = ioremap_nocache((load_addr + read_size),
 					roundup(size_per_read, 8));
 		if (start == 0) {
 			CCCI_UTIL_ERR_MSG_WITH_ID(md_id,
@@ -1016,7 +1018,8 @@ int ccci_load_firmware(int md_id, void *img_inf,
 			ret = -CCCI_ERR_LOAD_IMG_NOMEM;
 			goto out;
 		}
-		memcpy(start, (void *)(img_data_ptr + read_size),
+		memcpy(start,
+			(void *)(img_data_ptr + read_size),
 			size_per_read);
 		iounmap(start);
 		start = NULL;
@@ -1029,7 +1032,7 @@ int ccci_load_firmware(int md_id, void *img_inf,
 		"Firmware check header:load_addr=%lx, size=%d\n",
 		load_addr, img->size);
 	if (img->type == IMG_MD) {
-		start = ioremap_wc(
+		start = ioremap_nocache(
 				round_down(load_addr
 					+ img->size - 0x4000, 0x4000),
 				round_up(img->size, 0x4000)
@@ -1044,7 +1047,7 @@ int ccci_load_firmware(int md_id, void *img_inf,
 			goto out;
 		}
 	} else if (img->type == IMG_DSP) {
-		start = ioremap_wc(load_addr, dsp_header_size);
+		start = ioremap_nocache(load_addr, dsp_header_size);
 		check_ret = check_dsp_header(md_id, start, img);
 		if (check_ret < 0) {
 			ret = check_ret;

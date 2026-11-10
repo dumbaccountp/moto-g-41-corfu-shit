@@ -9,10 +9,6 @@
 #include <linux/list.h>
 #include <uapi/linux/signal.h>
 
-typedef struct kernel_siginfo {
-	__SIGINFO;
-} kernel_siginfo_t;
-
 /*
  * Real Time signals may be queued.
  */
@@ -20,7 +16,7 @@ typedef struct kernel_siginfo {
 struct sigqueue {
 	struct list_head list;
 	int flags;
-	kernel_siginfo_t info;
+	siginfo_t info;
 	struct user_struct *user;
 };
 
@@ -64,20 +60,8 @@ struct old_sigaction {
 
 struct ksignal {
 	struct k_sigaction ka;
-	kernel_siginfo_t info;
+	siginfo_t info;
 	int sig;
 };
-
-#ifndef __ARCH_UAPI_SA_FLAGS
-#ifdef SA_RESTORER
-#define __ARCH_UAPI_SA_FLAGS	SA_RESTORER
-#else
-#define __ARCH_UAPI_SA_FLAGS	0
-#endif
-#endif
-
-#define UAPI_SA_FLAGS                                                          \
-	(SA_NOCLDSTOP | SA_NOCLDWAIT | SA_SIGINFO | SA_ONSTACK | SA_RESTART |  \
-	 SA_NODEFER | SA_RESETHAND | SA_EXPOSE_TAGBITS | __ARCH_UAPI_SA_FLAGS)
 
 #endif /* _LINUX_SIGNAL_TYPES_H */

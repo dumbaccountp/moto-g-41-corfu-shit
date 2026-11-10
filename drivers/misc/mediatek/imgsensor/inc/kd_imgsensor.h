@@ -114,16 +114,32 @@
  *
  ************************************************************************/
 /* SENSOR CHIP VERSION */
+//add ellis sensor id begin
+#define MOT_ELLIS_HI1336_SENSOR_ID 0x1336
+#define MOT_ELLIS_SC500CS_SENSOR_ID 0xee27
+#define MOT_ELLIS_OV02B1B_SENSOR_ID 0x002b
+#define MOT_ELLIS_HI556D_SENSOR_ID 0x0556
+#define MOT_ELLIS_GC02M1B_SENSOR_ID (0x02e0+1)
+//add ellis sensor id end
+//add tonga sensor id begin
+#define MOT_TONGA_S5K4H7_SENSOR_ID 0x487B
+#define MOT_TONGA_OV02B1B_SENSOR_ID 0x002b
+#define MOT_TONGA_GC02M1B_SENSOR_ID (0x02e0+1)
+#define MOT_TONGA_GC02M1_SENSOR_ID 0x02e0
+#define MOT_TONGA_S5KJN1SQ_SENSOR_ID 0x38e1
+//add tonga sensor id end
+//add maui sensor id begin
+#define MOT_MAUI_HI1634B_SENSOR_ID 0x1634
+#define MOT_MAUI_S5K5E9_SENSOR_ID  0x559b
+#define MOT_MAUI_GC02M1_SENSOR_ID (0x02e0+1)
+#define MOT_MAUI_OV02B10_SENSOR_ID 0x002b
+//add maui sensor id end
 /*IMX*/
+#define IMX766_SENSOR_ID                        0x0766
 #define IMX499_SENSOR_ID                        0x0499
 #define IMX481_SENSOR_ID                        0x0481
 #define IMX486_SENSOR_ID                        0x0486
 #define IMX586_SENSOR_ID                        0x0586
-#define IMX766_SENSOR_ID                        0x0766
-#define IMX766DUAL_SENSOR_ID                    0x0767
-#define IMX766O_SENSOR_ID                       0x0766
-#define IMX766DUALO_SENSOR_ID                   0x0767
-#define IMX709O_SENSOR_ID                       0x0709
 #define IMX519_SENSOR_ID                        0x0519
 #define IMX576_SENSOR_ID                        0x0576
 #define IMX350_SENSOR_ID                        0x0350
@@ -134,8 +150,6 @@
 #define IMX386_MONO_SENSOR_ID                   0x0286
 #define IMX362_SENSOR_ID                        0x0362
 #define IMX338_SENSOR_ID                        0x0338
-#define IMX334_SENSOR_ID                        0x0334
-#define IMX334SUB_SENSOR_ID                     0x0335
 #define IMX376_SENSOR_ID                        0x0376
 #define IMX318_SENSOR_ID                        0x0318
 #define IMX319_SENSOR_ID                        0x0319
@@ -157,8 +171,6 @@
 #define IMX091_SENSOR_ID                        0x0091
 #define IMX073_SENSOR_ID                        0x0046
 #define IMX058_SENSOR_ID                        0x0058
-#define IMX582_SENSOR_ID                        0x0582
-#define IMX596_SENSOR_ID                        0x0596
 /*OV*/
 #define OV23850_SENSOR_ID                       0x023850
 #define OV16880_SENSOR_ID                       0x016880
@@ -209,17 +221,12 @@
 #define OV2650_SENSOR_ID_2                      0x2652
 #define OV2650_SENSOR_ID_3                      0x2655
 #define OV20880MIPI_SENSOR_ID                   0x20880
-#define OV05A20_SENSOR_ID                       0x5305
-#define MOT_AION_OV50A_SENSOR_ID                0x565042
-
-#define MOT_MANAUS_OV32B_SENSOR_ID                0x3242
-#define MOT_MANAUS_OV50A_SENSOR_ID                0x565043
-
-
+#define OV05A20_SENSOR_ID	                    0x5305
 /*S5K*/
 #define S5KJD1_SENSOR_ID                        0x3841
 #define S5K2LQSX_SENSOR_ID                      0x2c1a
 #define S5K4H7_SENSOR_ID                        0x487B
+#define S5K4H7YXSUB_SENSOR_ID                   0x487A
 #define S5K3P8SP_SENSOR_ID                      0x3108
 #define S5K2T7SP_SENSOR_ID                      0x2147
 #define S5K3P8SX_SENSOR_ID                      0x3108
@@ -228,7 +235,6 @@
 #define S5K3L8_SENSOR_ID                        0x30C8
 #define S5K3M3_SENSOR_ID                        0x30D3
 #define S5K3M5SX_SENSOR_ID                      0x30D5
-#define S5K3M5SXO_SENSOR_ID                     0x30D5
 #define S5K2X8_SENSOR_ID                        0x2188
 #define S5K2P7_SENSOR_ID                        0x2107
 #define S5K2P8_SENSOR_ID                        0x2108
@@ -261,7 +267,6 @@
 #define S5K5E8YXREAR2_SENSOR_ID                 0x5e81
 #define S5K5E9_SENSOR_ID                        0x559b
 #define S5KHM2SP_SENSOR_ID                      0x1AD2
-#define S5K4H7ALPHA_SENSOR_ID                   0x487B
 /*HI*/
 #define HI841_SENSOR_ID                         0x0841
 #define HI707_SENSOR_ID                         0x00b8
@@ -277,9 +282,6 @@
 #define HI251_SENSOR_ID                         0x0084
 #define HI191MIPI_SENSOR_ID                     0x0191
 #define HIVICF_SENSOR_ID                        0x0081
-#define MOT_DUBAI_HI1336_SENSOR_ID              0x1336
-#define MOT_AION_HI1336_SENSOR_ID               0x1337
-#define MOT_MANAUS_HI1336_SENSOR_ID              0x1338
 /*MT*/
 #define MT9D011_SENSOR_ID                       0x1511
 #define MT9D111_SENSOR_ID                       0x1511
@@ -323,7 +325,6 @@
 #define GC0312_SENSOR_ID                        0xb310
 #define GC8034_SENSOR_ID                        0x8044
 #define GC8C34_SENSOR_ID                        0x80C4
-#define GC02M1_SENSOR_ID                        0x2E0
 /*SP*/
 #define SP0A19_YUV_SENSOR_ID                    0xA6
 #define SP2518_YUV_SENSOR_ID                    0x53
@@ -362,7 +363,6 @@
 #define T8EV5_SENSOR_ID                         0x1011
 
 #define S5KGD1SP_SENSOR_ID                      0x0841
-#define MOT_AION_S5KGD2_SENSOR_ID               0x0842
 #define HI846_SENSOR_ID                         0x0846
 #define OV02A10_MONO_SENSOR_ID                  0x2509
 #define IMX686_SENSOR_ID                        0X0686
@@ -370,8 +370,8 @@
 #define OV48C_SENSOR_ID                         0x564843
 #define IMX355_SENSOR_ID                        0x0355
 #define OV13B10_SENSOR_ID                       0x560d42
+#define OV02B10_SENSOR_ID                       0x002b
 
-#define MOT_DUBAI_OV32C_SENSOR_ID               0x3243
 
 #define OV48B_SENSOR_ID                         0x564842
 #define S5K3P9SP_SENSOR_ID                      0x3109
@@ -382,46 +382,31 @@
 #define GC02K0_SENSOR_ID                        0x2385
 #define OV16A10_SENSOR_ID                       0x561641
 #define GC02M1B_SENSOR_ID                       0x02e0
-#define MOT_DUBAI_GC02M1B_SENSOR_ID             0x02E0
-//add dubai sensor id begin
-#define MOT_DUBAI_OV50A_SENSOR_ID               0x565041
-//add dubai sensor id end
-#define MOT_AION_OV50E_SENSOR_ID                0x565048
 
-//Begin: Add sensor id for Devonf
-#define MOT_DEVONF_OV50A_SENSOR_ID              0x565041
-#define SENSOR_DRVNAME_MOT_DEVONF_OV50A_MIPI_RAW           "mot_devonf_ov50a_mipi_raw"
-#define MOT_DEVONF_HI1634Q_SENSOR_ID            0x1634
-#define SENSOR_DRVNAME_MOT_DEVONF_HI1634Q_MIPI_RAW         "mot_devonf_hi1634q_mipi_raw"
-#define MOT_DEVONF_S5K4H7_SENSOR_ID             0x487b
-#define SENSOR_DRVNAME_MOT_DEVONF_S5K4H7_MIPI_RAW          "mot_devonf_s5k4h7_mipi_raw"
-//end
+//add corfu sensor id begin
+#define MOT_CORFU_S5KGM1_QTECH_ID       0x08D1
+#define MOT_CORFU_HI1336_OFILM_ID       0x1336
+#define MOT_CORFU_HI1336_OFILM_DOE_ID   0x2336
+#define MOT_CORFU_S5K4H7_QTECH_ID       0x487C
+#define MOT_CORFU_GC02M1_TSP_ID         0x02e1
+//add corfu sensor id end
+//add coful sensor id begin
+#define MOT_COFUL_S5K4H7_QTECH_ID       0x487C
+#define MOT_COFUL_GC02M1_TSP_ID         0x02e1
+#define MOT_COFUL_S5KJN1_QTECH_ID       0x38E1
+//add coful sensor id end
+//add cofud sensor id begin
+#define MOT_COFUD_S5K4H7_SENSOR_ID       0x487C
+#define MOT_COFUD_GC02M1_SENSOR_ID       0x02e1
+#define MOT_COFUD_S5KJN1_SENSOR_ID       0x38E1
+//add cofud sensor id end
+//add milan sensor id begin
+#define MOT_MILAN_S5K4H7_SENSOR_ID       0x487C
+#define MOT_MILAN_GC02M1_SENSOR_ID       0x02e1
+#define MOT_MILAN_S5KJN1_SENSOR_ID       0x38E1
+#define MOT_MILAN_OV16A1Q_SENSOR_ID      0x1641
+//add milan sensor id end
 
-//Begin: Add sensor id for CANCUNF
-#define MOT_CANCUNF_OV50D_SENSOR_ID              0x565044
-#define SENSOR_DRVNAME_MOT_CANCUNF_OV50D_MIPI_RAW           "mot_cancunf_ov50d_mipi_raw"
-#define MOT_CANCUNF_HI1634Q_SENSOR_ID            0x1634
-#define SENSOR_DRVNAME_MOT_CANCUNF_HI1634Q_MIPI_RAW         "mot_cancunf_hi1634q_mipi_raw"
-#define MOT_CANCUNF_S5K4H7_SENSOR_ID             0x487b
-#define SENSOR_DRVNAME_MOT_CANCUNF_S5K4H7_MIPI_RAW          "mot_cancunf_s5k4h7_mipi_raw"
-#define MOT_CANCUNF_SC202_SENSOR_ID             0xeb52
-#define SENSOR_DRVNAME_MOT_CANCUNF_SC202_MIPI_RAW             "mot_cancunf_sc202_mipi_raw"
-//end
-
-//Begin: Add sensor id for Vicky
-#define MOT_VICKY_S5KHM6_SENSOR_ID            0x1AD6
-#define MOT_VICKY_S5KGM1_SENSOR_ID            0x08D1
-#define MOT_VICKY_HI1634Q_SENSOR_ID           0x1634
-#define MOT_VICKY_OV02B10_SENSOR_ID           0x002b
-#define MOT_VICKY_S5K4H7_SENSOR_ID            0x487b
-//End
-
-//Begin: Add sensor id for devonn
-#define MOT_DEVONN_S5KJN1_SENSOR_ID       0x38E1
-#define MOT_DEVONN_HI1634Q_SENSOR_ID      0x1634
-#define MOT_DEVONN_OV02B10_SENSOR_ID      0x002b
-#define MOT_DEVONN_GC02M1_SENSOR_ID       0x02E0
-//End
 /* CAMERA DRIVER NAME */
 #define CAMERA_HW_DEVNAME                       "kd_camera_hw"
 /* SENSOR DEVICE DRIVER NAME */
@@ -431,11 +416,6 @@
 #define SENSOR_DRVNAME_IMX481_MIPI_RAW          "imx481_mipi_raw"
 #define SENSOR_DRVNAME_IMX486_MIPI_RAW          "imx486_mipi_raw"
 #define SENSOR_DRVNAME_IMX586_MIPI_RAW          "imx586_mipi_raw"
-#define SENSOR_DRVNAME_IMX766_MIPI_RAW          "imx766_mipi_raw"
-#define SENSOR_DRVNAME_IMX766O_MIPI_RAW         "imx766o_mipi_raw"
-#define SENSOR_DRVNAME_IMX709O_MIPI_RAW         "imx709o_mipi_raw"
-#define SENSOR_DRVNAME_IMX766DUAL_MIPI_RAW      "imx766dual_mipi_raw"
-#define SENSOR_DRVNAME_IMX766DUALO_MIPI_RAW     "imx766dualo_mipi_raw"
 #define SENSOR_DRVNAME_IMX519_MIPI_RAW          "imx519_mipi_raw"
 #define SENSOR_DRVNAME_IMX519DUAL_MIPI_RAW      "imx519dual_mipi_raw"
 #define SENSOR_DRVNAME_IMX576_MIPI_RAW          "imx576_mipi_raw"
@@ -447,8 +427,6 @@
 #define SENSOR_DRVNAME_IMX386_MIPI_MONO         "imx386_mipi_mono"
 #define SENSOR_DRVNAME_IMX362_MIPI_RAW          "imx362_mipi_raw"
 #define SENSOR_DRVNAME_IMX338_MIPI_RAW          "imx338_mipi_raw"
-#define SENSOR_DRVNAME_IMX334_MIPI_RAW          "imx334_mipi_raw"
-#define SENSOR_DRVNAME_IMX334SUB_MIPI_RAW       "imx334sub_mipi_raw"
 #define SENSOR_DRVNAME_IMX376_MIPI_RAW          "imx376_mipi_raw"
 #define SENSOR_DRVNAME_IMX318_MIPI_RAW          "imx318_mipi_raw"
 #define SENSOR_DRVNAME_IMX319_MIPI_RAW          "imx319_mipi_raw"
@@ -469,11 +447,8 @@
 #define SENSOR_DRVNAME_IMX105_MIPI_RAW          "imx105_mipi_raw"
 #define SENSOR_DRVNAME_IMX091_MIPI_RAW          "imx091_mipi_raw"
 #define SENSOR_DRVNAME_IMX073_MIPI_RAW          "imx073_mipi_raw"
-#define SENSOR_DRVNAME_IMX582_MIPI_RAW          "imx582_mipi_raw"
-#define SENSOR_DRVNAME_IMX596_MIPI_RAW          "imx596_mipi_raw"
+#define SENSOR_DRVNAME_IMX766_MIPI_RAW          "imx766_mipi_raw"
 /*OV*/
-#define SENSOR_DRVNAME_MOT_AION_OV50A_MIPI_RAW  "mot_aion_ov50a_mipi_raw"
-#define SENSOR_DRVNAME_MOT_MANAUS_OV32B_MIPI_RAW  "mot_manaus_ov32b_mipi_raw"
 #define SENSOR_DRVNAME_OV23850_MIPI_RAW         "ov23850_mipi_raw"
 #define SENSOR_DRVNAME_OV16880_MIPI_RAW         "ov16880_mipi_raw"
 #define SENSOR_DRVNAME_OV16885_MIPI_RAW         "ov16885_mipi_raw"
@@ -525,13 +500,13 @@
 #define SENSOR_DRVNAME_OV2655_YUV               "ov2655_yuv"
 #define SENSOR_DRVNAME_OV2650_RAW               "ov265x_raw"
 #define SENSOR_DRVNAME_OV20880_MIPI_RAW         "ov20880_mipi_raw"
+#define SENSOR_DRVNAME_OV13B10_MIPI_RAW         "ov13b10_mipi_raw"
 #define SENSOR_DRVNAME_OV05A20_MIPI_RAW         "ov05a20_mipi_raw"
-#define SENSOR_DRVNAME_MOT_DUBAI_OV32C_MIPI_RAW    "mot_dubai_ov32c_mipi_raw"
-
 /*S5K*/
 #define SENSOR_DRVNAME_S5KJD1_MIPI_RAW        "s5kjd1_mipi_raw"
 #define SENSOR_DRVNAME_S5K2LQSX_MIPI_RAW        "s5k2lqsx_mipi_raw"
 #define SENSOR_DRVNAME_S5K4H7_MIPI_RAW          "s5k4h7_mipi_raw"
+#define SENSOR_DRVNAME_S5K4H7YXSUB_MIPI_RAW     "s5k4h7yxsub_mipi_raw"
 #define SENSOR_DRVNAME_S5K3P8SP_MIPI_RAW        "s5k3p8sp_mipi_raw"
 #define SENSOR_DRVNAME_S5K2T7SP_MIPI_RAW        "s5k2t7sp_mipi_raw"
 #define SENSOR_DRVNAME_S5K2T7SP_MIPI_RAW_5M     "s5k2t7sp_mipi_raw_5m"
@@ -541,7 +516,6 @@
 #define SENSOR_DRVNAME_S5K3L8_MIPI_RAW          "s5k3l8_mipi_raw"
 #define SENSOR_DRVNAME_S5K3M3_MIPI_RAW          "s5k3m3_mipi_raw"
 #define SENSOR_DRVNAME_S5K3M5SX_MIPI_RAW        "s5k3m5sx_mipi_raw"
-#define SENSOR_DRVNAME_S5K3M5SXO_MIPI_RAW       "s5k3m5sxo_mipi_raw"
 #define SENSOR_DRVNAME_S5K2X8_MIPI_RAW          "s5k2x8_mipi_raw"
 #define SENSOR_DRVNAME_S5K2P7_MIPI_RAW          "s5k2p7_mipi_raw"
 #define SENSOR_DRVNAME_S5K2P8_MIPI_RAW          "s5k2p8_mipi_raw"
@@ -564,11 +538,7 @@
 #define SENSOR_DRVNAME_S5K5E8YXREAR2_MIPI_RAW   "s5k5e8yxrear2_mipi_raw"
 #define SENSOR_DRVNAME_S5K5E9_MIPI_RAW          "s5k5e9_mipi_raw"
 #define SENSOR_DRVNAME_S5KHM2SP_MIPI_RAW        "s5khm2sp_mipi_raw"
-#define SENSOR_DRVNAME_S5K4H7ALPHA_MIPI_RAW     "s5k4h7alpha_mipi_raw"
 /*HI*/
-#define SENSOR_DRVNAME_MOT_DUBAI_HI1336_MIPI_RAW  "mot_dubai_hi1336_mipi_raw"
-#define SENSOR_DRVNAME_MOT_AION_HI1336_MIPI_RAW  "mot_aion_hi1336_mipi_raw"
-#define SENSOR_DRVNAME_MOT_MANAUS_HI1336_MIPI_RAW  "mot_manaus_hi1336_mipi_raw"
 #define SENSOR_DRVNAME_HI841_MIPI_RAW           "hi841_mipi_raw"
 #define SENSOR_DRVNAME_HI707_YUV                "hi707_yuv"
 #define SENSOR_DRVNAME_HI704_YUV                "hi704_yuv"
@@ -594,7 +564,7 @@
 #define SENSOR_DRVNAME_MT9T113_MIPI_YUV         "mt9t113_mipi_yuv"
 /*GC*/
 #define SENSOR_DRVNAME_GC02M0_MIPI_RAW          "gc02m0_mipi_raw"
-#define SENSOR_DRVNAME_GC5035MIPI_RAW           "gc5035_mipi_raw"
+#define SENSOR_DRVNAME_GC5035MIPI_RAW          "gc5035_mipi_raw"
 #define SENSOR_DRVNAME_GC2375_MIPI_RAW          "gc2375_mipi_raw"
 #define SENSOR_DRVNAME_GC2375H_MIPI_RAW         "gc2375h_mipi_raw"
 #define SENSOR_DRVNAME_GC2375SUB_MIPI_RAW       "gc2375sub_mipi_raw"
@@ -613,7 +583,6 @@
 #define SENSOR_DRVNAME_GC0313MIPI_YUV           "gc0313_mipi_yuv"
 #define SENSOR_DRVNAME_GC8C34_MIPI_RAW          "gc8c34_mipi_raw"
 #define SENSOR_DRVNAME_GC8034_MIPI_RAW          "gc8034_mipi_raw"
-#define SENSOR_DRVNAME_GC02M1_MIPI_RAW          "gc02m1_mipi_raw"
 /*SP*/
 #define SENSOR_DRVNAME_SP0A19_YUV               "sp0a19_yuv"
 #define SENSOR_DRVNAME_SP2518_YUV               "sp2518_yuv"
@@ -661,39 +630,51 @@
 #define SENSOR_DRVNAME_OV48C_MIPI_RAW           "ov48c_mipi_raw"
 #define SENSOR_DRVNAME_IMX355_MIPI_RAW          "imx355_mipi_raw"
 #define SENSOR_DRVNAME_OV13B10_MIPI_RAW         "ov13b10_mipi_raw"
-/*moto*/
-#define SENSOR_DRVNAME_HI1634Q_MIPI_RAW "hi1634q_mipi_raw"
+#define SENSOR_DRVNAME_OV02B10_MIPI_RAW         "ov02b10_mipi_raw"
+//add ellis sensor drvname begin
+#define SENSOR_DRVNAME_MOT_ELLIS_HI1336_MIPI_RAW "mot_ellis_hi1336_mipi_raw"
+#define SENSOR_DRVNAME_MOT_ELLIS_SC500CS_MIPI_RAW "mot_ellis_sc500cs_mipi_raw"
+#define SENSOR_DRVNAME_MOT_ELLIS_OV02B1B_MIPI_RAW "mot_ellis_ov02b1b_mipi_raw"
+#define SENSOR_DRVNAME_MOT_ELLIS_HI556D_MIPI_RAW "mot_ellis_hi556d_mipi_raw"
+#define SENSOR_DRVNAME_MOT_ELLIS_GC02M1B_MIPI_RAW "mot_ellis_gc02m1b_mipi_raw"
+//add ellis sensor drvname end
+//add tonga sensor drvname begin
+#define SENSOR_DRVNAME_MOT_TONGA_S5K4H7_MIPI_RAW "mot_tonga_s5k4h7_mipi_raw"
+#define SENSOR_DRVNAME_MOT_TONGA_OV02B1B_MIPI_RAW "mot_tonga_ov02b1b_mipi_raw"
+#define SENSOR_DRVNAME_MOT_TONGA_GC02M1B_MIPI_RAW "mot_tonga_gc02m1b_mipi_raw"
+#define SENSOR_DRVNAME_MOT_TONGA_GC02M1_MIPI_RAW "mot_tonga_gc02m1_mipi_raw"
+#define SENSOR_DRVNAME_MOT_TONGA_S5KJN1SQ_MIPI_RAW "mot_tonga_s5kjn1sq_mipi_raw"
+//add tonga sensor drvname end
+//add maui sensor drvname begin
+#define SENSOR_DRVNAME_MOT_MAUI_HI1634B_MIPI_RAW "mot_maui_hi1634b_mipi_raw"
+#define SENSOR_DRVNAME_MOT_MAUI_S5K5E9_MIPI_RAW  "mot_maui_s5k5e9_mipi_raw"
+#define SENSOR_DRVNAME_MOT_MAUI_GC02M1_MIPI_RAW "mot_maui_gc02m1_mipi_raw"
+#define SENSOR_DRVNAME_MOT_MAUI_OV02B10_MIPI_RAW "mot_maui_ov02b10_mipi_raw"
+//add maui sensor drvname end
+//add corfu sensor drvname begin
+#define SENSOR_DRVNAME_MOT_CORFU_S5KGM1_QTECH               "mot_corfu_s5kgm1_qtech"
+#define SENSOR_DRVNAME_MOT_CORFU_HI1336_OFILM               "mot_corfu_hi1336_ofilm"
+#define SENSOR_DRVNAME_MOT_CORFU_HI1336_OFILM_DOE           "mot_corfu_hi1336_ofilm_doe"
+#define SENSOR_DRVNAME_MOT_CORFU_S5K4H7_QTECH               "mot_corfu_s5k4h7_qtech"
+#define SENSOR_DRVNAME_MOT_CORFU_GC02M1_TSP                 "mot_corfu_gc02m1_tsp"
+//add corfu sensor drvname end
+//add coful sensor drvname begin
+#define SENSOR_DRVNAME_MOT_COFUL_S5K4H7_QTECH               "mot_coful_s5k4h7_qtech"
+#define SENSOR_DRVNAME_MOT_COFUL_GC02M1_TSP                 "mot_coful_gc02m1_tsp"
+#define SENSOR_DRVNAME_MOT_COFUL_S5KJN1_QTECH               "mot_coful_s5kjn1_qtech"
+//add coful sensor drvname end
 
-//add dubai sensor drvname begin
-#define SENSOR_DRVNAME_MOT_DUBAI_GC02M1B_MIPI_RAW   "mot_dubai_gc02m1b_mipi_raw"
-#define SENSOR_DRVNAME_MOT_DUBAI_OV50A_MIPI_RAW "mot_dubai_ov50a_mipi_raw"
-//add dubai sensor drvname end
-
-//add aion sensor drvname begin
-#define SENSOR_DRVNAME_MOT_AION_S5KGD2_MIPI_RAW "mot_aion_s5kgd2_mipi_raw"
-#define SENSOR_DRVNAME_MOT_AION_OV50E_MIPI_RAW "mot_aion_ov50e_mipi_raw"
-//add aion sensor drvname end
-
-//add manaus sensor drvname begin
-#define SENSOR_DRVNAME_MOT_MANAUS_OV50A_MIPI_RAW "mot_manaus_ov50a_mipi_raw"
-//add manaus sensor drvname end
-
-
-//Begin: Add sensor drvname for Vicky
-#define SENSOR_DRVNAME_MOT_VICKY_S5KHM6_MIPI_RAW       "mot_vicky_s5khm6_mipi_raw"
-#define SENSOR_DRVNAME_MOT_VICKY_S5KGM1_MIPI_RAW       "mot_vicky_s5kgm1_mipi_raw"
-#define SENSOR_DRVNAME_MOT_VICKY_HI1634Q_MIPI_RAW      "mot_vicky_hi1634q_mipi_raw"
-#define SENSOR_DRVNAME_MOT_VICKY_OV02B10_MIPI_RAW      "mot_vicky_ov02b10_mipi_raw"
-#define SENSOR_DRVNAME_MOT_VICKY_S5K4H7_MIPI_RAW       "mot_vicky_s5k4h7_mipi_raw"
-//End
-
-//Begin: Add sensor drv name for devonn
-#define SENSOR_DRVNAME_MOT_DEVONN_S5KJN1_MIPI_RAW        "mot_devonn_s5kjn1_mipi_raw"
-#define SENSOR_DRVNAME_MOT_DEVONN_HI1634Q_MIPI_RAW       "mot_devonn_hi1634q_mipi_raw"
-#define SENSOR_DRVNAME_MOT_DEVONN_OV02B10_MIPI_RAW       "mot_devonn_ov02b10_mipi_raw"
-#define SENSOR_DRVNAME_MOT_DEVONN_GC02M1_MIPI_RAW        "mot_devonn_gc02m1_mipi_raw"
-//End
-
+//add cofud sensor drvname begin
+#define SENSOR_DRVNAME_MOT_COFUD_S5K4H7_MIPI_RAW               "mot_cofud_s5k4h7_mipi_raw"
+#define SENSOR_DRVNAME_MOT_COFUD_GC02M1_MIPI_RAW               "mot_cofud_gc02m1_mipi_raw"
+#define SENSOR_DRVNAME_MOT_COFUD_S5KJN1_MIPI_RAW               "mot_cofud_s5kjn1_mipi_raw"
+//add cofud sensor drvname end
+//add milan sensor drvname begin
+#define SENSOR_DRVNAME_MOT_MILAN_S5K4H7_MIPI_RAW            "mot_milan_s5k4h7_mipi_raw"
+#define SENSOR_DRVNAME_MOT_MILAN_GC02M1_MIPI_RAW            "mot_milan_gc02m1_mipi_raw"
+#define SENSOR_DRVNAME_MOT_MILAN_S5KJN1_MIPI_RAW            "mot_milan_s5kjn1_mipi_raw"
+#define SENSOR_DRVNAME_MOT_MILAN_OV16A1Q_MIPI_RAW           "mot_milan_ov16a1q_mipi_raw"
+//add milan sensor drvname end
 /******************************************************************************
  *
  ******************************************************************************/

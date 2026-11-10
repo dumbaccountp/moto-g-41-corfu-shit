@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2019 MediaTek Inc.
+ * Copyright (c) 2015 MediaTek Inc.
  */
 
 #ifndef _MT_WPE_H
@@ -308,13 +308,9 @@ struct WPE_Config {
 	unsigned int WPE_WPEO2_FMT;
 };
 
-struct WPE_ION_MEM_INFO {
-	unsigned int buf_fd;
-	unsigned int buf_offset;
-	unsigned int buf_pa;
-	unsigned int check_flag;
-};
-
+/***********************************************************************
+ *
+ ***********************************************************************/
 enum WPE_CMD_ENUM {
 	WPE_CMD_RESET,            /* Reset */
 	WPE_CMD_DUMP_REG,         /* Dump WPE Register */
@@ -332,8 +328,6 @@ enum WPE_CMD_ENUM {
 	WPE_CMD_DEQUE_DONE,       /* WMFE Deque Done */
 	WPE_CMD_WAIT_DEQUE,       /* WMFE WAIT Enque Done */
 	WPE_CMD_BUFQUE_CTRL,
-	WPE_CMD_SET_BUF_PA,
-	WPE_CMD_DEL_BUF_FD,
 	WPE_CMD_TOTAL,
 };
 
@@ -382,10 +376,6 @@ struct compat_WPE_Request {
 #define WPE_WAIT_DEQUE  _IO(WPE_MAGIC, WPE_CMD_WAIT_DEQUE)
 #define WPE_BUFQUE_CTRL \
 	_IOWR(WPE_MAGIC, WPE_CMD_BUFQUE_CTRL, struct ISP_WPE_BUFQUE_STRUCT)
-#define WPE_SET_BUF_PA \
-	_IOWR(WPE_MAGIC, WPE_CMD_SET_BUF_PA, struct WPE_ION_MEM_INFO)
-#define WPE_DEL_BUF_FD _IOWR(WPE_MAGIC, WPE_CMD_DEL_BUF_FD, unsigned int)
-
 
 
 #ifdef CONFIG_COMPAT

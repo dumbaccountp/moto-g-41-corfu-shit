@@ -1,10 +1,26 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Marvell 88SE64xx/88SE94xx main function
  *
  * Copyright 2007 Red Hat, Inc.
  * Copyright 2008 Marvell. <kewei@marvell.com>
  * Copyright 2009-2011 Marvell. <yuxiangl@marvell.com>
+ *
+ * This file is licensed under GPLv2.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; version 2 of the
+ * License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+ * USA
 */
 
 #include "mv_sas.h"
@@ -216,11 +232,11 @@ void mvs_set_sas_addr(struct mvs_info *mvi, int port_id, u32 off_lo,
 	MVS_CHIP_DISP->write_port_cfg_data(mvi, port_id, hi);
 }
 
-static void mvs_bytes_dmaed(struct mvs_info *mvi, int i, gfp_t gfp_flags)
+static void mvs_bytes_dmaed(struct mvs_info *mvi, int i)
 {
 	struct mvs_phy *phy = &mvi->phy[i];
 	struct asd_sas_phy *sas_phy = &phy->sas_phy;
-
+	struct sas_ha_struct *sas_ha;
 	if (!phy->phy_attached)
 		return;
 
@@ -229,7 +245,8 @@ static void mvs_bytes_dmaed(struct mvs_info *mvi, int i, gfp_t gfp_flags)
 		return;
 	}
 
-	sas_notify_phy_event_gfp(sas_phy, PHYE_OOB_DONE, gfp_flags);
+	sas_ha = mvi->sas;
+	sas_ha->notify_phy_event(sas_phy, PHYE_OOB_DONE);
 
 	if (sas_phy->phy) {
 		struct sas_phy *sphy = sas_phy->phy;
@@ -261,7 +278,8 @@ static void mvs_bytes_dmaed(struct mvs_info *mvi, int i, gfp_t gfp_flags)
 
 	sas_phy->frame_rcvd_size = phy->frame_rcvd_size;
 
-	sas_notify_port_event_gfp(sas_phy, PORTE_BYTES_DMAED, gfp_flags);
+	mvi->sas->notify_port_event(sas_phy,
+				   PORTE_BYTES_DMAED);
 }
 
 void mvs_scan_start(struct Scsi_Host *shost)
@@ -277,7 +295,7 @@ void mvs_scan_start(struct Scsi_Host *shost)
 	for (j = 0; j < core_nr; j++) {
 		mvi = ((struct mvs_prv_info *)sha->lldd_ha)->mvi[j];
 		for (i = 0; i < mvi->chip->n_phy; ++i)
-			mvs_bytes_dmaed(mvi, i, GFP_KERNEL);
+			mvs_bytes_dmaed(mvi, i);
 	}
 	mvs_prv->scan_finished = 1;
 }
@@ -318,13 +336,13 @@ static int mvs_task_prep_smp(struct mvs_info *mvi,
 	 * DMA-map SMP request, response buffers
 	 */
 	sg_req = &task->smp_task.smp_req;
-	elem = dma_map_sg(mvi->dev, sg_req, 1, DMA_TO_DEVICE);
+	elem = dma_map_sg(mvi->dev, sg_req, 1, PCI_DMA_TODEVICE);
 	if (!elem)
 		return -ENOMEM;
 	req_len = sg_dma_len(sg_req);
 
 	sg_resp = &task->smp_task.smp_resp;
-	elem = dma_map_sg(mvi->dev, sg_resp, 1, DMA_FROM_DEVICE);
+	elem = dma_map_sg(mvi->dev, sg_resp, 1, PCI_DMA_FROMDEVICE);
 	if (!elem) {
 		rc = -ENOMEM;
 		goto err_out;
@@ -398,10 +416,10 @@ static int mvs_task_prep_smp(struct mvs_info *mvi,
 
 err_out_2:
 	dma_unmap_sg(mvi->dev, &tei->task->smp_task.smp_resp, 1,
-		     DMA_FROM_DEVICE);
+		     PCI_DMA_FROMDEVICE);
 err_out:
 	dma_unmap_sg(mvi->dev, &tei->task->smp_task.smp_req, 1,
-		     DMA_TO_DEVICE);
+		     PCI_DMA_TODEVICE);
 	return rc;
 }
 
@@ -772,11 +790,12 @@ static int mvs_task_prep(struct sas_task *task, struct mvs_info *mvi, int is_tmf
 	slot->n_elem = n_elem;
 	slot->slot_tag = tag;
 
-	slot->buf = dma_pool_zalloc(mvi->dma_pool, GFP_ATOMIC, &slot->buf_dma);
+	slot->buf = dma_pool_alloc(mvi->dma_pool, GFP_ATOMIC, &slot->buf_dma);
 	if (!slot->buf) {
 		rc = -ENOMEM;
 		goto err_out_tag;
 	}
+	memset(slot->buf, 0, MVS_SLOT_BUF_SZ);
 
 	tei.task = task;
 	tei.hdr = &mvi->slot[tag];
@@ -885,9 +904,9 @@ static void mvs_slot_task_free(struct mvs_info *mvi, struct sas_task *task,
 	switch (task->task_proto) {
 	case SAS_PROTOCOL_SMP:
 		dma_unmap_sg(mvi->dev, &task->smp_task.smp_resp, 1,
-			     DMA_FROM_DEVICE);
+			     PCI_DMA_FROMDEVICE);
 		dma_unmap_sg(mvi->dev, &task->smp_task.smp_req, 1,
-			     DMA_TO_DEVICE);
+			     PCI_DMA_TODEVICE);
 		break;
 
 	case SAS_PROTOCOL_SATA:
@@ -1191,7 +1210,7 @@ static int mvs_dev_found_notify(struct domain_device *dev, int lock)
 	mvi_device->dev_type = dev->dev_type;
 	mvi_device->mvi_info = mvi;
 	mvi_device->sas_device = dev;
-	if (parent_dev && dev_is_expander(parent_dev->dev_type)) {
+	if (parent_dev && DEV_IS_EXPANDER(parent_dev->dev_type)) {
 		int phy_id;
 		u8 phy_num = parent_dev->ex_dev.num_phys;
 		struct ex_phy *phy;
@@ -1404,7 +1423,7 @@ int mvs_I_T_nexus_reset(struct domain_device *dev)
 {
 	unsigned long flags;
 	int rc = TMF_RESP_FUNC_FAILED;
-	struct mvs_device *mvi_dev = (struct mvs_device *)dev->lldd_dev;
+    struct mvs_device * mvi_dev = (struct mvs_device *)dev->lldd_dev;
 	struct mvs_info *mvi = mvi_dev->mvi_info;
 
 	if (mvi_dev->dev_status != MVS_DEV_EH)
@@ -1539,7 +1558,7 @@ out:
 
 int mvs_abort_task_set(struct domain_device *dev, u8 *lun)
 {
-	int rc;
+	int rc = TMF_RESP_FUNC_FAILED;
 	struct mvs_tmf_task tmf_task;
 
 	tmf_task.tmf = TMF_ABORT_TASK_SET;
@@ -1878,6 +1897,7 @@ static void mvs_work_queue(struct work_struct *work)
 	struct mvs_info *mvi = mwq->mvi;
 	unsigned long flags;
 	u32 phy_no = (unsigned long) mwq->data;
+	struct sas_ha_struct *sas_ha = mvi->sas;
 	struct mvs_phy *phy = &mvi->phy[phy_no];
 	struct asd_sas_phy *sas_phy = &phy->sas_phy;
 
@@ -1886,27 +1906,28 @@ static void mvs_work_queue(struct work_struct *work)
 
 		if (phy->phy_event & PHY_PLUG_OUT) {
 			u32 tmp;
-
+			struct sas_identify_frame *id;
+			id = (struct sas_identify_frame *)phy->frame_rcvd;
 			tmp = MVS_CHIP_DISP->read_phy_ctl(mvi, phy_no);
 			phy->phy_event &= ~PHY_PLUG_OUT;
 			if (!(tmp & PHY_READY_MASK)) {
 				sas_phy_disconnected(sas_phy);
 				mvs_phy_disconnected(phy);
-				sas_notify_phy_event_gfp(sas_phy,
-					PHYE_LOSS_OF_SIGNAL, GFP_ATOMIC);
+				sas_ha->notify_phy_event(sas_phy,
+					PHYE_LOSS_OF_SIGNAL);
 				mv_dprintk("phy%d Removed Device\n", phy_no);
 			} else {
 				MVS_CHIP_DISP->detect_porttype(mvi, phy_no);
 				mvs_update_phyinfo(mvi, phy_no, 1);
-				mvs_bytes_dmaed(mvi, phy_no, GFP_ATOMIC);
+				mvs_bytes_dmaed(mvi, phy_no);
 				mvs_port_notify_formed(sas_phy, 0);
 				mv_dprintk("phy%d Attached Device\n", phy_no);
 			}
 		}
 	} else if (mwq->handler & EXP_BRCT_CHG) {
 		phy->phy_event &= ~EXP_BRCT_CHG;
-		sas_notify_port_event_gfp(sas_phy,
-				PORTE_BROADCAST_RCVD, GFP_ATOMIC);
+		sas_ha->notify_port_event(sas_phy,
+				PORTE_BROADCAST_RCVD);
 		mv_dprintk("phy%d Got Broadcast Change\n", phy_no);
 	}
 	list_del(&mwq->entry);
@@ -2023,7 +2044,7 @@ void mvs_int_port(struct mvs_info *mvi, int phy_no, u32 events)
 				mdelay(10);
 			}
 
-			mvs_bytes_dmaed(mvi, phy_no, GFP_ATOMIC);
+			mvs_bytes_dmaed(mvi, phy_no);
 			/* whether driver is going to handle hot plug */
 			if (phy->phy_event & PHY_PLUG_OUT) {
 				mvs_port_notify_formed(&phy->sas_phy, 0);

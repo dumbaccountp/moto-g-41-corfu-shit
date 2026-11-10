@@ -349,11 +349,7 @@ static int __init gscps2_probe(struct parisc_device *dev)
 
 	ps2port->port = serio;
 	ps2port->padev = dev;
-	ps2port->addr = ioremap(hpa, GSC_STATUS + 4);
-	if (!ps2port->addr) {
-		ret = -ENOMEM;
-		goto fail_nomem;
-	}
+	ps2port->addr = ioremap_nocache(hpa, GSC_STATUS + 4);
 	spin_lock_init(&ps2port->lock);
 
 	gscps2_reset(ps2port);

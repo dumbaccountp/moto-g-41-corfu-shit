@@ -9,6 +9,7 @@
 #ifndef _LINUX_SUNRPC_SVCAUTH_GSS_H
 #define _LINUX_SUNRPC_SVCAUTH_GSS_H
 
+#ifdef __KERNEL__
 #include <linux/sched.h>
 #include <linux/sunrpc/types.h>
 #include <linux/sunrpc/xdr.h>
@@ -24,4 +25,5 @@ struct auth_domain *svcauth_gss_register_pseudoflavor(u32 pseudoflavor,
 						      char *name);
 u32 svcauth_gss_flavor(struct auth_domain *dom);
 
+#endif /* __KERNEL__ */
 #endif /* _LINUX_SUNRPC_SVCAUTH_GSS_H */

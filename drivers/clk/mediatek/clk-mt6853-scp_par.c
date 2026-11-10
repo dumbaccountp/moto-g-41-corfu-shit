@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
-//
-// Copyright (c) 2020 MediaTek Inc.
-// Author: Owen Chen <owen.chen@mediatek.com>
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright (c) 2019 MediaTek Inc.
+ */
+
 
 #include <linux/clk-provider.h>
-#include <linux/module.h>
 #include <linux/platform_device.h>
 
 #include "clk-mtk.h"
@@ -14,14 +14,12 @@
 
 #define MT_CLKMGR_MODULE_INIT	0
 
-#define MT_CCF_BRINGUP		1
-
-#define INV_OFS			-1
+#define MT_CCF_BRINGUP			1
 
 static const struct mtk_gate_regs scp_par_cg_regs = {
-	.set_ofs = 0x180,
-	.clr_ofs = 0x180,
-	.sta_ofs = 0x180,
+	.set_ofs = 0x0180,
+	.clr_ofs = 0x0180,
+	.sta_ofs = 0x0180,
 };
 
 #define GATE_SCP_PAR(_id, _name, _parent, _shift) {	\
@@ -34,7 +32,7 @@ static const struct mtk_gate_regs scp_par_cg_regs = {
 	}
 
 static const struct mtk_gate scp_par_clks[] = {
-	GATE_SCP_PAR(CLK_SCP_PAR_RG_AUDIODSP, "scp_par_audiodsp",
+	GATE_SCP_PAR(CLK_SCP_PAR_ADSP_PLL, "scp_par_adsp_pll",
 			"adsp_ck"/* parent */, 0),
 };
 
@@ -67,7 +65,7 @@ static int clk_mt6853_scp_par_probe(struct platform_device *pdev)
 }
 
 static const struct of_device_id of_match_clk_mt6853_scp_par[] = {
-	{ .compatible = "mediatek,mt6853-scp_adsp", },
+	{ .compatible = "mediatek,mt6853-scp", },
 	{}
 };
 
@@ -92,18 +90,10 @@ static struct platform_driver clk_mt6853_scp_par_drv = {
 		.of_match_table = of_match_clk_mt6853_scp_par,
 	},
 };
-
-static int __init clk_mt6853_scp_par_init(void)
+static int __init clk_mt6853_scp_par_platform_init(void)
 {
 	return platform_driver_register(&clk_mt6853_scp_par_drv);
 }
+arch_initcall(clk_mt6853_scp_par_platform_init);
 
-static void __exit clk_mt6853_scp_par_exit(void)
-{
-	platform_driver_unregister(&clk_mt6853_scp_par_drv);
-}
-
-arch_initcall(clk_mt6853_scp_par_init);
-module_exit(clk_mt6853_scp_par_exit);
-MODULE_LICENSE("GPL");
 #endif	/* MT_CLKMGR_MODULE_INIT */

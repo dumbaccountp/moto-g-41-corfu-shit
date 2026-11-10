@@ -15,27 +15,6 @@
 
 static struct class *charger_algorithm_class;
 
-static const char *const chg_alg_notify_evt_name[EVT_MAX] = {
-	[EVT_PLUG_IN] = "EVT_PLUG_IN",
-	[EVT_PLUG_OUT] = "EVT_PLUG_OUT",
-	[EVT_FULL] = "EVT_FULL",
-	[EVT_RECHARGE] = "EVT_RECHARGE",
-	[EVT_DETACH] = "EVT_DETACH",
-	[EVT_HARDRESET] = "EVT_HARDRESET",
-	[EVT_VBUSOVP] = "EVT_VBUSOVP",
-	[EVT_IBUSOCP] = "EVT_IBUSOCP",
-	[EVT_IBUSUCP_FALL] = "EVT_IBUSUCP_FALL",
-	[EVT_VBATOVP] = "EVT_VBATOVP",
-	[EVT_IBATOCP] = "EVT_IBATOCP",
-	[EVT_VOUTOVP] = "EVT_VOUTOVP",
-	[EVT_VDROVP] = "EVT_VDROVP",
-	[EVT_VBATOVP_ALARM] = "EVT_VBATOVP_ALARM",
-	[EVT_VBUSOVP_ALARM] = "EVT_VBUSOVP_ALARM",
-	[EVT_BATPRO_DONE] = "EVT_BATPRO_DONE",
-	[EVT_ALGO_STOP] = "EVT_ALGO_STOP",
-	[EVT_VDM_VERIFY] = "EVT_VDM_VERIFY",
-};
-
 static void chg_alg_device_release(struct device *dev)
 {
 	struct chg_alg_device *chg_dev = to_chg_alg_dev(dev);
@@ -49,7 +28,7 @@ int chg_alg_init_algo(struct chg_alg_device *alg_dev)
 	    alg_dev->ops->init_algo)
 		return alg_dev->ops->init_algo(alg_dev);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_init_algo);
 
@@ -59,7 +38,7 @@ int chg_alg_is_algo_ready(struct chg_alg_device *alg_dev)
 	    alg_dev->ops->is_algo_ready)
 		return alg_dev->ops->is_algo_ready(alg_dev);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_is_algo_ready);
 
@@ -69,7 +48,7 @@ int chg_alg_is_algo_running(struct chg_alg_device *alg_dev)
 	    alg_dev->ops->is_algo_running)
 		return alg_dev->ops->is_algo_running(alg_dev);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_is_algo_running);
 
@@ -79,7 +58,7 @@ int chg_alg_start_algo(struct chg_alg_device *alg_dev)
 	    alg_dev->ops->start_algo)
 		return alg_dev->ops->start_algo(alg_dev);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_start_algo);
 
@@ -90,7 +69,7 @@ int chg_alg_get_prop(struct chg_alg_device *alg_dev,
 	    alg_dev->ops->get_prop)
 		return alg_dev->ops->get_prop(alg_dev, s, value);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_get_prop);
 
@@ -101,7 +80,7 @@ int chg_alg_set_prop(struct chg_alg_device *alg_dev,
 	    alg_dev->ops->set_prop)
 		return alg_dev->ops->set_prop(alg_dev, s, value);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_set_prop);
 
@@ -111,7 +90,7 @@ int chg_alg_stop_algo(struct chg_alg_device *alg_dev)
 	    alg_dev->ops->stop_algo)
 		return alg_dev->ops->stop_algo(alg_dev);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_stop_algo);
 
@@ -122,7 +101,7 @@ int chg_alg_notifier_call(struct chg_alg_device *alg_dev,
 	    alg_dev->ops->notifier_call)
 		return alg_dev->ops->notifier_call(alg_dev, notify);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_notifier_call);
 
@@ -134,7 +113,7 @@ int chg_alg_set_current_limit(struct chg_alg_device *alg_dev,
 	    alg_dev->ops->set_current_limit)
 		return alg_dev->ops->set_current_limit(alg_dev, setting);
 
-	return -EOPNOTSUPP;
+	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(chg_alg_set_current_limit);
 
@@ -163,18 +142,6 @@ char *chg_alg_state_to_str(int state)
 	return "chg_alg_state_UNKNOWN";
 }
 EXPORT_SYMBOL(chg_alg_state_to_str);
-
-extern const char *const
-chg_alg_notify_evt_tostring(enum chg_alg_notifier_events evt)
-{
-	if ((int)evt >= (int)EVT_MAX || (int)evt < 0) {
-		pr_notice("%s: chg_algo error\n", __func__);
-		return "chg_algo_error";
-	}
-	return chg_alg_notify_evt_name[evt];
-
-}
-EXPORT_SYMBOL(chg_alg_notify_evt_tostring);
 
 int register_chg_alg_notifier(struct chg_alg_device *alg_dev,
 				struct notifier_block *nb)
@@ -311,7 +278,7 @@ static int __init charger_algorithm_class_init(void)
 	return 0;
 }
 
-module_init(charger_algorithm_class_init);
+subsys_initcall(charger_algorithm_class_init);
 module_exit(charger_algorithm_class_exit);
 
 MODULE_DESCRIPTION("Charger Algorithm Class Device");

@@ -11,12 +11,6 @@
 #include <linux/kthread.h>
 #include <linux/poll.h>
 #include <linux/bitops.h>
-#if IS_ENABLED(CONFIG_OF)
-#include <linux/of.h>
-#include <linux/of_fdt.h>
-#include <linux/of_irq.h>
-#include <linux/of_address.h>
-#endif
 #include "mt-plat/mtk_ccci_common.h"
 #include "ccci_config.h"
 #include "ccci_common_config.h"
@@ -98,7 +92,9 @@ int port_ipc_recv_match(struct port_t *port, struct sk_buff *skb)
 	return 0;
 }
 
-static int send_new_time_to_md_before_6295(int md_id, int tz);
+#if MD_GENERATION <= (6295)
+static int send_new_time_to_md(int md_id, int tz);
+#endif
 int current_time_zone;
 
 long port_ipc_ioctl(struct file *file, unsigned int cmd,
@@ -110,14 +106,6 @@ long port_ipc_ioctl(struct file *file, unsigned int cmd,
 	unsigned long flags;
 	struct ccci_ipc_ctrl *ipc_ctrl =
 		(struct ccci_ipc_ctrl *)port->private_data;
-	struct device_node *node = NULL;
-	int ipc_md_gen = 0;
-
-	node = of_find_compatible_node(NULL, NULL,
-		"mediatek,mddriver");
-	if (node)
-		of_property_read_u32(node,
-		"mediatek,md_generation", &ipc_md_gen);
 
 	switch (cmd) {
 	case CCCI_IPC_RESET_RECV:
@@ -146,10 +134,11 @@ long port_ipc_ioctl(struct file *file, unsigned int cmd,
 		CCCI_REPEAT_LOG(port->md_id, IPC,
 			"CCCI_IPC_UPDATE_TIME 0x%x\n", (unsigned int)arg);
 		current_time_zone = (int)arg;
-		if (ipc_md_gen <= 6295)
-			ret = send_new_time_to_md_before_6295(port->md_id, (int)arg);
-		else
-			ret = send_new_time_to_md_after_6297(port->md_id, (int)arg);
+		#if MD_GENERATION <= (6295)
+		ret = send_new_time_to_md(port->md_id, (int)arg);
+		#else
+		ret = send_new_time_to_new_md(port->md_id, (int)arg);
+		#endif
 		break;
 
 	case CCCI_IPC_WAIT_TIME_UPDATE:
@@ -335,45 +324,6 @@ static int ccci_ipc_send_ilm_to_md1(struct ipc_ilm *in_ilm)
 	return port_ipc_kernel_write(0, in_ilm);
 }
 #endif
-
-static int send_new_time_to_md_before_6295(int md_id, int tz)
-{
-	struct ipc_ilm in_ilm = {0};
-	char local_param[sizeof(struct local_para) + 16];
-	unsigned int timeinfo[4];
-	struct timespec64 tv;
-
-	ktime_get_real_ts64(&tv);
-	timeinfo[0] = tv.tv_sec;
-	timeinfo[1] = sizeof(tv.tv_sec) > 4 ? tv.tv_sec >> 32 : 0;
-	timeinfo[2] = tz;
-	timeinfo[3] = sys_tz.tz_dsttime;
-
-	in_ilm.src_mod_id = AP_MOD_CCCIIPC;
-	in_ilm.dest_mod_id = MD_MOD_CCCIIPC;
-	in_ilm.sap_id = 0;
-	in_ilm.msg_id = IPC_MSG_ID_CCCIIPC_CLIB_TIME_REQ;
-	in_ilm.local_para_ptr = (struct local_para *)&local_param[0];
-	/* msg_len not only contain local_para_ptr->data,
-	 * but also contain 4 Bytes header itself
-	 */
-	in_ilm.local_para_ptr->msg_len = 20;
-	memcpy(in_ilm.local_para_ptr->data, timeinfo, 16);
-
-	CCCI_DEBUG_LOG(md_id, IPC,
-		"Update time(R): [sec=0x%lx][timezone=0x%08x][des=0x%08x]\n",
-		tv.tv_sec, sys_tz.tz_minuteswest, sys_tz.tz_dsttime);
-	CCCI_DEBUG_LOG(md_id, IPC,
-		"Update time(A): [L:0x%08x][H:0x%08x][0x%08x][0x%08x]\n",
-		timeinfo[0], timeinfo[1], timeinfo[2], timeinfo[3]);
-	if (port_ipc_kernel_write(md_id, &in_ilm) < 0) {
-		CCCI_NORMAL_LOG(md_id, IPC, "Update fail\n");
-		return -1;
-	}
-	CCCI_REPEAT_LOG(md_id, IPC, "Update success\n");
-	return 0;
-}
-
 static int port_ipc_kernel_thread(void *arg)
 {
 	struct port_t *port = arg;
@@ -427,7 +377,20 @@ retry:
 			switch (id_map->task_id) {
 			case AP_IPC_WMT:
 #ifdef CONFIG_MTK_CONN_MD
+#ifndef CCCI_PLATFORM_MT6877
 				mtk_conn_md_bridge_send_msg(&out_ilm);
+#endif
+#endif
+				break;
+			case AP_IPC_PKTTRC:
+#if defined(CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT)
+				pkt_track_md_msg_hdlr(&out_ilm);
+#endif
+				break;
+			case AP_IPC_USB:
+#if defined(CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT) \
+	|| defined(CONFIG_MTK_MD_DIRECT_LOGGING_SUPPORT)
+				rndis_md_msg_hdlr(&out_ilm);
 #endif
 				break;
 			default:
@@ -497,6 +460,8 @@ int port_ipc_init(struct port_t *port)
 			.rx_cb = ccci_ipc_send_ilm_to_md1};
 
 			mtk_conn_md_bridge_reg(MD_MOD_EL1, &ccci_ipc_conn_ops);
+			mtk_conn_md_bridge_reg(MD_MOD_GMMGR,
+					&ccci_ipc_conn_ops);
 #endif
 		}
 	}
@@ -510,6 +475,47 @@ struct port_ops ipc_port_ops = {
 	.md_state_notify = &port_ipc_md_state_notify,
 };
 
+#if MD_GENERATION <= (6295)
+int send_new_time_to_md(int md_id, int tz)
+{
+	struct ipc_ilm in_ilm;
+	char local_param[sizeof(struct local_para) + 16];
+	unsigned int timeinfo[4];
+	struct timeval tv = { 0 };
+
+	do_gettimeofday(&tv);
+
+	timeinfo[0] = tv.tv_sec;
+	timeinfo[1] = sizeof(tv.tv_sec) > 4 ? tv.tv_sec >> 32 : 0;
+	timeinfo[2] = tz;
+	timeinfo[3] = sys_tz.tz_dsttime;
+
+	in_ilm.src_mod_id = AP_MOD_CCCIIPC;
+	in_ilm.dest_mod_id = MD_MOD_CCCIIPC;
+	in_ilm.sap_id = 0;
+	in_ilm.msg_id = IPC_MSG_ID_CCCIIPC_CLIB_TIME_REQ;
+	in_ilm.local_para_ptr = (struct local_para *)&local_param[0];
+	/* msg_len not only contain local_para_ptr->data,
+	 * but also contain 4 Bytes header itself
+	 */
+	in_ilm.local_para_ptr->msg_len = 20;
+	memcpy(in_ilm.local_para_ptr->data, timeinfo, 16);
+
+	CCCI_DEBUG_LOG(md_id, IPC,
+		"Update time(R): [sec=0x%lx][timezone=0x%08x][des=0x%08x]\n",
+		tv.tv_sec, sys_tz.tz_minuteswest, sys_tz.tz_dsttime);
+	CCCI_DEBUG_LOG(md_id, IPC,
+		"Update time(A): [L:0x%08x][H:0x%08x][0x%08x][0x%08x]\n",
+		timeinfo[0], timeinfo[1], timeinfo[2], timeinfo[3]);
+	if (port_ipc_kernel_write(md_id, &in_ilm) < 0) {
+		CCCI_NORMAL_LOG(md_id, IPC, "Update fail\n");
+		return -1;
+	}
+	CCCI_REPEAT_LOG(md_id, IPC, "Update success\n");
+	return 0;
+}
+#endif
+
 int ccci_get_emi_info(int md_id, struct ccci_emi_info *emi_info)
 {
 	struct ccci_mem_layout *mem_layout = NULL;
@@ -517,8 +523,9 @@ int ccci_get_emi_info(int md_id, struct ccci_emi_info *emi_info)
 	if (md_id < 0 || md_id > MAX_MD_NUM || !emi_info)
 		return -EINVAL;
 	mem_layout = ccci_md_get_mem(md_id);
-	if (mem_layout == NULL) {
-		CCCI_ERROR_LOG(md_id, IPC, "mem_layout get fail\n");
+	if (!mem_layout) {
+		CCCI_ERROR_LOG(md_id, IPC, "%s:ccci_md_get_mem fail\n",
+		__func__);
 		return -1;
 	}
 

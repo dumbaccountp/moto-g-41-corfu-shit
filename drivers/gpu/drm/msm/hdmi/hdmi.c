@@ -1,14 +1,23 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published by
+ * the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/of_irq.h>
 #include <linux/of_gpio.h>
-
-#include <drm/drm_bridge_connector.h>
 
 #include <sound/hdmi-codec.h>
 #include "hdmi.h"
@@ -43,7 +52,7 @@ static irqreturn_t msm_hdmi_irq(int irq, void *dev_id)
 	struct hdmi *hdmi = dev_id;
 
 	/* Process HPD: */
-	msm_hdmi_hpd_irq(hdmi->bridge);
+	msm_hdmi_connector_irq(hdmi->connector);
 
 	/* Process DDC: */
 	msm_hdmi_i2c_irq(hdmi->i2c);
@@ -89,7 +98,7 @@ static int msm_hdmi_get_phy(struct hdmi *hdmi)
 
 	phy_node = of_parse_phandle(pdev->dev.of_node, "phys", 0);
 	if (!phy_node) {
-		DRM_DEV_ERROR(&pdev->dev, "cannot find phy device\n");
+		dev_err(&pdev->dev, "cannot find phy device\n");
 		return -ENXIO;
 	}
 
@@ -99,13 +108,8 @@ static int msm_hdmi_get_phy(struct hdmi *hdmi)
 
 	of_node_put(phy_node);
 
-	if (!phy_pdev) {
-		DRM_DEV_ERROR(&pdev->dev, "phy driver is not ready\n");
-		return -EPROBE_DEFER;
-	}
-	if (!hdmi->phy) {
-		DRM_DEV_ERROR(&pdev->dev, "phy driver is not ready\n");
-		put_device(&phy_pdev->dev);
+	if (!phy_pdev || !hdmi->phy) {
+		dev_err(&pdev->dev, "phy driver is not ready\n");
 		return -EPROBE_DEFER;
 	}
 
@@ -144,16 +148,12 @@ static struct hdmi *msm_hdmi_init(struct platform_device *pdev)
 	/* HDCP needs physical address of hdmi register */
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 		config->mmio_name);
-	if (!res) {
-		ret = -EINVAL;
-		goto fail;
-	}
 	hdmi->mmio_phy_addr = res->start;
 
 	hdmi->qfprom_mmio = msm_ioremap(pdev,
 		config->qfprom_mmio_name, "HDMI_QFPROM");
 	if (IS_ERR(hdmi->qfprom_mmio)) {
-		DRM_DEV_INFO(&pdev->dev, "can't find qfprom resource\n");
+		dev_info(&pdev->dev, "can't find qfprom resource\n");
 		hdmi->qfprom_mmio = NULL;
 	}
 
@@ -172,7 +172,7 @@ static struct hdmi *msm_hdmi_init(struct platform_device *pdev)
 				config->hpd_reg_names[i]);
 		if (IS_ERR(reg)) {
 			ret = PTR_ERR(reg);
-			DRM_DEV_ERROR(&pdev->dev, "failed to get hpd regulator: %s (%d)\n",
+			dev_err(&pdev->dev, "failed to get hpd regulator: %s (%d)\n",
 					config->hpd_reg_names[i], ret);
 			goto fail;
 		}
@@ -195,7 +195,7 @@ static struct hdmi *msm_hdmi_init(struct platform_device *pdev)
 				config->pwr_reg_names[i]);
 		if (IS_ERR(reg)) {
 			ret = PTR_ERR(reg);
-			DRM_DEV_ERROR(&pdev->dev, "failed to get pwr regulator: %s (%d)\n",
+			dev_err(&pdev->dev, "failed to get pwr regulator: %s (%d)\n",
 					config->pwr_reg_names[i], ret);
 			goto fail;
 		}
@@ -217,7 +217,7 @@ static struct hdmi *msm_hdmi_init(struct platform_device *pdev)
 		clk = msm_clk_get(pdev, config->hpd_clk_names[i]);
 		if (IS_ERR(clk)) {
 			ret = PTR_ERR(clk);
-			DRM_DEV_ERROR(&pdev->dev, "failed to get hpd clk: %s (%d)\n",
+			dev_err(&pdev->dev, "failed to get hpd clk: %s (%d)\n",
 					config->hpd_clk_names[i], ret);
 			goto fail;
 		}
@@ -239,27 +239,13 @@ static struct hdmi *msm_hdmi_init(struct platform_device *pdev)
 		clk = msm_clk_get(pdev, config->pwr_clk_names[i]);
 		if (IS_ERR(clk)) {
 			ret = PTR_ERR(clk);
-			DRM_DEV_ERROR(&pdev->dev, "failed to get pwr clk: %s (%d)\n",
+			dev_err(&pdev->dev, "failed to get pwr clk: %s (%d)\n",
 					config->pwr_clk_names[i], ret);
 			goto fail;
 		}
 
 		hdmi->pwr_clks[i] = clk;
 	}
-
-	hdmi->hpd_gpiod = devm_gpiod_get_optional(&pdev->dev, "hpd", GPIOD_IN);
-	/* This will catch e.g. -EPROBE_DEFER */
-	if (IS_ERR(hdmi->hpd_gpiod)) {
-		ret = PTR_ERR(hdmi->hpd_gpiod);
-		DRM_DEV_ERROR(&pdev->dev, "failed to get hpd gpio: (%d)\n", ret);
-		goto fail;
-	}
-
-	if (!hdmi->hpd_gpiod)
-		DBG("failed to get HPD gpio");
-
-	if (hdmi->hpd_gpiod)
-		gpiod_set_consumer_name(hdmi->hpd_gpiod, "HDMI_HPD");
 
 	pm_runtime_enable(&pdev->dev);
 
@@ -268,14 +254,14 @@ static struct hdmi *msm_hdmi_init(struct platform_device *pdev)
 	hdmi->i2c = msm_hdmi_i2c_init(hdmi);
 	if (IS_ERR(hdmi->i2c)) {
 		ret = PTR_ERR(hdmi->i2c);
-		DRM_DEV_ERROR(&pdev->dev, "failed to get i2c: %d\n", ret);
+		dev_err(&pdev->dev, "failed to get i2c: %d\n", ret);
 		hdmi->i2c = NULL;
 		goto fail;
 	}
 
 	ret = msm_hdmi_get_phy(hdmi);
 	if (ret) {
-		DRM_DEV_ERROR(&pdev->dev, "failed to get phy\n");
+		dev_err(&pdev->dev, "failed to get phy\n");
 		goto fail;
 	}
 
@@ -309,11 +295,6 @@ int msm_hdmi_modeset_init(struct hdmi *hdmi,
 	struct platform_device *pdev = hdmi->pdev;
 	int ret;
 
-	if (priv->num_bridges == ARRAY_SIZE(priv->bridges)) {
-		DRM_DEV_ERROR(dev->dev, "too many bridges\n");
-		return -ENOSPC;
-	}
-
 	hdmi->dev = dev;
 	hdmi->encoder = encoder;
 
@@ -322,44 +303,42 @@ int msm_hdmi_modeset_init(struct hdmi *hdmi,
 	hdmi->bridge = msm_hdmi_bridge_init(hdmi);
 	if (IS_ERR(hdmi->bridge)) {
 		ret = PTR_ERR(hdmi->bridge);
-		DRM_DEV_ERROR(dev->dev, "failed to create HDMI bridge: %d\n", ret);
+		dev_err(dev->dev, "failed to create HDMI bridge: %d\n", ret);
 		hdmi->bridge = NULL;
 		goto fail;
 	}
 
-	hdmi->connector = drm_bridge_connector_init(hdmi->dev, encoder);
+	hdmi->connector = msm_hdmi_connector_init(hdmi);
 	if (IS_ERR(hdmi->connector)) {
 		ret = PTR_ERR(hdmi->connector);
-		DRM_DEV_ERROR(dev->dev, "failed to create HDMI connector: %d\n", ret);
+		dev_err(dev->dev, "failed to create HDMI connector: %d\n", ret);
 		hdmi->connector = NULL;
 		goto fail;
 	}
 
-	drm_connector_attach_encoder(hdmi->connector, hdmi->encoder);
-
 	hdmi->irq = irq_of_parse_and_map(pdev->dev.of_node, 0);
-	if (!hdmi->irq) {
-		ret = -EINVAL;
-		DRM_DEV_ERROR(dev->dev, "failed to get irq\n");
+	if (hdmi->irq < 0) {
+		ret = hdmi->irq;
+		dev_err(dev->dev, "failed to get irq: %d\n", ret);
 		goto fail;
 	}
 
-	ret = devm_request_irq(dev->dev, hdmi->irq,
-			msm_hdmi_irq, IRQF_TRIGGER_HIGH,
+	ret = devm_request_irq(&pdev->dev, hdmi->irq,
+			msm_hdmi_irq, IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
 			"hdmi_isr", hdmi);
 	if (ret < 0) {
-		DRM_DEV_ERROR(dev->dev, "failed to request IRQ%u: %d\n",
+		dev_err(dev->dev, "failed to request IRQ%u: %d\n",
 				hdmi->irq, ret);
 		goto fail;
 	}
 
-	drm_bridge_connector_enable_hpd(hdmi->connector);
-
-	ret = msm_hdmi_hpd_enable(hdmi->bridge);
+	ret = msm_hdmi_hpd_enable(hdmi->connector);
 	if (ret < 0) {
 		DRM_DEV_ERROR(&hdmi->pdev->dev, "failed to enable HPD: %d\n", ret);
 		goto fail;
 	}
+
+	encoder->bridge = hdmi->bridge;
 
 	priv->bridges[priv->num_bridges++]       = hdmi->bridge;
 	priv->connectors[priv->num_connectors++] = hdmi->connector;
@@ -443,6 +422,52 @@ static struct hdmi_platform_config hdmi_tx_8996_config = {
 		.hpd_freq      = hpd_clk_freq_8x74,
 };
 
+static const struct {
+	const char *name;
+	const bool output;
+	const int value;
+	const char *label;
+} msm_hdmi_gpio_pdata[] = {
+	{ "qcom,hdmi-tx-ddc-clk", true, 1, "HDMI_DDC_CLK" },
+	{ "qcom,hdmi-tx-ddc-data", true, 1, "HDMI_DDC_DATA" },
+	{ "qcom,hdmi-tx-hpd", false, 1, "HDMI_HPD" },
+	{ "qcom,hdmi-tx-mux-en", true, 1, "HDMI_MUX_EN" },
+	{ "qcom,hdmi-tx-mux-sel", true, 0, "HDMI_MUX_SEL" },
+	{ "qcom,hdmi-tx-mux-lpm", true, 1, "HDMI_MUX_LPM" },
+};
+
+static int msm_hdmi_get_gpio(struct device_node *of_node, const char *name)
+{
+	int gpio;
+
+	/* try with the gpio names as in the table (downstream bindings) */
+	gpio = of_get_named_gpio(of_node, name, 0);
+	if (gpio < 0) {
+		char name2[32];
+
+		/* try with the gpio names as in the upstream bindings */
+		snprintf(name2, sizeof(name2), "%s-gpios", name);
+		gpio = of_get_named_gpio(of_node, name2, 0);
+		if (gpio < 0) {
+			char name3[32];
+
+			/*
+			 * try again after stripping out the "qcom,hdmi-tx"
+			 * prefix. This is mainly to match "hpd-gpios" used
+			 * in the upstream bindings
+			 */
+			if (sscanf(name2, "qcom,hdmi-tx-%s", name3))
+				gpio = of_get_named_gpio(of_node, name3, 0);
+		}
+
+		if (gpio < 0) {
+			DBG("failed to get gpio: %s (%d)", name, gpio);
+			gpio = -1;
+		}
+	}
+	return gpio;
+}
+
 /*
  * HDMI audio codec callbacks
  */
@@ -457,7 +482,7 @@ static int msm_hdmi_audio_hw_params(struct device *dev, void *data,
 	unsigned int level_shift  = 0; /* 0dB */
 	bool down_mix = false;
 
-	DRM_DEV_DEBUG(dev, "%u Hz, %d bit, %d channels\n", params->sample_rate,
+	dev_dbg(dev, "%u Hz, %d bit, %d channels\n", params->sample_rate,
 		 params->sample_width, params->cea.channels);
 
 	switch (params->cea.channels) {
@@ -508,7 +533,7 @@ static int msm_hdmi_audio_hw_params(struct device *dev, void *data,
 		rate = HDMI_SAMPLE_RATE_192KHZ;
 		break;
 	default:
-		DRM_DEV_ERROR(dev, "rate[%d] not supported!\n",
+		dev_err(dev, "rate[%d] not supported!\n",
 			params->sample_rate);
 		return -EINVAL;
 	}
@@ -552,20 +577,28 @@ static int msm_hdmi_bind(struct device *dev, struct device *master, void *data)
 {
 	struct drm_device *drm = dev_get_drvdata(master);
 	struct msm_drm_private *priv = drm->dev_private;
-	struct hdmi_platform_config *hdmi_cfg;
+	static struct hdmi_platform_config *hdmi_cfg;
 	struct hdmi *hdmi;
 	struct device_node *of_node = dev->of_node;
-	int err;
+	int i, err;
 
 	hdmi_cfg = (struct hdmi_platform_config *)
 			of_device_get_match_data(dev);
 	if (!hdmi_cfg) {
-		DRM_DEV_ERROR(dev, "unknown hdmi_cfg: %pOFn\n", of_node);
+		dev_err(dev, "unknown hdmi_cfg: %s\n", of_node->name);
 		return -ENXIO;
 	}
 
 	hdmi_cfg->mmio_name     = "core_physical";
 	hdmi_cfg->qfprom_mmio_name = "qfprom_physical";
+
+	for (i = 0; i < HDMI_MAX_NUM_GPIO; i++) {
+		hdmi_cfg->gpios[i].num = msm_hdmi_get_gpio(of_node,
+						msm_hdmi_gpio_pdata[i].name);
+		hdmi_cfg->gpios[i].output = msm_hdmi_gpio_pdata[i].output;
+		hdmi_cfg->gpios[i].value = msm_hdmi_gpio_pdata[i].value;
+		hdmi_cfg->gpios[i].label = msm_hdmi_gpio_pdata[i].label;
+	}
 
 	dev->platform_data = hdmi_cfg;
 

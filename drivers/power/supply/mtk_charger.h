@@ -10,8 +10,7 @@
 #include "charger_class.h"
 #include "adapter_class.h"
 #include "mtk_charger_algorithm_class.h"
-#include <linux/power_supply.h>
-#include "mtk_smartcharging.h"
+
 #include <linux/power/moto_chg_tcmd.h>
 
 #define CHARGING_INTERVAL 10
@@ -20,8 +19,6 @@
 #define CHRLOG_ERROR_LEVEL	1
 #define CHRLOG_INFO_LEVEL	2
 #define CHRLOG_DEBUG_LEVEL	3
-
-#define SC_TAG "smartcharging"
 
 extern int chr_get_debug_level(void);
 
@@ -47,7 +44,6 @@ do {								\
 } while (0)
 
 struct mtk_charger;
-struct charger_data;
 #define BATTERY_CV 4350000
 #define V_CHARGER_MAX 6500000 /* 6.5 V */
 #define V_CHARGER_MIN 4600000 /* 4.6 V */
@@ -60,15 +56,6 @@ struct charger_data;
 #define AC_CHARGER_INPUT_CURRENT		3200000
 #define NON_STD_AC_CHARGER_CURRENT		500000
 #define CHARGING_HOST_CHARGER_CURRENT		650000
-/*wireless input current and charging current*/
-#define WIRELESS_FACTORY_MAX_CURRENT			3000000
-#define WIRELESS_FACTORY_MAX_INPUT_CURRENT		1150000
-
-/*wireless charging power*/
-#define WLS_RX_CAP_15W 15
-#define WLS_RX_CAP_10W 10
-#define WLS_RX_CAP_8W 8
-#define WLS_RX_CAP_5W 5
 
 /* dynamic mivr */
 #define V_CHARGER_MIN_1 4400000 /* 4.4 V */
@@ -95,35 +82,6 @@ struct charger_data;
 #define MAX_CHARGE_TEMP_MINUS_X_DEGREE	47
 
 #define MAX_ALG_NO 10
-#define DEFAULT_ALG 0
-
-enum mmi_mux_channel {
-	MMI_MUX_CHANNEL_NONE = 0,
-	MMI_MUX_CHANNEL_TYPEC_CHG,
-	MMI_MUX_CHANNEL_TYPEC_OTG,
-	MMI_MUX_CHANNEL_WLC_CHG,
-	MMI_MUX_CHANNEL_WLC_OTG,
-	MMI_MUX_CHANNEL_TYPEC_CHG_WLC_OTG,
-	MMI_MUX_CHANNEL_TYPEC_CHG_WLC_CHG,
-	MMI_MUX_CHANNEL_TYPEC_OTG_WLC_CHG,
-	MMI_MUX_CHANNEL_TYPEC_OTG_WLC_OTG,
-	MMI_MUX_CHANNEL_WLC_FW_UPDATE,
-	MMI_MUX_CHANNEL_WLC_FACTORY_TEST,
-	MMI_MUX_CHANNEL_MAX
-};
-
-struct mmi_mux_chan {
-	enum mmi_mux_channel chan;
-	bool on;
-};
-
-struct mmi_mux_configure {
-	u32 typec_mos;
-	u32 wls_mos;
-	bool wls_boost_en;
-	bool wls_loadswtich_en;
-	bool wls_chip_en;
-};
 
 enum bat_temp_state_enum {
 	BAT_TEMP_LOW = 0,
@@ -191,14 +149,10 @@ struct sw_jeita_data {
 };
 
 struct mtk_charger_algorithm {
-	int (*do_mux)(struct mtk_charger *info, enum mmi_mux_channel channel, bool on);
+
 	int (*do_algorithm)(struct mtk_charger *info);
 	int (*enable_charging)(struct mtk_charger *info, bool en);
 	int (*do_event)(struct notifier_block *nb, unsigned long ev, void *v);
-	int (*do_dvchg1_event)(struct notifier_block *nb, unsigned long ev,
-			       void *v);
-	int (*do_dvchg2_event)(struct notifier_block *nb, unsigned long ev,
-			       void *v);
 	int (*change_current_setting)(struct mtk_charger *info);
 	void *algo_data;
 };
@@ -245,9 +199,6 @@ struct charger_custom_data {
 	int min_charger_voltage_2;
 	int max_dmivr_charger_current;
 
-	/*wireless charger*/
-	int wireless_factory_max_current;
-	int wireless_factory_max_input_current;
 };
 
 struct charger_data {
@@ -263,21 +214,13 @@ struct charger_data {
 	int junction_temp_max;
 	int moto_chg_tcmd_ichg;
 	int moto_chg_tcmd_ibat;
-#if defined(CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT) || defined(CONFIG_MOTO_CHARGER_SGM415XX)
-	int cp_ichg_limit;
-#endif
+	int typec_input_current_limit;
 };
 
-/*moto mmi Functionality start*/
-struct mmi_ffc_zone  {
-	int		temp;
-	int		ffc_max_mv;
-	int		ffc_chg_iterm;
-};
-
-struct mmi_cycle_cv_steps {
-	int		cycle;
-	int		delta_cv_mv;
+enum chg_data_idx_enum {
+	CHG1_SETTING,
+	CHG2_SETTING,
+	CHGS_SETTING_MAX,
 };
 
 struct mmi_temp_zone {
@@ -313,25 +256,6 @@ enum charging_limit_modes {
 	CHARGING_LIMIT_UNKNOWN,
 };
 
-#ifdef CONFIG_MOTO_CHG_FFC_5V10W_SUPPORT
-typedef enum {
-	CHARGER_FFC_STATE_INITIAL,
-	CHARGER_FFC_STATE_PROBING,
-	CHARGER_FFC_STATE_STANDBY,
-	CHARGER_FFC_STATE_GOREADY,
-	CHARGER_FFC_STATE_RUNNING,
-	CHARGER_FFC_STATE_AVGEXIT,
-	CHARGER_FFC_STATE_FFCDONE,
-	CHARGER_FFC_STATE_INVALID,
-} CHARGER_FFC_STATE_T;
-
-enum {
-	CHARGER_FLAG_INVALID,
-	CHARGER_FLAG_FFC,
-	CHARGER_FLAG_NON_FFC,
-};
-#endif
-
 struct mmi_params {
 	bool			init_done;
 	bool			factory_mode;
@@ -343,8 +267,6 @@ struct mmi_params {
 	/*adaptive charging*/
 	bool adaptive_charging_disable_ichg;
 	bool adaptive_charging_disable_ibat;
-	bool charging_enable_hz;
-	bool battery_charging_disable;
 
 	/* Charge Profile */
 	int			num_temp_zones;
@@ -354,24 +276,6 @@ struct mmi_params {
 	int			chrg_taper_cnt;
 	int			temp_state;
 	int			chrg_iterm;
-	int			back_chrg_iterm;
-
-	int			num_ffc_zones;
-	struct mmi_ffc_zone	*ffc_zones;
-	int			num_cycle_cv_steps;
-	struct mmi_cycle_cv_steps	*cycle_cv_steps;
-
-#ifdef CONFIG_MOTO_CHG_FFC_5V10W_SUPPORT
-	CHARGER_FFC_STATE_T	ffc_state;
-	int			ffc_entry_threshold;
-	int			ffc_exit_threshold;
-	int			ffc_uisoc_threshold;
-	long		ffc_ibat_windowsum;
-	long		ffc_ibat_count;
-	int			ffc_ibat_windowsize;
-	int			ffc_iavg;
-	unsigned long ffc_iavg_update_timestamp;
-#endif
 
 	bool			enable_charging_limit;
 	bool			is_factory_image;
@@ -381,7 +285,6 @@ struct mmi_params {
 	int			base_fv_mv;
 	int			vfloat_comp_mv;
 	int			batt_health;
-	int			batt_statues;
 	int			max_chrg_temp;
 
 	/*target parameter*/
@@ -390,29 +293,6 @@ struct mmi_params {
 	int			target_fcc;
 	int			target_usb;
 	struct notifier_block	chg_reboot;
-	int			min_therm_current_limit;
-	bool			enable_mux;
-	struct			mmi_mux_chan mux_channel;
-	int			wls_switch_en;
-	int			wls_boost_en;
-	int			charge_rate;
-	unsigned int	active_fast_alg;
-	int			typec_rp_max_current;
-
-	int			pd_pmax_mw;
-	struct adapter_auth_data	apdo_cap;
-	int			pd_cap_max_watt;
-	int			vbus_h;
-	int			vbus_l;
-};
-/*moto mmi Functionality end*/
-
-enum chg_data_idx_enum {
-	CHG1_SETTING,
-	CHG2_SETTING,
-	DVCHG1_SETTING,
-	DVCHG2_SETTING,
-	CHGS_SETTING_MAX,
 };
 
 struct mtk_charger {
@@ -420,10 +300,6 @@ struct mtk_charger {
 	struct charger_device *chg1_dev;
 	struct notifier_block chg1_nb;
 	struct charger_device *chg2_dev;
-	struct charger_device *dvchg1_dev;
-	struct notifier_block dvchg1_nb;
-	struct charger_device *dvchg2_dev;
-	struct notifier_block dvchg2_nb;
 
 	struct charger_data chg_data[CHGS_SETTING_MAX];
 	struct chg_limit_setting setting;
@@ -437,17 +313,9 @@ struct mtk_charger {
 	struct power_supply_config psy_cfg2;
 	struct power_supply *psy2;
 
-	struct power_supply_desc psy_dvchg_desc1;
-	struct power_supply_config psy_dvchg_cfg1;
-	struct power_supply *psy_dvchg1;
-
-	struct power_supply_desc psy_dvchg_desc2;
-	struct power_supply_config psy_dvchg_cfg2;
-	struct power_supply *psy_dvchg2;
-
 	struct power_supply  *chg_psy;
-	struct power_supply  *wl_psy;
 	struct power_supply  *bat_psy;
+
 	struct adapter_device *pd_adapter;
 	struct notifier_block pd_nb;
 	struct mutex pd_lock;
@@ -458,7 +326,6 @@ struct mtk_charger {
 	u32 boottype;
 
 	int chr_type;
-	int usb_type;
 	int usb_state;
 
 	struct mutex cable_out_lock;
@@ -477,10 +344,9 @@ struct mtk_charger {
 
 	/* alarm timer */
 	struct alarm charger_timer;
-	struct timespec64 endtime;
+	struct timespec endtime;
 	bool is_suspend;
 	struct notifier_block pm_notifier;
-	ktime_t timer_cb_duration[8];
 
 	/* notify charger user */
 	struct srcu_notifier_head evt_nh;
@@ -488,14 +354,11 @@ struct mtk_charger {
 	/* common info */
 	int log_level;
 	bool usb_unlimited;
-	bool charger_unlimited;
 	bool disable_charger;
-	bool disable_aicl;
 	int battery_temp;
 	bool can_charging;
 	bool cmd_discharging;
 	bool safety_timeout;
-	int safety_timer_cmd;
 	bool vbusov_stat;
 	bool is_chg_done;
 	/* ATM */
@@ -514,15 +377,7 @@ struct mtk_charger {
 	/* sw safety timer */
 	bool enable_sw_safety_timer;
 	bool sw_safety_timer_setting;
-	struct timespec64 charging_begin_time;
-
-	/* vbat monitor, 6pin bat */
-	bool batpro_done;
-	bool enable_vbat_mon;
-	bool enable_vbat_mon_bak;
-	int old_cv;
-	bool stop_6pin_re_en;
-	int vbat0_flag;
+	struct timespec charging_begin_time;
 
 	/* sw jeita */
 	bool enable_sw_jeita;
@@ -540,62 +395,11 @@ struct mtk_charger {
 
 	bool enable_dynamic_mivr;
 
-	/* fast charging algo support indicator */
-	bool enable_fast_charging_indicator;
-	unsigned int fast_charging_indicator;
-
-	/* diasable meta current limit for testing */
-	unsigned int enable_meta_current_limit;
-
-	struct smartcharging sc;
-
-#ifdef CONFIG_MOTO_CHG_FFC_5V10W_SUPPORT
-	/* 10w ffc */
-	bool ffc_discharging;
-	int ffc_input_current_backup;
-	int ffc_max_fv_mv_backup;
-	struct wakeup_source *ffc_charger_wakelock;
-	struct delayed_work ffc_enable_charge_work;
-#endif
-
-	/*daemon related*/
-	struct sock *daemo_nl_sk;
-	u_int g_scd_pid;
-	struct scd_cmd_param_t_1 sc_data;
-
-	/*charger IC charging status*/
-	bool is_charging;
-
-	ktime_t uevent_time_check;
-
-	bool force_disable_pp[CHG2_SETTING + 1];
-	bool enable_pp[CHG2_SETTING + 1];
-	struct mutex pp_lock[CHG2_SETTING + 1];
 	struct moto_chg_tcmd_client chg_tcmd_client;
+	struct power_supply		*battery_psy;
+	struct power_supply 		*charger_psy;
 	struct mmi_params	mmi;
-	int wireless_online;
-	struct mutex mmi_mux_lock;
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-	struct tcpc_device *tcpc_dev;
-#endif
 };
-
-static inline int mtk_chg_alg_notify_call(struct mtk_charger *info,
-					  enum chg_alg_notifier_events evt,
-					  int value)
-{
-	int i;
-	struct chg_alg_notify notify = {
-		.evt = evt,
-		.value = value,
-	};
-
-	for (i = 0; i < MAX_ALG_NO; i++) {
-		if (info->alg[i])
-			chg_alg_notifier_call(info->alg[i], &notify);
-	}
-	return 0;
-}
 
 /* functions which framework needs*/
 extern int mtk_basic_charger_init(struct mtk_charger *info);
@@ -605,11 +409,9 @@ extern int get_battery_voltage(struct mtk_charger *info);
 extern int get_battery_temperature(struct mtk_charger *info);
 extern int get_battery_current(struct mtk_charger *info);
 extern int get_vbus(struct mtk_charger *info);
-extern int get_ibat(struct mtk_charger *info);
 extern int get_ibus(struct mtk_charger *info);
 extern bool is_battery_exist(struct mtk_charger *info);
 extern int get_charger_type(struct mtk_charger *info);
-extern int get_usb_type(struct mtk_charger *info);
 extern int disable_hw_ovp(struct mtk_charger *info, int en);
 extern bool is_charger_exist(struct mtk_charger *info);
 extern int get_charger_temperature(struct mtk_charger *info,
@@ -624,6 +426,9 @@ extern void _wake_up_charger(struct mtk_charger *info);
 
 /* functions for other */
 extern int mtk_chg_enable_vbus_ovp(bool enable);
+
 extern void aee_kernel_RT_Monitor_api_factory(void);
+
+extern bool extern_is_typec_adapter(struct mtk_charger *info);
 
 #endif /* __MTK_CHARGER_H */

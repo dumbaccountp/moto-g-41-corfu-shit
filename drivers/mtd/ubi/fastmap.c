@@ -1,8 +1,17 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012 Linutronix GmbH
  * Copyright (c) 2014 sigma star gmbh
  * Author: Richard Weinberger <richard@nod.at>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 2.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+ * the GNU General Public License for more details.
+ *
  */
 
 #include <linux/crc32.h>
@@ -468,9 +477,7 @@ static int scan_pool(struct ubi_device *ubi, struct ubi_attach_info *ai,
 			if (err == UBI_IO_FF_BITFLIPS)
 				scrub = 1;
 
-			ret = add_aeb(ai, free, pnum, ec, scrub);
-			if (ret)
-				goto out;
+			add_aeb(ai, free, pnum, ec, scrub);
 			continue;
 		} else if (err == 0 || err == UBI_IO_BITFLIPS) {
 			dbg_bld("Found non empty PEB:%i in pool", pnum);
@@ -640,10 +647,8 @@ static int ubi_attach_fastmap(struct ubi_device *ubi,
 		if (fm_pos >= fm_size)
 			goto fail_bad;
 
-		ret = add_aeb(ai, &ai->free, be32_to_cpu(fmec->pnum),
-			      be32_to_cpu(fmec->ec), 0);
-		if (ret)
-			goto fail;
+		add_aeb(ai, &ai->free, be32_to_cpu(fmec->pnum),
+			be32_to_cpu(fmec->ec), 0);
 	}
 
 	/* read EC values from used list */
@@ -653,10 +658,8 @@ static int ubi_attach_fastmap(struct ubi_device *ubi,
 		if (fm_pos >= fm_size)
 			goto fail_bad;
 
-		ret = add_aeb(ai, &used, be32_to_cpu(fmec->pnum),
-			      be32_to_cpu(fmec->ec), 0);
-		if (ret)
-			goto fail;
+		add_aeb(ai, &used, be32_to_cpu(fmec->pnum),
+			be32_to_cpu(fmec->ec), 0);
 	}
 
 	/* read EC values from scrub list */
@@ -666,10 +669,8 @@ static int ubi_attach_fastmap(struct ubi_device *ubi,
 		if (fm_pos >= fm_size)
 			goto fail_bad;
 
-		ret = add_aeb(ai, &used, be32_to_cpu(fmec->pnum),
-			      be32_to_cpu(fmec->ec), 1);
-		if (ret)
-			goto fail;
+		add_aeb(ai, &used, be32_to_cpu(fmec->pnum),
+			be32_to_cpu(fmec->ec), 1);
 	}
 
 	/* read EC values from erase list */
@@ -679,10 +680,8 @@ static int ubi_attach_fastmap(struct ubi_device *ubi,
 		if (fm_pos >= fm_size)
 			goto fail_bad;
 
-		ret = add_aeb(ai, &ai->erase, be32_to_cpu(fmec->pnum),
-			      be32_to_cpu(fmec->ec), 1);
-		if (ret)
-			goto fail;
+		add_aeb(ai, &ai->erase, be32_to_cpu(fmec->pnum),
+			be32_to_cpu(fmec->ec), 1);
 	}
 
 	ai->mean_ec = div_u64(ai->ec_sum, ai->ec_count);

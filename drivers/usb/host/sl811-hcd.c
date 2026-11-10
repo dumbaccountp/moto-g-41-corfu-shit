@@ -1631,6 +1631,12 @@ sl811h_probe(struct platform_device *dev)
 	irq = ires->start;
 	irqflags = ires->flags & IRQF_TRIGGER_MASK;
 
+	/* refuse to confuse usbcore */
+	if (dev->dev.dma_mask) {
+		dev_dbg(&dev->dev, "no we won't dma\n");
+		return -EINVAL;
+	}
+
 	/* the chip may be wired for either kind of addressing */
 	addr = platform_get_resource(dev, IORESOURCE_MEM, 0);
 	data = platform_get_resource(dev, IORESOURCE_MEM, 1);
@@ -1791,7 +1797,7 @@ struct platform_driver sl811h_driver = {
 	.suspend =	sl811h_suspend,
 	.resume =	sl811h_resume,
 	.driver = {
-		.name =	hcd_name,
+		.name =	(char *) hcd_name,
 	},
 };
 EXPORT_SYMBOL(sl811h_driver);

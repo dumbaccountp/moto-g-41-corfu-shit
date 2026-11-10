@@ -46,8 +46,7 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/debugfs.h>
 #include <linux/sched/clock.h>
-
-#include <mt-plat/mrdump.h>
+#include <asm/arch_timer.h>
 
 #if ENABLE_GZ_TRACE_DUMP
 #if IS_BUILTIN(CONFIG_MTK_GZ_LOG)
@@ -220,20 +219,26 @@ static int gz_log_page_init(void)
 		glctx.flag == STATIC_MAP ? "static_map" : "dynamic",
 		glctx.virt, glctx.size);
 
-	// register GZ_LOG DB log
-	mrdump_mini_add_extra_file((unsigned long)glctx.virt,
-				   (unsigned long)glctx.paddr,
-				   (unsigned long)glctx.size, "GZ_LOG");
-
 	return 0;
 }
 
-/* get_gz_log_buffer is deprecated after GKI */
 /* get_gz_log_buffer was called in arch_initcall */
 void get_gz_log_buffer(unsigned long *addr, unsigned long *paddr,
 		       unsigned long *size, unsigned long *start)
 {
-	*addr = *paddr = *size = *start = 0;
+	gz_log_page_init();
+
+	if (!glctx.virt) {
+		*addr = *paddr = *size = *start = 0;
+		pr_info("[%s] ERR gz_log init failed\n", __func__);
+		return;
+	}
+	*addr = (unsigned long)glctx.virt;
+	*paddr = (unsigned long)glctx.paddr;
+	pr_info("[%s] virtual address:0x%lx, paddr:0x%lx\n",
+		__func__, (unsigned long)*addr, *paddr);
+	*size = glctx.size;
+	*start = 0;
 }
 EXPORT_SYMBOL(get_gz_log_buffer);
 
@@ -733,25 +738,25 @@ static const struct file_operations gz_trace_on_fops = {
 };
 #endif /* ENABLE_GZ_TRACE_DUMP */
 
-static const struct proc_ops proc_gz_log_fops = {
-	.proc_open = gz_log_open,
-	.proc_read = gz_log_read,
-	.proc_release = gz_log_release,
-	.proc_poll = gz_log_poll,
+static const struct file_operations proc_gz_log_fops = {
+	.owner = THIS_MODULE,
+	.open = gz_log_open,
+	.read = gz_log_read,
+	.release = gz_log_release,
+	.poll = gz_log_poll,
 };
 
 static int trusty_gz_send_ktime(struct platform_device *pdev)
 {
-	uint64_t current_ktime;
-	uint64_t current_cnt;
+	uint64_t current_ktime = 0;
+	uint64_t current_cnt = 0;
 	uint64_t diff_all;
 	uint32_t diff_msb;
 	uint32_t diff_lsb;
 
 	current_ktime = sched_clock();
-	current_cnt = __arch_counter_get_cntvct();
-
-	diff_all = current_cnt - (13 * current_ktime)/1000;
+	current_cnt = arch_counter_get_cntvct();
+	diff_all = current_cnt - div64_u64((13 * current_ktime), 1000);
 	diff_msb = (diff_all >> 32);
 	diff_lsb = (diff_all & U32_MAX);
 

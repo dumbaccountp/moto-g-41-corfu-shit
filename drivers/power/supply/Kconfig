@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0-only
 menuconfig POWER_SUPPLY
 	bool "Power supply class support"
 	help
@@ -14,20 +13,6 @@ config POWER_SUPPLY_DEBUG
 	help
 	  Say Y here to enable debugging messages for power supply class
 	  and drivers.
-
-config POWER_SUPPLY_HWMON
-	bool
-	prompt "Expose power supply sensors as hwmon device"
-	depends on HWMON=y || HWMON=POWER_SUPPLY
-	default y
-	help
-	  This options enables API that allows sensors found on a
-	  power supply device (current, voltage, temperature) to be
-	  exposed as a hwmon device.
-
-	  Say 'Y' here if you want power supplies to
-	  have hwmon sysfs interface too.
-
 
 config PDA_POWER
 	tristate "Generic PDA/phone power driver"
@@ -73,10 +58,10 @@ config WM831X_POWER
 	  provided by Wolfson Microelectronics WM831x PMICs.
 
 config WM8350_POWER
-	tristate "WM8350 PMU support"
-	depends on MFD_WM8350
-	help
-	  Say Y here to enable support for the power management unit
+        tristate "WM8350 PMU support"
+        depends on MFD_WM8350
+        help
+          Say Y here to enable support for the power management unit
 	  provided by the Wolfson Microelectronics WM8350 PMIC.
 
 config TEST_POWER
@@ -116,17 +101,6 @@ config BATTERY_CPCAP
 	  Say Y here to enable support for battery on Motorola
 	  phones and tablets such as droid 4.
 
-config BATTERY_CW2015
-	tristate "CW2015 Battery driver"
-	depends on I2C
-	select REGMAP_I2C
-	help
-	  Say Y here to enable support for the cellwise cw2015
-	  battery fuel gauge (used in the Pinebook Pro & others)
-
-	  This driver can also be built as a module. If so, the module will be
-	  called cw2015_battery.
-
 config BATTERY_DS2760
 	tristate "DS2760 battery driver (HP iPAQ & others)"
 	depends on W1
@@ -164,29 +138,9 @@ config BATTERY_DS2782
 
 config BATTERY_LEGO_EV3
 	tristate "LEGO MINDSTORMS EV3 battery"
-	depends on OF && IIO && GPIOLIB && (ARCH_DAVINCI_DA850 || COMPILE_TEST)
+	depends on OF && IIO && GPIOLIB
 	help
 	  Say Y here to enable support for the LEGO MINDSTORMS EV3 battery.
-
-config BATTERY_MT6358
-	tristate "MT6358 fuel gauge support"
-	depends on MFD_MT6397
-	default m
-	help
-	  Say Y to enable support for MT6358 battery driver.
-	  it measure battery current and temperature to provide
-	  battery information , It issues interrupt when trigger
-	  threshold is met.
-
-config BATTERY_MT6359P
-	tristate "MT6359P fuel gauge support"
-	depends on MFD_MT6397
-	default m
-	help
-	  Say Y to enable support for MT6359P battery driver.
-	  it measure battery current and temperature to provide
-	  battery information , It issues interrupt when trigger
-	  threshold is met.
 
 config BATTERY_PMU
 	tristate "Apple PMU battery"
@@ -197,7 +151,7 @@ config BATTERY_PMU
 
 config BATTERY_OLPC
 	tristate "One Laptop Per Child battery"
-	depends on OLPC_EC
+	depends on X86_32 && OLPC
 	help
 	  Say Y to enable support for the battery on the OLPC laptop.
 
@@ -215,17 +169,6 @@ config BATTERY_COLLIE
 	  Say Y to enable support for the battery on the Sharp Zaurus
 	  SL-5500 (collie) models.
 
-config BATTERY_INGENIC
-	tristate "Ingenic JZ47xx SoCs battery driver"
-	depends on MIPS || COMPILE_TEST
-	depends on INGENIC_ADC
-	help
-	  Choose this option if you want to monitor battery status on
-	  Ingenic JZ47xx SoC based devices.
-
-	  This driver can also be built as a module. If so, the module will be
-	  called ingenic-battery.
-
 config BATTERY_IPAQ_MICRO
 	tristate "iPAQ Atmel Micro ASIC battery driver"
 	depends on MFD_IPAQ_MICRO
@@ -240,17 +183,16 @@ config BATTERY_WM97XX
 	  Say Y to enable support for battery measured by WM97xx aux port.
 
 config BATTERY_SBS
-	tristate "SBS Compliant gas gauge"
-	depends on I2C
-	help
+        tristate "SBS Compliant gas gauge"
+        depends on I2C
+        help
 	  Say Y to include support for SBS battery driver for SBS-compliant
 	  gas gauges.
 
 config CHARGER_SBS
-	tristate "SBS Compliant charger"
-	depends on I2C
-	select REGMAP_I2C
-	help
+        tristate "SBS Compliant charger"
+        depends on I2C
+        help
 	  Say Y to include support for SBS compliant battery chargers.
 
 config MANAGER_SBS
@@ -388,15 +330,10 @@ config AXP288_FUEL_GAUGE
 config BATTERY_MAX17040
 	tristate "Maxim MAX17040 Fuel Gauge"
 	depends on I2C
-	select REGMAP_I2C
 	help
-	  Maxim models with ModelGauge are fuel-gauge systems for lithium-ion
-	  (Li+) batteries in handheld and portable equipment, including
-	  max17040, max17041, max17043, max17044, max17048, max17049, max17058,
-	  max17059. It is also included in some batteries like max77836.
-
-	  Driver supports reporting SOC (State of Charge, i.e capacity),
-	  voltage and configurable low-SOC wakeup interrupt.
+	  MAX17040 is fuel-gauge systems for lithium-ion (Li+) batteries
+	  in handheld and portable equipment. The MAX17040 is configured
+	  to operate with a single lithium cell
 
 config BATTERY_MAX17042
 	tristate "Maxim MAX17042/17047/17050/8997/8966 Fuel Gauge"
@@ -452,7 +389,18 @@ config CHARGER_PCF50633
 	tristate "NXP PCF50633 MBC"
 	depends on MFD_PCF50633
 	help
-	  Say Y to include support for NXP PCF50633 Main Battery Charger.
+	 Say Y to include support for NXP PCF50633 Main Battery Charger.
+
+config BATTERY_JZ4740
+	tristate "Ingenic JZ4740 battery"
+	depends on MACH_JZ4740
+	depends on MFD_JZ4740_ADC
+	help
+	  Say Y to enable support for the battery on Ingenic JZ4740 based
+	  boards.
+
+	  This driver can be build as a module. If so, the module will be
+	  called jz4740-battery.
 
 config BATTERY_RX51
 	tristate "Nokia RX-51 (N900) battery driver"
@@ -517,22 +465,22 @@ config CHARGER_GPIO
 	  called gpio-charger.
 
 config CHARGER_MANAGER
-	tristate "Battery charger manager for multiple chargers"
+	bool "Battery charger manager for multiple chargers"
 	depends on REGULATOR
 	select EXTCON
 	help
-	  Say Y to enable charger-manager support, which allows multiple
-	  chargers attached to a battery and multiple batteries attached to a
-	  system. The charger-manager also can monitor charging status in
-	  runtime and in suspend-to-RAM by waking up the system periodically
-	  with help of suspend_again support.
+          Say Y to enable charger-manager support, which allows multiple
+          chargers attached to a battery and multiple batteries attached to a
+          system. The charger-manager also can monitor charging status in
+          runtime and in suspend-to-RAM by waking up the system periodically
+          with help of suspend_again support.
 
-config CHARGER_LT3651
-	tristate "Analog Devices LT3651 charger"
+config CHARGER_LTC3651
+	tristate "LTC3651 charger"
 	depends on GPIOLIB
 	help
-	  Say Y to include support for the Analog Devices (Linear Technology)
-	  LT3651 battery charger which reports its status via GPIO lines.
+	  Say Y to include support for the LTC3651 battery charger which reports
+	  its status via GPIO lines.
 
 config CHARGER_MAX14577
 	tristate "Maxim MAX14577/77836 battery charger driver"
@@ -550,13 +498,6 @@ config CHARGER_DETECTOR_MAX14656
 	  The device is compliant with the USB Battery Charging Specification
 	  Revision 1.2 and can be found e.g. in Kindle 4/5th generation
 	  readers and certain LG devices.
-
-config CHARGER_MAX77650
-	tristate "Maxim MAX77650 battery charger driver"
-	depends on MFD_MAX77650
-	help
-	  Say Y to enable support for the battery charger control of MAX77650
-	  PMICs.
 
 config CHARGER_MAX77693
 	tristate "Maxim MAX77693 battery charger driver"
@@ -577,16 +518,6 @@ config CHARGER_MAX8998
 	help
 	  Say Y to enable support for the battery charger control sysfs and
 	  platform data of MAX8998/LP3974 PMICs.
-
-config CHARGER_MP2629
-	tristate "Monolithic power system MP2629 Battery charger"
-	depends on MFD_MP2629
-	depends on MP2629_ADC
-	depends on IIO
-	help
-	  Select this option to enable support for Monolithic power system
-	  Battery charger. This driver provides Battery charger power management
-	  functions on the systems.
 
 config CHARGER_QCOM_SMBB
 	tristate "Qualcomm Switch-Mode Battery Charger and Boost"
@@ -636,19 +567,6 @@ config CHARGER_BQ24735
 	help
 	  Say Y to enable support for the TI BQ24735 battery charger.
 
-config CHARGER_BQ2515X
-	tristate "TI BQ2515X battery charger family"
-	depends on I2C
-	depends on GPIOLIB || COMPILE_TEST
-	select REGMAP_I2C
-	help
-	  Say Y to enable support for the TI BQ2515X family of battery
-	  charging integrated circuits. The BQ2515X are highly integrated
-	  battery charge management ICs that integrate the most common
-	  functions for wearable devices, namely a charger, an output voltage
-	  rail, ADC for battery and system monitoring, and push-button
-	  controller.
-
 config CHARGER_BQ25890
 	tristate "TI BQ25890 battery charger driver"
 	depends on I2C
@@ -657,36 +575,27 @@ config CHARGER_BQ25890
 	help
 	  Say Y to enable support for the TI BQ25890 battery charger.
 
-config CHARGER_BQ25980
-	tristate "TI BQ25980 battery charger driver"
-	depends on I2C
-	depends on GPIOLIB || COMPILE_TEST
-	select REGMAP_I2C
-	help
-	  Say Y to enable support for the TI BQ25980, BQ25975 and BQ25960
-	  series of fast battery chargers.
-
 config CHARGER_SMB347
-	tristate "Summit Microelectronics SMB3XX Battery Charger"
+	tristate "Summit Microelectronics SMB347 Battery Charger"
 	depends on I2C
 	select REGMAP_I2C
 	help
-	  Say Y to include support for Summit Microelectronics SMB345,
-	  SMB347 or SMB358 Battery Charger.
+	  Say Y to include support for Summit Microelectronics SMB347
+	  Battery Charger.
 
 config CHARGER_TPS65090
 	tristate "TPS65090 battery charger driver"
 	depends on MFD_TPS65090
 	help
-	  Say Y here to enable support for battery charging with TPS65090
-	  PMIC chips.
+	 Say Y here to enable support for battery charging with TPS65090
+	 PMIC chips.
 
 config CHARGER_TPS65217
 	tristate "TPS65217 battery charger driver"
 	depends on MFD_TPS65217
 	help
-	  Say Y here to enable support for battery charging with TPS65217
-	  PMIC chips.
+	 Say Y here to enable support for battery charging with TPS65217
+	 PMIC chips.
 
 config BATTERY_GAUGE_LTC2941
 	tristate "LTC2941/LTC2943 Battery Gauge Driver"
@@ -698,7 +607,7 @@ config BATTERY_GAUGE_LTC2941
 
 config AB8500_BM
 	bool "AB8500 Battery Management Driver"
-	depends on AB8500_CORE && AB8500_GPADC && (IIO = y)
+	depends on AB8500_CORE && AB8500_GPADC
 	help
 	  Say Y to include support for AB8500 battery management.
 
@@ -712,8 +621,7 @@ config BATTERY_GOLDFISH
 
 config BATTERY_RT5033
 	tristate "RT5033 fuel gauge support"
-	depends on I2C
-	select REGMAP_I2C
+	depends on MFD_RT5033
 	help
 	  This adds support for battery fuel gauge in Richtek RT5033 PMIC.
 	  The fuelgauge calculates and determines the battery state of charge
@@ -727,120 +635,47 @@ config CHARGER_RT9455
 	help
 	  Say Y to enable support for Richtek RT9455 battery charger.
 
-config MOTO_CHARGER_SGM415XX
-        bool "Enable SGM415xx charger IC for Moto"
-        default n
-        help
-          This is to enable MOTO supports of IC SGM415xx.
-
-config MOTO_REMOVE_MTK_GAUGE
-        bool "Romve mtk gauge and use 3rd FG"
-        default n
-        help
-          Mtk gauge already be replaced by 3rd FG.
-
-config MOTO_CHG_WT6670F_SUPPORT
-        bool "Enable WT6670F charger protocol IC for Moto"
-        default n
-        help
-          This is to enable MOTO supports of IC WT6670F.
-
-config FORCE_QC3_ICL
-        bool "Force set qc3 input current limit"
-        default n
-        help
-          This is to force set the icl of qc3&qc3+.
-
-config WT6670F_QC3P
-        tristate "QC3+ protocal chipset"
-        depends on I2C
-        help
-          Say Y to enable support for QC3 plus protocal chipset.
-
-config MOTO_DISCRETE_CHARGE_PUMP_SUPPORT
-        bool "Enable discrete charger pumpfor Moto"
-        default n
-        help
-          This is to enable MOTO supports of charger pump.
-
-config MOTO_CHARGER_MT6375_SUPPORT
-        bool "MT6375 sw charger support"
-        default n
-        help
-          This is to enable MOTO supports of MT6375 control.
-
-config MOTO_CHARGE_PUMP_OVP_CONTROL_SUPPORT
-        bool "CHARGER PUMP ovp control support"
-        default n
-        help
-          This is to enable MOTO supports of charger vac control ovp.
-
-config MOTO_CHG_FFC_5V10W_SUPPORT
-	bool "Enable 5V10W charger FFC feature"
-	default n
-	help
-		This is to enable MOTO 5V10W Charger FFC feature.
-
 config CHARGER_CROS_USBPD
 	tristate "ChromeOS EC based USBPD charger"
-	depends on CROS_USBPD_NOTIFY
+	depends on MFD_CROS_EC
+	default n
 	help
 	  Say Y here to enable ChromeOS EC based USBPD charger
 	  driver. This driver gets various bits of information about
 	  what is connected to USB PD ports from the EC and converts
 	  that into power_supply properties.
 
-config CHARGER_SC2731
-	tristate "Spreadtrum SC2731 charger driver"
-	depends on MFD_SC27XX_PMIC || COMPILE_TEST
+config MTK_BATTERY
+	bool "MTK BATTERY framework and algorithm"
+	depends on MFD_MT6397
+	default n
 	help
-	  Say Y here to enable support for battery charging with SC2731
-	  PMIC chips.
+	  Say Y to enable support for MTK battery Algorithm.
+	  It is fuel gauge algorithm , The driver get various
+	  battery information from hardware to calculate
+	  Battery percentage.
 
-config FUEL_GAUGE_SC27XX
-	tristate "Spreadtrum SC27XX fuel gauge driver"
-	depends on MFD_SC27XX_PMIC || COMPILE_TEST
-	depends on IIO
+config BATTERY_MT6357
+	tristate "MT6357 fuel gauge support"
+	depends on MFD_MT6397
+	depends on NET
+	default m
 	help
-	  Say Y here to enable support for fuel gauge with SC27XX
-	  PMIC chips.
+	  Say Y to enable support for MT6357 battery driver.
+	  it measure battery current and temperature to provide
+	  battery information , It issues interrupt when trigger
+	  threshold is met.
 
-config CHARGER_UCS1002
-	tristate "Microchip UCS1002 USB Port Power Controller"
-	depends on I2C
-	depends on OF
-	depends on REGULATOR
-	select REGMAP_I2C
+config BATTERY_MT6359
+	tristate "MT6359 fuel gauge support"
+	depends on MFD_MT6397
+	depends on NET
+	default m
 	help
-	  Say Y to enable support for Microchip UCS1002 Programmable
-	  USB Port Power Controller with Charger Emulation.
-
-config CHARGER_BD70528
-	tristate "ROHM bd70528 charger driver"
-	depends on MFD_ROHM_BD70528
-	select LINEAR_RANGES
-	help
-	  Say Y here to enable support for getting battery status
-	  information and altering charger configurations from charger
-	  block of the ROHM BD70528 Power Management IC.
-
-config CHARGER_BD99954
-	tristate "ROHM bd99954 charger driver"
-	depends on I2C
-	select LINEAR_RANGES
-	help
-	  Say Y here to enable support for getting battery and charger
-	  information and altering charger configurations from the ROHM
-	  BD99954 charger IC.
-
-config CHARGER_WILCO
-	tristate "Wilco EC based charger for ChromeOS"
-	depends on WILCO_EC
-	help
-	  Say Y here to enable control of the charging routines performed
-	  by the Embedded Controller on the Chromebook named Wilco. Further
-	  information can be found in
-	  Documentation/ABI/testing/sysfs-class-power-wilco
+	  Say Y to enable support for MT6359 battery driver.
+	  it measure battery current and temperature to provide
+	  battery information , It issues interrupt when trigger
+	  threshold is met.
 
 config CHARGER_MT6360
 	tristate "Mediatek MT6360 Charger Driver"
@@ -853,52 +688,43 @@ config CHARGER_MT6360
 	  Average Input Current Regulation, Battery Tempature Sensing,
 	  Over-Temperature Protection, DPDM Detection for BC1.2
 
-config CHARGER_MT6362
-	tristate "MT6362 SPMI CHG driver"
-	depends on MFD_MT6362
+config CHARGER_TYPE_MT6357
+	tristate "MT6357 Charger Type Detection Driver"
+	depends on MFD_MT6397
 	help
-	  Say yes here to have support for the MT6362 CHG
-	  It supports BC1.2 and OTG boost.
-	  The driver can also be build as a module.
-	  If so, the module will be called mt6362_chg
+	  Say yes here to enable MT6357 Charger Type
+	  Detection Driver.
+	  This driver use MT6357 to detect charger type
+	  Say no if not using MT6357 Charger Type Detection.
 
-config CHARGER_MT6375
-	tristate "MT6375 charger driver"
-	depends on MFD_MT6375
+config CHARGER_MT6357
+	bool "MT6357 Pulse Charger Driver"
+	depends on MFD_MT6397
 	help
-	  Say Y to enable support for the MT6375 charger.
-	  The driver supports controlling switching charger and OTG
-	  with high-accuracy current and voltage regulation.
-	  The device is compliant with the USB Battery Charging Specification
-	  Revision 1.2.
-
-config GAUGE_MT6375
-	tristate "MT6375 fuel gauge driver"
-	depends on MFD_MT6375
-	help
-	  This adds support for battery fuel gauge in Mediatek MT6375 PMIC.
-	  The fuelgauge calculates and determines the battery state of charge
-	  according to battery open circuit voltage.
-
-config MTK_CHARGER_TYPE_DETECT
-	tristate "Mediatek Charger Type Detect Driver"
-	depends on TCPC_CLASS
-	help
-	  Say Y here to enable Mediatek Charger Type Detect.
-	  Support enable charger type detect when receiving
-	  typec attach notify.
-	  Say N to disable.
+	  Say yes here to enable MT6357 Pulse Charger
+	  Detection Driver.
+	  This driver use MT6357 to charge
+	  Say no if not using MT6357 to charge
 
 config MTK_CHARGER
-	tristate "MediaTek Charging Driver"
+	bool "MediaTek Charging Driver"
 	help
 	  Say yes here to enable MediaTek charging driver.
 	  This driver contains charging control flow and
 	  maintains charging status.
 	  Say no if not using MediaTek charging driver.
 
+config MTK_KERNEL_POWER_OFF_CHARGING
+	bool "MTK kernel power off charging"
+	depends on MTK_CHARGER
+	help
+	  yes : support KPOC feature, power off charging would running by
+	  kernel and charging animation by kpoc service. no: not support KPOC
+	  feature.
+	  device won't enter charging mode if config is no.
+
 config MTK_PUMP_EXPRESS_PLUS_SUPPORT
-	tristate "MediaTek PUMP EXPRESS PLUS"
+	bool "MediaTek PUMP EXPRESS PLUS"
 	depends on MTK_CHARGER
 	help
 	  Fast charging technology using switch charger and current pattern
@@ -907,7 +733,7 @@ config MTK_PUMP_EXPRESS_PLUS_SUPPORT
 	  Set No to disable PE+
 
 config MTK_PUMP_EXPRESS_PLUS_20_SUPPORT
-	tristate "MediaTek PUMP EXPRESS PLUS 2.0"
+	bool "MediaTek PUMP EXPRESS PLUS 2.0"
 	depends on MTK_CHARGER
 	help
 	  Fast charging technology using switch charger and current pattern
@@ -917,96 +743,170 @@ config MTK_PUMP_EXPRESS_PLUS_20_SUPPORT
 	  Set No to disable PE+2.0
 
 config MTK_PUMP_EXPRESS_40_SUPPORT
-	tristate "MediaTek PUMP EXPRESS 4.0"
+	bool "MediaTek PUMP EXPRESS 4.0"
 	depends on MTK_CHARGER
 	help
-	  Fast charging technology supports request adjustments of source output
-	  voltage in increments as small as 50 mV to achive better charging ability.
-	  It has higher charging efficiency and has better thermal performance than
-	  PE+/PE+2.0.
+	  Fast charging technology using switch charger and current pattern
+	  to achive better charging ability. It has higher charging efficiency
+	  and has better thermal performance than PE+.
 	  Set Yes to enable PE 4.0
 	  Set No to disable PE 4.0
 
-config MTK_PUMP_EXPRESS_50_SUPPORT
-	tristate "MediaTek PUMP EXPRESS 5.0"
+
+config CHARGER_RT9458
+	bool "Charger Driver for Richtek RT9458 Charger IC"
 	depends on MTK_CHARGER
 	help
-	  Fast charging technology using divider charger
-	  to achive better charging ability. It has higher charging efficiency
-	  and has better thermal performance than PE+.
-	  Set Yes to enable PE 5.0
-	  Set No to disable PE 5.0
+	  Say Yes to enable
+	  Richtek RT9458 driver.
+	  It depends on
+	  the config MTK_CHARGER.
 
-config CHARGER_RT9759
-	tristate "Charger Driver for Richtek RT9759 Charger IC"
-	default n
+config CHARGER_RT9465
+	bool "Charger Driver for Richtek RT9465 Charger IC"
 	depends on MTK_CHARGER
 	help
-	  Say Yes to enable Richtek RT9759 driver.
-	  It is mainly used as cap divider charger
-	  for Mediatek Pump Express 5.0.
-	  It depends on config MTK_CHARGER
+	  Say Yes to enable Richtek RT9465 driver.
+	  It is mainly used as slave IC for dual charger
+	  application.
+	  It depends on config MTK_CHARGER.
 
-#moto-charger@jianyong.pan  20220412 start
-config CHARGER_SGM415XX
-	tristate "Charger Driver for SGM415XX Charger IC"
-	default n
+config CHARGER_RT9466
+	bool "Charger Driver for Richtek RT9466 Charger IC"
 	depends on MTK_CHARGER
 	help
-	  Say Yes to enable SGM415XX driver.
-	  It is mainly used as cap divider charger
-	  for Mediatek Pump Express 5.0.
-	  It depends on config MTK_CHARGER
-#moto-charger@jianyong.pan  20220412 end
+	  Say Yes to enable Richtek RT9466 driver.
+	  It is mainly used as slave IC for dual charger
+	  application.
+	  It depends on config MTK_CHARGER.
 
-config RN5T618_POWER
-	tristate "RN5T618 charger/fuel gauge support"
-	depends on MFD_RN5T618
+config CHARGER_RT9467
+	bool "Charger Driver for Richtek RT9467 Charger IC"
+	depends on MTK_CHARGER
 	help
-	  Say Y here to have support for RN5T618 PMIC family fuel gauge and charger.
-	  This driver can also be built as a module. If so, the module will be
-	  called rn5t618_power.
+	  Say Yes to enable Richtek RT9467 driver.
+	  It is mainly used as slave IC for dual charger
+	  application.
+	  It depends on config MTK_CHARGER.
 
-config GAUGE_MT6983_ALPHA_SUPPORT
-	tristate "Specify Alpha Gauge Platform is mt6983"
+config CHARGER_RT9471
+	bool "Charger Driver for Richtek RT9471 Charger IC"
+	depends on MTK_CHARGER
 	help
-	  Select Alpha Gauge Platform is mt6983.
-	  To compile this dirver for used touch IC.
-	  Set Y or M to select this feature for specific platform-mt6983,
-	  and set N to disable.
+	  Say Yes to enable Richtek RT9471 driver.
+	  It supports RT9470/RT9470D/RT9471/RT9471D,
+	  which RT9470D and RT9471D support BC1.2
+	  It depends on config MTK_CHARGER.
 
-config MOTO_WLC_ALG_SUPPORT
-	tristate "moto wlc interface driver for charger"
+config CHARGER_BQ25601
+	bool "CHARGER_BQ25601"
+	depends on MTK_CHARGER
 	help
-	  This is to enable MOTO supports of wlc charger INTERFACE.
+	  Say Yes to enable
+	  TI BQ25601 driver.
+	  It depends on
+	  the config MTK_CHARGER.
 
 config MOTO_CHG_TCMD_SUPPORT
-	tristate "MOTO TCMD interface driver for charger"
+	bool "MOTO TCMD interface driver for charger"
+	default n
 	help
 	  This is to enable MOTO supports of charger TCMD INTERFACE.
 
-config MOTO_THERMAL_POWER_OFF_ALGO
-        bool "Enable Moto MTK thermal power on/off algo"
+config MTK_BQ2560x_SUPPORT
+	bool "Charger Driver for BQ 2560x Charger IC"
         default n
+	help
+	  BQ 2560x.
+
+config CHARGER_PD_ET7303
+	bool "Define for cclogic driver Etek ET7303"
+        default n
+	help
+	  Say Y here to enable Etek ET7303 driver
+
+config MTK_DISABLE_BAT_HIGH_TEMP_PROTECT
+     	bool "Disable battery high temperature protect"
+     	default n
+     	help
+	  battery high temperature will poweroff phone
+	  Set YES to disable hight temperature protect
+	  set No to enable hight temperature protect
+
+config WT6670F_QC3P
+        tristate "QC3+ protocal chipset"
+        depends on I2C
         help
-          This is to enable MOTO Moto MTK thermal power on/off algo.
+          Say Y to enable support for QC3 plus protocal chipset.
 
-config MOTO_PE50_CV_LOWER_BOUND_GAP_OFF
-	bool "This is config charger pe5 cv lower bound gap"
-	default n
-	help
-	  This is config charger pe5 cv lower bound gap
+config BQ2597X_CHARGE_PUMP
+        tristate "BQ2597X power supply framework based driver"
+        depends on I2C
+        help
+          Say Y to include support for BQ2597X Charge Pump driver based on
+          power supply framework.
+          BQ2597X is a div2 charge pump capable of delivering 8A charge current
+          with very high efficiency.
 
-config CANCUNF_BATTERY_NTC
-	bool "This is config cancunf battery ntc table"
-	default n
-	help
-	  This is config cancunf battery ntc table
+if MACH_MT6768
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
 
-config MOTO_JP_TYPECOTP_SUPPORT
-	bool "This is config cancunf jp typecotp support"
-	default n
+if MACH_MT6739
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6771
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6877
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6781
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6833
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6893
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6885
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6853
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6873
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+if MACH_MT6785
+source "drivers/power/supply/mediatek/battery/Kconfig"
+source "drivers/power/supply/mediatek/charger/Kconfig"
+endif
+
+config PD_HARDRESET_HND
+        bool "PD HARDRESET handle"
+        default n
 	help
-	  This is config cancunf jp typecotp support
+	  Say Y here to enable PD Hardreset ignore
 
 endif # POWER_SUPPLY

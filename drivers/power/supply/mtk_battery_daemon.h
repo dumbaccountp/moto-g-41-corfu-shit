@@ -38,8 +38,3 @@ struct fgd_cmd_param_t_4 {
 	char input[DATA_SIZE];
 };
 
-struct fgd_cmd_param_t_8 {
-	int size;
-	int data[128];
-};
-

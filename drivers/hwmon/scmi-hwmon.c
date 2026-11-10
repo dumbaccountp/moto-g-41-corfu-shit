@@ -2,7 +2,7 @@
 /*
  * System Control and Management Interface(SCMI) based hwmon sensor driver
  *
- * Copyright (C) 2018-2020 ARM Ltd.
+ * Copyright (C) 2018 ARM Ltd.
  * Sudeep Holla <sudeep.holla@arm.com>
  */
 
@@ -13,56 +13,10 @@
 #include <linux/sysfs.h>
 #include <linux/thermal.h>
 
-static const struct scmi_sensor_proto_ops *sensor_ops;
-
 struct scmi_sensors {
-	const struct scmi_protocol_handle *ph;
+	const struct scmi_handle *handle;
 	const struct scmi_sensor_info **info[hwmon_max];
 };
-
-static inline u64 __pow10(u8 x)
-{
-	u64 r = 1;
-
-	while (x--)
-		r *= 10;
-
-	return r;
-}
-
-static int scmi_hwmon_scale(const struct scmi_sensor_info *sensor, u64 *value)
-{
-	int scale = sensor->scale;
-	u64 f;
-
-	switch (sensor->type) {
-	case TEMPERATURE_C:
-	case VOLTAGE:
-	case CURRENT:
-		scale += 3;
-		break;
-	case POWER:
-	case ENERGY:
-		scale += 6;
-		break;
-	default:
-		break;
-	}
-
-	if (scale == 0)
-		return 0;
-
-	if (abs(scale) > 19)
-		return -E2BIG;
-
-	f = __pow10(abs(scale));
-	if (scale > 0)
-		*value *= f;
-	else
-		*value = div64_u64(*value, f);
-
-	return 0;
-}
 
 static int scmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 			   u32 attr, int channel, long *val)
@@ -71,13 +25,10 @@ static int scmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 	u64 value;
 	const struct scmi_sensor_info *sensor;
 	struct scmi_sensors *scmi_sensors = dev_get_drvdata(dev);
+	const struct scmi_handle *h = scmi_sensors->handle;
 
 	sensor = *(scmi_sensors->info[type] + channel);
-	ret = sensor_ops->reading_get(scmi_sensors->ph, sensor->id, &value);
-	if (ret)
-		return ret;
-
-	ret = scmi_hwmon_scale(sensor, &value);
+	ret = h->sensor_ops->reading_get(h, sensor->id, false, &value);
 	if (!ret)
 		*val = value;
 
@@ -105,8 +56,8 @@ scmi_hwmon_is_visible(const void *drvdata, enum hwmon_sensor_types type,
 	const struct scmi_sensors *scmi_sensors = drvdata;
 
 	sensor = *(scmi_sensors->info[type] + channel);
-	if (sensor)
-		return 0444;
+	if (sensor && sensor->name)
+		return S_IRUGO;
 
 	return 0;
 }
@@ -170,16 +121,11 @@ static int scmi_hwmon_probe(struct scmi_device *sdev)
 	struct hwmon_channel_info *scmi_hwmon_chan;
 	const struct hwmon_channel_info **ptr_scmi_ci;
 	const struct scmi_handle *handle = sdev->handle;
-	struct scmi_protocol_handle *ph;
 
-	if (!handle)
+	if (!handle || !handle->sensor_ops)
 		return -ENODEV;
 
-	sensor_ops = handle->devm_get_protocol(sdev, SCMI_PROTOCOL_SENSOR, &ph);
-	if (IS_ERR(sensor_ops))
-		return PTR_ERR(sensor_ops);
-
-	nr_sensors = sensor_ops->count_get(ph);
+	nr_sensors = handle->sensor_ops->count_get(handle);
 	if (!nr_sensors)
 		return -EIO;
 
@@ -187,10 +133,10 @@ static int scmi_hwmon_probe(struct scmi_device *sdev)
 	if (!scmi_sensors)
 		return -ENOMEM;
 
-	scmi_sensors->ph = ph;
+	scmi_sensors->handle = handle;
 
 	for (i = 0; i < nr_sensors; i++) {
-		sensor = sensor_ops->info_get(ph, i);
+		sensor = handle->sensor_ops->info_get(handle, i);
 		if (!sensor)
 			return -EINVAL;
 
@@ -208,10 +154,8 @@ static int scmi_hwmon_probe(struct scmi_device *sdev)
 		}
 	}
 
-	if (nr_count[hwmon_temp]) {
-		nr_count[hwmon_chip]++;
-		nr_types++;
-	}
+	if (nr_count[hwmon_temp])
+		nr_count[hwmon_chip]++, nr_types++;
 
 	scmi_hwmon_chan = devm_kcalloc(dev, nr_types, sizeof(*scmi_hwmon_chan),
 				       GFP_KERNEL);
@@ -242,7 +186,7 @@ static int scmi_hwmon_probe(struct scmi_device *sdev)
 	}
 
 	for (i = nr_sensors - 1; i >= 0 ; i--) {
-		sensor = sensor_ops->info_get(ph, i);
+		sensor = handle->sensor_ops->info_get(handle, i);
 		if (!sensor)
 			continue;
 
@@ -267,7 +211,7 @@ static int scmi_hwmon_probe(struct scmi_device *sdev)
 }
 
 static const struct scmi_device_id scmi_id_table[] = {
-	{ SCMI_PROTOCOL_SENSOR, "hwmon" },
+	{ SCMI_PROTOCOL_SENSOR },
 	{ },
 };
 MODULE_DEVICE_TABLE(scmi, scmi_id_table);

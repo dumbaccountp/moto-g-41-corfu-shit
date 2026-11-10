@@ -34,7 +34,7 @@ enum PIDMAP_PROC_MODE {
 #define PIDMAP_PROC_PERM          (0440)
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_PID_MAP)
+#ifdef CONFIG_MTK_PID_MAP
 extern void get_pidmap_aee_buffer(unsigned long *vaddr, unsigned long *size);
 #else
 static inline void get_pidmap_aee_buffer(unsigned long *vaddr,

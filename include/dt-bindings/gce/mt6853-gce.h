@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2018 MediaTek Inc.
- *
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 
 #ifndef _DT_BINDINGS_GCE_MT6853_H
 #define _DT_BINDINGS_GCE_MT6853_H
@@ -344,7 +343,8 @@
 
 /* DISP sw token */
 #define CMDQ_SYNC_TOKEN_SODI				671
-/* GPR access tokens (for  HW register backup)
+
+/* GPR access tokens (for HW register backup)
  * There are 15 32-bit GPR, 3 GPR form a set
  * (64-bit for address, 32-bit for value)
  * MUST NOT CHANGE, these tokens sync with MDP
@@ -379,5 +379,6 @@
 
 #define CMDQ_EVENT_MAX					0x3FF
 /* CMDQ sw tokens END */
+
 
 #endif

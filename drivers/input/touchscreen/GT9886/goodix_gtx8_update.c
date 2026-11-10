@@ -1,20 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Goodix GTX5 Firmware Update Driver.
- *
- * Copyright (C) 2015 - 2016 Goodix, Inc.
- * Authors:  Yulong Cai <caiyulong@goodix.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be a reference
- * to you, when you are integrating the GOODiX's CTP IC into your system,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 #include "goodix_ts_core.h"
 #include "goodix_cfg_bin.h"
 #include "goodix_default_fw.h"
@@ -156,7 +143,7 @@ struct fw_update_ctrl {
 	struct goodix_ts_device *ts_dev;
 	struct goodix_ts_core *core_data;
 
-	char fw_name[128];
+	char fw_name[32];
 	struct bin_attribute attr_fwimage;
 	bool fw_from_sysfs;
 };
@@ -1327,9 +1314,9 @@ static struct goodix_ext_attribute goodix_fwu_attrs[] = {
 	__EXTMOD_ATTR(result, 0444, goodix_sysfs_update_result_show, NULL),
 	__EXTMOD_ATTR(fwversion, 0444,
 			goodix_sysfs_update_fwversion_show, NULL),
-	__EXTMOD_ATTR(fwsize, 0660, goodix_sysfs_fwsize_show,
+	__EXTMOD_ATTR(fwsize, 0666, goodix_sysfs_fwsize_show,
 			goodix_sysfs_fwsize_store),
-	__EXTMOD_ATTR(force_update, 0220, NULL,
+	__EXTMOD_ATTR(force_update, 0222, NULL,
 			goodix_sysfs_force_update_store),
 };
 
@@ -1361,7 +1348,7 @@ static int goodix_syfs_init(struct goodix_ts_core *core_data,
 	}
 
 	fw_ctrl->attr_fwimage.attr.name = "fwimage";
-	fw_ctrl->attr_fwimage.attr.mode = 0660;
+	fw_ctrl->attr_fwimage.attr.mode = 0666;
 	fw_ctrl->attr_fwimage.size = 0;
 	fw_ctrl->attr_fwimage.write = goodix_sysfs_fwimage_store;
 	#ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -1416,24 +1403,9 @@ static int goodix_fw_update_init(struct goodix_ts_core *core_data,
 	if (ts_bdata && ts_bdata->fw_name)
 		strlcpy(fwu_ctrl->fw_name, ts_bdata->fw_name,
 				sizeof(fwu_ctrl->fw_name));
-	else {
-		if (gt9886_find_touch_node == 1) {
-			strncat(panel_firmware_buf, ".bin", 4);
-			strncpy(fwu_ctrl->fw_name,
-				panel_firmware_buf,
+	else
+		strlcpy(fwu_ctrl->fw_name, firmware_bin_name,
 				sizeof(fwu_ctrl->fw_name));
-		} else {
-			ret = snprintf(fwu_ctrl->fw_name,
-				sizeof(fwu_ctrl->fw_name),
-				"%s%s.bin",
-				TS_DEFAULT_FIRMWARE,
-				gt9886_firmware_buf);
-			if (ret >= sizeof(fwu_ctrl->fw_name))
-				ts_err("get firmware_bin_name name FAILED!!!");
-		}
-	}
-	ts_info("fwu_ctrl->fw_name:%s",
-				fwu_ctrl->fw_name);
 
 	/* create sysfs interface */
 	if (init_sysfs) {
@@ -1519,8 +1491,20 @@ static struct goodix_ext_module goodix_fwu_module = {
 	.priority = EXTMOD_PRIO_FWUPDATE,
 };
 
-int goodix_fwu_module_init(void *data)
+static int __init goodix_fwu_module_init(void)
 {
 	ts_info("run goodix_fwu_module\n");
 	return goodix_register_ext_module(&goodix_fwu_module);
 }
+
+static void __exit goodix_fwu_module_exit(void)
+{
+	;
+}
+
+late_initcall(goodix_fwu_module_init);
+module_exit(goodix_fwu_module_exit);
+
+MODULE_DESCRIPTION("Goodix FWU Module");
+MODULE_AUTHOR("Goodix, Inc.");
+MODULE_LICENSE("GPL v2");

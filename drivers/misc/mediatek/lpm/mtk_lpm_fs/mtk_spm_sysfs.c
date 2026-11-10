@@ -11,7 +11,21 @@
 #define MTK_SPM_SYS_FS_NAME	"spm"
 #define MTK_SPM_SYS_FS_MODE	0644
 
-static struct mtk_lp_sysfs_handle mtk_spm_fs_root;
+static struct mtk_lp_sysfs_handle mtk_spm_fs_root = {
+	NULL
+};
+
+int mtk_spm_sysfs_entry_group_add(const char *name,
+		int mode, struct mtk_lp_sysfs_group *_group,
+		struct mtk_lp_sysfs_handle *handle)
+{
+	if (!IS_MTK_LP_SYS_HANDLE_VALID(&mtk_spm_fs_root))
+		mtk_spm_sysfs_root_entry_create();
+
+	return mtk_lp_sysfs_entry_func_group_create(name
+			, mode, _group, &mtk_spm_fs_root, handle);
+}
+EXPORT_SYMBOL(mtk_spm_sysfs_entry_group_add);
 
 int mtk_spm_sysfs_entry_node_add(const char *name,
 		int mode, const struct mtk_lp_sysfs_op *op,
@@ -56,8 +70,14 @@ int mtk_spm_sysfs_entry_root_get(struct mtk_lp_sysfs_handle **handle)
 }
 EXPORT_SYMBOL(mtk_spm_sysfs_entry_root_get);
 
-int mtk_spm_sysfs_remove(void)
+int mtk_spm_sysfs_power_create_group(struct attribute_group *grp)
 {
-	return mtk_lp_sysfs_entry_func_node_remove(&mtk_spm_fs_root);
+	return mtk_lp_kernfs_create_group(power_kobj, grp);
+}
+EXPORT_SYMBOL(mtk_spm_sysfs_power_create_group);
+
+size_t get_mtk_spm_sysfs_power_bufsz_max(void)
+{
+	return get_mtk_lp_kernfs_bufsz_max();
 }
 

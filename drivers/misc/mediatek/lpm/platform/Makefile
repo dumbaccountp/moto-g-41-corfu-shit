@@ -1,5 +1,8 @@
-lpm_platform_objs += lpm_platform.o
-lpm_platform_objs += lpm_irqremain.o
-lpm_platform_objs += lpm_resource_ctrl.o
-lpm_platform_objs += lpm_rc.o
-lpm_platform_objs += lpm_trace.o
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/lpm/inc/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/lpm/
+
+obj-y += mtk_lpm_platform.o
+obj-y += mtk_lpm_irqremain.o
+obj-y += mtk_lpm_resource_ctrl.o
+obj-y += mtk_lpm_rc.o
+obj-y += mtk_lpm_trace.o

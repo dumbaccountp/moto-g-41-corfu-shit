@@ -299,8 +299,6 @@ enum ACDK_SENSOR_FEATURE_ENUM {
 	SENSOR_FEATURE_GET_SEAMLESS_SCENARIOS,
 	SENSOR_FEATURE_GET_SEAMLESS_SYSTEM_DELAY,
 	SENSOR_FEATURE_SET_SEAMLESS_EXTEND_FRAME_LENGTH,
-	SENSOR_FEATURE_SET_HDR_SHUTTER_FRAME_TIME,
-	SENSOR_FEATURE_SET_HDR_TRI_SHUTTER_FRAME_TIME,
 	SENSOR_FEATURE_MAX
 };
 
@@ -430,6 +428,72 @@ enum SENSOR_DPCM_TYPE_ENUM {
 	COMP8_DI_2A = 0x2A,
 };
 
+#define MAX_CALIBRATION_STRING 40
+
+typedef struct {
+	MINT32 mnf;
+	MINT32 awb;
+	MINT32 af;
+	MINT32 lsc;
+	MINT32 pdaf;
+	MINT32 dual;
+	MINT32 sw_ggc;
+	MINT32 hw_ggc;
+	MINT32 xtalk;
+} mot_calibration_status_t;
+
+typedef struct {
+	char integrator[MAX_CALIBRATION_STRING];
+	char serial_number[MAX_CALIBRATION_STRING];
+	char table_revision[MAX_CALIBRATION_STRING];
+	char mot_part_number[MAX_CALIBRATION_STRING];
+	char actuator_id[MAX_CALIBRATION_STRING];
+	char lens_id[MAX_CALIBRATION_STRING];
+	char factory_id[MAX_CALIBRATION_STRING];
+	char manufacture_line[MAX_CALIBRATION_STRING];
+	char manufacture_date[MAX_CALIBRATION_STRING];
+} mot_calibration_mnf_t;
+
+typedef struct {
+	unsigned short awb_src_1_golden_r;
+	unsigned short awb_src_1_golden_gr;
+	unsigned short awb_src_1_golden_gb;
+	unsigned short awb_src_1_golden_b;
+	unsigned short awb_src_1_r;
+	unsigned short awb_src_1_gr;
+	unsigned short awb_src_1_gb;
+	unsigned short awb_src_1_b;
+	unsigned short awb_src_1_rg_ratio;
+	unsigned short awb_src_1_bg_ratio;
+	unsigned short awb_src_1_gr_gb_ratio;
+	unsigned short awb_src_1_golden_rg_ratio;
+	unsigned short awb_src_1_golden_bg_ratio;
+	unsigned short awb_src_1_golden_gr_gb_ratio;
+	unsigned short cie_src_1_ev;//big_y_source
+	unsigned short cie_src_1_u;//lil_x_source
+	unsigned short cie_src_1_v;//lil_y_source   from qcom
+} mot_calibration_3aInfo_t;
+
+typedef enum {
+	STATUS_OK,
+	STATUS_CRC_FAIL,
+	STATUS_LIMIT_FAIL
+} MotCalibrationStatus;
+
+typedef struct {
+        MotCalibrationStatus mnf_status;
+        MotCalibrationStatus af_status;
+        MotCalibrationStatus awb_status;
+        MotCalibrationStatus lsc_status;
+        MotCalibrationStatus pdaf_status;
+        MotCalibrationStatus dual_status;
+        MotCalibrationStatus sw_ggc_status;
+        MotCalibrationStatus hw_ggc_status;
+        MotCalibrationStatus xtalk_status;
+	MUINT8 *ggc_data;
+	mot_calibration_mnf_t mnf_cal_data;
+} mot_calibration_info_t;
+
 struct ACDK_SENSOR_RESOLUTION_INFO_STRUCT {
 	MUINT16 SensorPreviewWidth;
 	MUINT16 SensorPreviewHeight;
@@ -535,91 +599,6 @@ struct ACDK_SENSOR_RESOLUTION_INFO_STRUCT {
 	MUINT16 Sensor3DVideoHeightOffset;
 };
 
-/* IKSWR-45543 Begin*/
-#define MAX_CALIBRATION_STRING 40
-#define CALIBRATION_STATUS_SIZE 200
-typedef struct {
-	MINT32 mnf;
-	MINT32 awb;
-	MINT32 af;
-	MINT32 lsc;
-	MINT32 pdaf;
-	MINT32 af_sync;
-	MINT32 dual;
-} mot_calibration_status_t;
-
-typedef struct {
-	char integrator[MAX_CALIBRATION_STRING];
-	char serial_number[MAX_CALIBRATION_STRING];
-	char table_revision[MAX_CALIBRATION_STRING];
-	char mot_part_number[MAX_CALIBRATION_STRING];
-	char actuator_id[MAX_CALIBRATION_STRING];
-	char lens_id[MAX_CALIBRATION_STRING];
-	char factory_id[MAX_CALIBRATION_STRING];
-	char manufacture_line[MAX_CALIBRATION_STRING];
-	char manufacture_date[MAX_CALIBRATION_STRING];
-} mot_calibration_mnf_t;
-
-typedef enum {
-	STATUS_OK,
-	STATUS_CRC_FAIL,
-	STATUS_LIMIT_FAIL
-} MotCalibrationStatus;
-
-typedef struct {
-        MotCalibrationStatus mnf_status;
-        MotCalibrationStatus af_status;
-        MotCalibrationStatus awb_status;
-        MotCalibrationStatus lsc_status;
-        MotCalibrationStatus pdaf_status;
-        MotCalibrationStatus dual_status;
-	mot_calibration_mnf_t mnf_cal_data;
-} mot_calibration_info_t;
-
-#define OV_CROSS_TALK_GROUP_SIZE   288
-
-typedef struct {
-       MUINT16 addr;
-       MUINT16 data;
-} ov_cross_talk_addr_data_t;
-
-typedef struct {
-       ov_cross_talk_addr_data_t height[2];
-       ov_cross_talk_addr_data_t width[2];
-       ov_cross_talk_addr_data_t cross_talk_data[OV_CROSS_TALK_GROUP_SIZE];
-       ov_cross_talk_addr_data_t cross_talk_enable[2];
-       MUINT8 cross_talk_crc[2];
-       MUINT8 is_valid;
-} ov_cross_talk_cal_t;
-
-typedef struct {
-	MUINT16 unit_r;
-	MUINT16 unit_gr;
-	MUINT16 unit_gb;
-	MUINT16 unit_b;
-	MUINT16 golden_r;
-	MUINT16 golden_gr;
-	MUINT16 golden_gb;
-	MUINT16 golden_b;
-	MUINT16 black_level_r;
-	MUINT16 black_level_gr;
-	MUINT16 black_level_gb;
-	MUINT16 black_level_b;
-	float r_over_g;
-	float b_over_g;
-	float gr_over_gb;
-	MUINT16 cie_Ev;
-	MUINT16 cie_u;
-	MUINT16 cie_v;
-} mot_calibration_awb_t;
-
-typedef struct {
-	MINT32 infinity_pos_org;
-	MINT32 infinity_pos_ext;
-	MINT32 macro_pos_org;
-	MINT32 macro_pos_ext;
-} mot_calibration_af_t;
-/* IKSWR-45543 End*/
 
 struct ACDK_SENSOR_INFO_STRUCT {
 	MUINT16 SensorPreviewResolutionX;
@@ -670,6 +649,7 @@ struct ACDK_SENSOR_INFO_STRUCT {
 	MUINT32 Custom13DelayFrame;
 	MUINT32 Custom14DelayFrame;
 	MUINT32 Custom15DelayFrame;
+
 	MUINT16 SensorGrabStartX;
 	MUINT16 SensorGrabStartY;
 	MUINT16 SensorGrabStartX_PRV;
@@ -768,16 +748,10 @@ struct ACDK_SENSOR_INFO_STRUCT {
 	MUINT16 SensorVerFOV;
 	MUINT16 SensorOrientation;
 	MUINT32 SensorModuleID;
-	MUINT8 efuseID[64];
-
-/* IKSWR-45543 Begin*/
+        MUINT8 efuseID[64];
 	mot_calibration_status_t calibration_status;
 	mot_calibration_mnf_t mnf_calibration;
-#if 0
-	mot_calibration_awb_t awb_calibration;
-	mot_calibration_af_t af_calibration;
-#endif
-/* IKSWR-45543 End*/
+	mot_calibration_3aInfo_t calibration_3aInfo;
 };
 
 #define ACDK_SENSOR_INFO2_STRUCT struct ACDK_SENSOR_INFO_STRUCT
@@ -1049,9 +1023,9 @@ enum VC_FEATURE {
 
 	VC_STAGGER_MIN_NUM = VC_3HDR_MAX_NUM,
 	VC_STAGGER_EMBEDDED = VC_STAGGER_MIN_NUM,
-	VC_STAGGER_NE,//9
-	VC_STAGGER_ME,//10
-	VC_STAGGER_SE,//11
+	VC_STAGGER_NE,  //9
+	VC_STAGGER_ME,  //10
+	VC_STAGGER_SE,  //11
 	VC_STAGGER_MAX_NUM,
 	VC_MAX_NUM = VC_STAGGER_MAX_NUM,
 };
@@ -1464,7 +1438,6 @@ struct SENSOR_FUNCTION_STRUCT {
 	    MSDK_SENSOR_CONFIG_STRUCT *pSensorConfigData);
 
 	MUINT32 (*SensorClose)(void);
-	void (*SensorSetPlatformInfo)(unsigned int platform_id);
 #if 1 /* isp suspend resume patch */
 	enum MSDK_SCENARIO_ID_ENUM ScenarioId;
 	MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT imageWindow;
@@ -1649,8 +1622,4 @@ struct IMGSENSOR_AE_FRM_MODE {
 	MUINT32 frame_mode_4:4;
 };
 
-struct IMGSENSOR_AE_MULTI_SHUTTER {
-	MUINT32 shutter_num; /* How many shutter settings in this structure */
-	MUINT32 shutter[3];
-};
 #endif              /* _KD_IMGSENSOR_DATA_H */

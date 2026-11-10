@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	NET3:	Implementation of the ICMP protocol layer.
  *
  *		Alan Cox, <alan@lxorguk.ukuu.org.uk>
+ *
+ *	This program is free software; you can redistribute it and/or
+ *	modify it under the terms of the GNU General Public License
+ *	as published by the Free Software Foundation; either version
+ *	2 of the License, or (at your option) any later version.
  *
  *	Some of the function names and the icmp unreach table for this
  *	module were derived from [icmp.c 1.0.11 06/02/93] by
@@ -55,6 +59,7 @@
  *
  *	- Should use skb_pull() instead of all the manual checking.
  *	  This would also greatly simply some upper layer error handlers. --AK
+ *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -201,7 +206,7 @@ static const struct icmp_control icmp_pointers[NR_ICMP_TYPES+1];
  */
 static struct sock *icmp_sk(struct net *net)
 {
-	return this_cpu_read(*net->ipv4.icmp_sk);
+	return *this_cpu_ptr(net->ipv4.icmp_sk);
 }
 
 /* Called with BH disabled */
@@ -261,12 +266,11 @@ bool icmp_global_allow(void)
 	spin_lock(&icmp_global.lock);
 	delta = min_t(u32, now - icmp_global.stamp, HZ);
 	if (delta >= HZ / 50) {
-		incr = READ_ONCE(sysctl_icmp_msgs_per_sec) * delta / HZ;
+		incr = sysctl_icmp_msgs_per_sec * delta / HZ ;
 		if (incr)
 			WRITE_ONCE(icmp_global.stamp, now);
 	}
-	credit = min_t(u32, icmp_global.credit + incr,
-		       READ_ONCE(sysctl_icmp_msgs_burst));
+	credit = min_t(u32, icmp_global.credit + incr, sysctl_icmp_msgs_burst);
 	if (credit) {
 		/* We want to use a credit of one in average, but need to randomize
 		 * it for security reasons.
@@ -290,7 +294,7 @@ static bool icmpv4_mask_allow(struct net *net, int type, int code)
 		return true;
 
 	/* Limit if icmp type is enabled in ratemask. */
-	if (!((1 << type) & READ_ONCE(net->ipv4.sysctl_icmp_ratemask)))
+	if (!((1 << type) & net->ipv4.sysctl_icmp_ratemask))
 		return true;
 
 	return false;
@@ -328,8 +332,7 @@ static bool icmpv4_xrlim_allow(struct net *net, struct rtable *rt,
 
 	vif = l3mdev_master_ifindex(dst->dev);
 	peer = inet_getpeer_v4(net->ipv4.peers, fl4->daddr, vif, 1);
-	rc = inet_peer_xrlim_allow(peer,
-				   READ_ONCE(net->ipv4.sysctl_icmp_ratelimit));
+	rc = inet_peer_xrlim_allow(peer, net->ipv4.sysctl_icmp_ratelimit);
 	if (peer)
 		inet_putpeer(peer);
 out:
@@ -357,7 +360,7 @@ static int icmp_glue_bits(void *from, char *to, int offset, int len, int odd,
 
 	csum = skb_copy_and_csum_bits(icmp_param->skb,
 				      icmp_param->offset + offset,
-				      to, len);
+				      to, len, 0);
 
 	skb->csum = csum_block_add(skb->csum, csum, odd);
 	if (icmp_pointers[icmp_param->data.icmph.type].error)
@@ -381,15 +384,15 @@ static void icmp_push_reply(struct icmp_bxm *icmp_param,
 		ip_flush_pending_frames(sk);
 	} else if ((skb = skb_peek(&sk->sk_write_queue)) != NULL) {
 		struct icmphdr *icmph = icmp_hdr(skb);
-		__wsum csum;
+		__wsum csum = 0;
 		struct sk_buff *skb1;
 
-		csum = csum_partial_copy_nocheck((void *)&icmp_param->data,
-						 (char *)icmph,
-						 icmp_param->head_len);
 		skb_queue_walk(&sk->sk_write_queue, skb1) {
 			csum = csum_add(csum, skb1->csum);
 		}
+		csum = csum_partial_copy_nocheck((void *)&icmp_param->data,
+						 (char *)icmph,
+						 icmp_param->head_len, csum);
 		icmph->checksum = csum_fold(csum);
 		skb->ip_summed = CHECKSUM_NONE;
 		ip_push_pending_frames(sk, fl4);
@@ -432,7 +435,7 @@ static void icmp_reply(struct icmp_bxm *icmp_param, struct sk_buff *skb)
 
 	ipcm_init(&ipc);
 	inet->tos = ip_hdr(skb)->tos;
-	ipc.sockc.mark = mark;
+	sk->sk_mark = mark;
 	daddr = ipc.addr = ip_hdr(skb)->saddr;
 	saddr = fib_compute_spec_dst(skb);
 
@@ -449,7 +452,7 @@ static void icmp_reply(struct icmp_bxm *icmp_param, struct sk_buff *skb)
 	fl4.flowi4_tos = RT_TOS(ip_hdr(skb)->tos);
 	fl4.flowi4_proto = IPPROTO_ICMP;
 	fl4.flowi4_oif = l3mdev_master_ifindex(skb->dev);
-	security_skb_classify_flow(skb, flowi4_to_flowi_common(&fl4));
+	security_skb_classify_flow(skb, flowi4_to_flowi(&fl4));
 	rt = ip_route_output_key(net, &fl4);
 	if (IS_ERR(rt))
 		goto out_unlock;
@@ -462,23 +465,6 @@ out_bh_enable:
 	local_bh_enable();
 }
 
-/*
- * The device used for looking up which routing table to use for sending an ICMP
- * error is preferably the source whenever it is set, which should ensure the
- * icmp error can be sent to the source host, else lookup using the routing
- * table of the destination device, else use the main routing table (index 0).
- */
-static struct net_device *icmp_get_route_lookup_dev(struct sk_buff *skb)
-{
-	struct net_device *route_lookup_dev = NULL;
-
-	if (skb->dev)
-		route_lookup_dev = skb->dev;
-	else if (skb_dst(skb))
-		route_lookup_dev = skb_dst(skb)->dev;
-	return route_lookup_dev;
-}
-
 static struct rtable *icmp_route_lookup(struct net *net,
 					struct flowi4 *fl4,
 					struct sk_buff *skb_in,
@@ -487,7 +473,6 @@ static struct rtable *icmp_route_lookup(struct net *net,
 					int type, int code,
 					struct icmp_bxm *param)
 {
-	struct net_device *route_lookup_dev;
 	struct rtable *rt, *rt2;
 	struct flowi4 fl4_dec;
 	int err;
@@ -502,10 +487,9 @@ static struct rtable *icmp_route_lookup(struct net *net,
 	fl4->flowi4_proto = IPPROTO_ICMP;
 	fl4->fl4_icmp_type = type;
 	fl4->fl4_icmp_code = code;
-	route_lookup_dev = icmp_get_route_lookup_dev(skb_in);
-	fl4->flowi4_oif = l3mdev_master_ifindex(route_lookup_dev);
+	fl4->flowi4_oif = l3mdev_master_ifindex(skb_dst(skb_in)->dev);
 
-	security_skb_classify_flow(skb_in, flowi4_to_flowi_common(fl4));
+	security_skb_classify_flow(skb_in, flowi4_to_flowi(fl4));
 	rt = ip_route_output_key_hash(net, fl4, skb_in);
 	if (IS_ERR(rt))
 		return rt;
@@ -527,7 +511,7 @@ static struct rtable *icmp_route_lookup(struct net *net,
 	if (err)
 		goto relookup_failed;
 
-	if (inet_addr_type_dev_table(net, route_lookup_dev,
+	if (inet_addr_type_dev_table(net, skb_dst(skb_in)->dev,
 				     fl4_dec.saddr) == RTN_LOCAL) {
 		rt2 = __ip_route_output_key(net, &fl4_dec);
 		if (IS_ERR(rt2))
@@ -707,16 +691,15 @@ void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
 			dev = dev_get_by_index_rcu(net, inet_iif(skb_in));
 
 		if (dev)
-			saddr = inet_select_addr(dev, iph->saddr,
-						 RT_SCOPE_LINK);
+			saddr = inet_select_addr(dev, 0, RT_SCOPE_LINK);
 		else
 			saddr = 0;
 		rcu_read_unlock();
 	}
 
-	tos = icmp_pointers[type].error ? (RT_TOS(iph->tos) |
+	tos = icmp_pointers[type].error ? ((iph->tos & IPTOS_TOS_MASK) |
 					   IPTOS_PREC_INTERNETCONTROL) :
-					   iph->tos;
+					  iph->tos;
 	mark = IP4_REPLY_MARK(net, skb_in->mark);
 
 	if (__ip_options_echo(net, &icmp_param.replyopts.opt.opt, skb_in, opt))
@@ -734,10 +717,10 @@ void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
 	icmp_param.skb	  = skb_in;
 	icmp_param.offset = skb_network_offset(skb_in);
 	inet_sk(sk)->tos = tos;
+	sk->sk_mark = mark;
 	ipcm_init(&ipc);
 	ipc.addr = iph->saddr;
 	ipc.opt = &icmp_param.replyopts.opt;
-	ipc.sockc.mark = mark;
 
 	rt = icmp_route_lookup(net, &fl4, skb_in, iph, saddr, tos, mark,
 			       type, code, &icmp_param);
@@ -760,13 +743,6 @@ void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
 	if (icmp_param.data_len > room)
 		icmp_param.data_len = room;
 	icmp_param.head_len = sizeof(struct icmphdr);
-
-	/* if we don't have a source address at this point, fall back to the
-	 * dummy address instead of sending out a packet with a source address
-	 * of 0.0.0.0
-	 */
-	if (!fl4.saddr)
-		fl4.saddr = htonl(INADDR_DUMMY);
 
 	icmp_push_reply(&icmp_param, &fl4, &ipc, &rt);
 ende:
@@ -816,7 +792,7 @@ EXPORT_SYMBOL(icmp_ndo_send);
 
 static void icmp_socket_deliver(struct sk_buff *skb, u32 info)
 {
-	const struct iphdr *iph = (const struct iphdr *)skb->data;
+	const struct iphdr *iph = (const struct iphdr *) skb->data;
 	const struct net_protocol *ipprot;
 	int protocol = iph->protocol;
 
@@ -885,9 +861,9 @@ static bool icmp_unreach(struct sk_buff *skb)
 		case ICMP_FRAG_NEEDED:
 			/* for documentation of the ip_no_pmtu_disc
 			 * values please see
-			 * Documentation/networking/ip-sysctl.rst
+			 * Documentation/networking/ip-sysctl.txt
 			 */
-			switch (READ_ONCE(net->ipv4.sysctl_ip_no_pmtu_disc)) {
+			switch (net->ipv4.sysctl_ip_no_pmtu_disc) {
 			default:
 				net_dbg_ratelimited("%pI4: fragmentation needed and DF set\n",
 						    &iph->daddr);
@@ -897,7 +873,7 @@ static bool icmp_unreach(struct sk_buff *skb)
 			case 3:
 				if (!icmp_tag_validation(iph->protocol))
 					goto out;
-				fallthrough;
+				/* fall through */
 			case 0:
 				info = ntohs(icmph->un.frag.mtu);
 			}
@@ -975,7 +951,7 @@ static bool icmp_redirect(struct sk_buff *skb)
 		return false;
 	}
 
-	icmp_socket_deliver(skb, ntohl(icmp_hdr(skb)->un.gateway));
+	icmp_socket_deliver(skb, icmp_hdr(skb)->un.gateway);
 	return true;
 }
 
@@ -1148,66 +1124,7 @@ error:
 	goto drop;
 }
 
-static bool ip_icmp_error_rfc4884_validate(const struct sk_buff *skb, int off)
-{
-	struct icmp_extobj_hdr *objh, _objh;
-	struct icmp_ext_hdr *exth, _exth;
-	u16 olen;
-
-	exth = skb_header_pointer(skb, off, sizeof(_exth), &_exth);
-	if (!exth)
-		return false;
-	if (exth->version != 2)
-		return true;
-
-	if (exth->checksum &&
-	    csum_fold(skb_checksum(skb, off, skb->len - off, 0)))
-		return false;
-
-	off += sizeof(_exth);
-	while (off < skb->len) {
-		objh = skb_header_pointer(skb, off, sizeof(_objh), &_objh);
-		if (!objh)
-			return false;
-
-		olen = ntohs(objh->length);
-		if (olen < sizeof(_objh))
-			return false;
-
-		off += olen;
-		if (off > skb->len)
-			return false;
-	}
-
-	return true;
-}
-
-void ip_icmp_error_rfc4884(const struct sk_buff *skb,
-			   struct sock_ee_data_rfc4884 *out,
-			   int thlen, int off)
-{
-	int hlen;
-
-	/* original datagram headers: end of icmph to payload (skb->data) */
-	hlen = -skb_transport_offset(skb) - thlen;
-
-	/* per rfc 4884: minimal datagram length of 128 bytes */
-	if (off < 128 || off < hlen)
-		return;
-
-	/* kernel has stripped headers: return payload offset in bytes */
-	off -= hlen;
-	if (off + sizeof(struct icmp_ext_hdr) > skb->len)
-		return;
-
-	out->len = off;
-
-	if (!ip_icmp_error_rfc4884_validate(skb, off))
-		out->flags |= SO_EE_RFC4884_FLAG_INVALID;
-}
-EXPORT_SYMBOL_GPL(ip_icmp_error_rfc4884);
-
-int icmp_err(struct sk_buff *skb, u32 info)
+void icmp_err(struct sk_buff *skb, u32 info)
 {
 	struct iphdr *iph = (struct iphdr *)skb->data;
 	int offset = iph->ihl<<2;
@@ -1222,15 +1139,13 @@ int icmp_err(struct sk_buff *skb, u32 info)
 	 */
 	if (icmph->type != ICMP_ECHOREPLY) {
 		ping_err(skb, offset, info);
-		return 0;
+		return;
 	}
 
 	if (type == ICMP_DEST_UNREACH && code == ICMP_FRAG_NEEDED)
-		ipv4_update_pmtu(skb, net, info, 0, IPPROTO_ICMP);
+		ipv4_update_pmtu(skb, net, info, 0, 0, IPPROTO_ICMP, 0);
 	else if (type == ICMP_REDIRECT)
-		ipv4_redirect(skb, net, 0, IPPROTO_ICMP);
-
-	return 0;
+		ipv4_redirect(skb, net, 0, 0, IPPROTO_ICMP, 0);
 }
 
 /*
@@ -1373,7 +1288,9 @@ static int __net_init icmp_sk_init(struct net *net)
 	return 0;
 
 fail:
-	icmp_sk_exit(net);
+	for_each_possible_cpu(i)
+		inet_ctl_sock_destroy(*per_cpu_ptr(net->ipv4.icmp_sk, i));
+	free_percpu(net->ipv4.icmp_sk);
 	return err;
 }
 

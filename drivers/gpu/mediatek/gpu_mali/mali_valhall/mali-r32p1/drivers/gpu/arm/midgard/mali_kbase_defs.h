@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
  * (C) COPYRIGHT 2011-2021 ARM Limited. All rights reserved.
@@ -111,12 +111,12 @@
 /**
  * Maximum size in bytes of a MMU lock region, as a logarithm
  */
-#define KBASE_LOCK_REGION_MAX_SIZE_LOG2 (64)
+#define KBASE_LOCK_REGION_MAX_SIZE_LOG2 (48) /*  256 TB */
 
 /**
  * Minimum size in bytes of a MMU lock region, as a logarithm
  */
-#define KBASE_LOCK_REGION_MIN_SIZE_LOG2 (15)
+#define KBASE_LOCK_REGION_MIN_SIZE_LOG2 (15) /* 32 kB */
 
 /**
  * Maximum number of GPU memory region zones
@@ -267,6 +267,21 @@ struct kbase_mmu_table {
 	phys_addr_t pgd;
 	u8 group_id;
 	struct kbase_context *kctx;
+};
+
+/**
+ * struct kbase_reg_zone - Information about GPU memory region zones
+ * @base_pfn: Page Frame Number in GPU virtual address space for the start of
+ *            the Zone
+ * @va_size_pages: Size of the Zone in pages
+ *
+ * Track information about a zone KBASE_REG_ZONE() and related macros.
+ * In future, this could also store the &rb_root that are currently in
+ * &kbase_context and &kbase_csf_device.
+ */
+struct kbase_reg_zone {
+	u64 base_pfn;
+	u64 va_size_pages;
 };
 
 #if MALI_USE_CSF
@@ -529,8 +544,11 @@ struct kbase_devfreq_opp {
  * @entry_set_ate:    program the pte to be a valid address translation entry to
  *                    encode the physical address of the actual page being mapped.
  * @entry_set_pte:    program the pte to be a valid entry to encode the physical
- *                    address of the next lower level page table.
- * @entry_invalidate: clear out or invalidate the pte.
+ *                    address of the next lower level page table and also update
+ *                    the number of valid entries.
+ * @entries_invalidate: clear out or invalidate a range of ptes.
+ * @get_num_valid_entries: returns the number of valid entries for a specific pgd.
+ * @set_num_valid_entries: sets the number of valid entries for a specific pgd
  * @flags:            bitmask of MMU mode flags. Refer to KBASE_MMU_MODE_ constants.
  */
 struct kbase_mmu_mode {
@@ -545,8 +563,11 @@ struct kbase_mmu_mode {
 	int (*pte_is_valid)(u64 pte, int level);
 	void (*entry_set_ate)(u64 *entry, struct tagged_addr phy,
 			unsigned long flags, int level);
-	void (*entry_set_pte)(u64 *entry, phys_addr_t phy);
-	void (*entry_invalidate)(u64 *entry);
+	void (*entry_set_pte)(u64 *pgd, u64 vpfn, phys_addr_t phy);
+	void (*entries_invalidate)(u64 *entry, u32 count);
+	unsigned int (*get_num_valid_entries)(u64 *pgd);
+	void (*set_num_valid_entries)(u64 *pgd,
+				      unsigned int num_of_valid_entries);
 	unsigned long flags;
 };
 
@@ -554,7 +575,7 @@ struct kbase_mmu_mode const *kbase_mmu_mode_get_aarch64(void);
 
 #define DEVNAME_SIZE	16
 
-#if defined(CONFIG_MALI_MTK_GPU_BM_2)
+#if defined(MTK_GPU_BM_2)
 struct job_status_qos {
         phys_addr_t phyaddr;
         size_t size;
@@ -1189,7 +1210,7 @@ struct kbase_device {
 	struct ion_client *client;
 #endif
 
-#if defined(CONFIG_MALI_MTK_GPU_BM_2)
+#if defined(MTK_GPU_BM_2)
 	struct job_status_qos job_status_addr;
 	struct v1_data* v1;
 #endif
@@ -1419,21 +1440,6 @@ struct kbase_sub_alloc {
 };
 
 /**
- * struct kbase_reg_zone - Information about GPU memory region zones
- * @base_pfn: Page Frame Number in GPU virtual address space for the start of
- *            the Zone
- * @va_size_pages: Size of the Zone in pages
- *
- * Track information about a zone KBASE_REG_ZONE() and related macros.
- * In future, this could also store the &rb_root that are currently in
- * &kbase_context
- */
-struct kbase_reg_zone {
-	u64 base_pfn;
-	u64 va_size_pages;
-};
-
-/**
  * struct kbase_context - Kernel base context
  *
  * @filp:                 Pointer to the struct file corresponding to device file
@@ -1559,11 +1565,13 @@ struct kbase_reg_zone {
  *                        is scheduled in and an atom is pulled from the context's per
  *                        slot runnable tree in JM GPU or GPU command queue
  *                        group is programmed on CSG slot in CSF GPU.
- * @mm_update_lock:       lock used for handling of special tracking page.
  * @process_mm:           Pointer to the memory descriptor of the process which
  *                        created the context. Used for accounting the physical
  *                        pages used for GPU allocations, done for the context,
- *                        to the memory consumed by the process.
+ *                        to the memory consumed by the process. A reference is taken
+ *                        on this descriptor for the Userspace created contexts so that
+ *                        Kbase can safely access it to update the memory usage counters.
+ *                        The reference is dropped on context termination.
  * @gpu_va_end:           End address of the GPU va space (in 4KB page units)
  * @jit_va:               Indicates if a JIT_VA zone has been created.
  * @mem_profile_data:     Buffer containing the profiling information provided by
@@ -1785,8 +1793,7 @@ struct kbase_context {
 
 	atomic_t refcount;
 
-	spinlock_t         mm_update_lock;
-	struct mm_struct __rcu *process_mm;
+	struct mm_struct *process_mm;
 	u64 gpu_va_end;
 	bool jit_va;
 
@@ -1848,6 +1855,7 @@ struct kbase_context {
 #if !MALI_USE_CSF
 	void *platform_data;
 #endif
+	struct task_struct *task;
 };
 
 #ifdef CONFIG_MALI_CINSTR_GWT
@@ -1876,17 +1884,15 @@ struct kbasep_gwt_list_element {
  *                                 to a @kbase_context.
  * @ext_res_node:                  List head for adding the metadata to a
  *                                 @kbase_context.
- * @alloc:                         The physical memory allocation structure
- *                                 which is mapped.
- * @gpu_addr:                      The GPU virtual address the resource is
- *                                 mapped to.
+ * @reg:                           External resource information, containing
+ *                                 the corresponding VA region
  * @ref:                           Reference count.
  *
  * External resources can be mapped into multiple contexts as well as the same
  * context multiple times.
- * As kbase_va_region itself isn't refcounted we can't attach our extra
- * information to it as it could be removed under our feet leaving external
- * resources pinned.
+ * As kbase_va_region is refcounted, we guarantee that it will be available
+ * for the duration of the external resource, meaning it is sufficient to use
+ * it to rederive any additional data, like the GPU address.
  * This metadata structure binds a single external resource to a single
  * context, ensuring that per context mapping is tracked separately so it can
  * be overridden when needed and abuses by the application (freeing the resource
@@ -1894,8 +1900,7 @@ struct kbasep_gwt_list_element {
  */
 struct kbase_ctx_ext_res_meta {
 	struct list_head ext_res_node;
-	struct kbase_mem_phy_alloc *alloc;
-	u64 gpu_addr;
+	struct kbase_va_region *reg;
 	u32 ref;
 };
 

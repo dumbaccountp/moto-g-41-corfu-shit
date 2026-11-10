@@ -3,6 +3,7 @@
  * Copyright (c) 2019 MediaTek Inc.
  */
 
+
 #ifndef __IMX519_EEPROM_H__
 #define __IMX519_EEPROM_H__
 

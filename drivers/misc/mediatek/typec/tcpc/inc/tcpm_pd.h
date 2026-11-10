@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef TCPM_PD_H_
@@ -23,7 +23,7 @@
 
 /******************* PD30 *******************/
 
-#if CONFIG_USB_PD_REV30_CHUNKING_BY_PE
+#ifdef CONFIG_USB_PD_REV30_CHUNKING_BY_PE
 #define MAX_EXTENDED_MSG_LEN	260
 #else
 #define MAX_EXTENDED_MSG_LEN	26
@@ -289,7 +289,7 @@ struct pd_country_info {
 struct pd_status {
 	uint8_t internal_temp;	/* 0 means no support */
 	uint8_t present_input;	/* bit filed */
-	uint8_t present_battery_input; /* bit filed */
+	uint8_t present_battery_input;
 	uint8_t event_flags;	/* bit filed */
 	uint8_t temp_status;	/* bit filed */
 	uint8_t power_status;	/* bit filed */

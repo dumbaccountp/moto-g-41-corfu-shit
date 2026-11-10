@@ -8,12 +8,11 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include "musb_qmu.h"
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#ifdef CONFIG_MTK_AEE_FEATURE
 #include <mt-plat/aee.h>
 #endif
-#include <linux/iopoll.h>
 
-#if IS_ENABLED(CONFIG_MTK_UAC_POWER_SAVING)
+#ifdef CONFIG_MTK_UAC_POWER_SAVING
 #define USB_AUDIO_DATA_OUT 0
 static struct TGPD *Tx_gpd_head_dram;
 static u64 Tx_gpd_Offset_dram;
@@ -36,22 +35,6 @@ static u32 Tx_gpd_max_count[MAX_QMU_EP + 1];
 static bool Tx_enable[MAX_QMU_EP + 1];
 static bool Rx_enable[MAX_QMU_EP + 1];
 
-int isoc_ep_end_idx = 3;
-EXPORT_SYMBOL(isoc_ep_end_idx);
-
-int isoc_ep_gpd_count = 260;
-EXPORT_SYMBOL(isoc_ep_gpd_count);
-
-int mtk_qmu_dbg_level = LOG_WARN;
-EXPORT_SYMBOL(mtk_qmu_dbg_level);
-
-int mtk_qmu_max_gpd_num;
-EXPORT_SYMBOL(mtk_qmu_max_gpd_num);
-
-module_param(mtk_qmu_dbg_level, int, 0644);
-module_param(mtk_qmu_max_gpd_num, int, 0644);
-module_param(isoc_ep_end_idx, int, 0644);
-module_param(isoc_ep_gpd_count, int, 0644);
 
 u32 qmu_used_gpd_count(u8 isRx, u32 num)
 {
@@ -279,7 +262,7 @@ int qmu_init_gpd_pool(struct device *dev)
 				Tx_gpd_end[i], TXQ, i));
 	}
 
-#if IS_ENABLED(CONFIG_MTK_UAC_POWER_SAVING)
+#ifdef CONFIG_MTK_UAC_POWER_SAVING
 	Tx_gpd_head_dram = Tx_gpd_head[ISOC_EP_START_IDX];
 	Tx_gpd_Offset_dram = Tx_gpd_Offset[ISOC_EP_START_IDX];
 #endif
@@ -290,7 +273,7 @@ int qmu_init_gpd_pool(struct device *dev)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_MTK_UAC_POWER_SAVING)
+#ifdef CONFIG_MTK_UAC_POWER_SAVING
 void *mtk_usb_alloc_sram(int id, size_t size, dma_addr_t *dma)
 {
 	void *sram_virt_addr = NULL;
@@ -394,7 +377,7 @@ void gpd_switch_to_dram(struct device *dev)
 				(void *)(uintptr_t)Tx_gpd_Offset[index],
 				(void *)(uintptr_t)Tx_gpd_Offset_dram);
 		QMU_ERR("%s\n", string);
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#ifdef CONFIG_MTK_AEE_FEATURE
 		aee_kernel_warning(string, string);
 #endif
 	}
@@ -464,7 +447,7 @@ static void prepare_rx_gpd(dma_addr_t pBuf, u32 data_len, u8 ep_num, u8 isioc)
 
 	TGPD_SET_DATA(gpd, (uintptr_t)pBuf);
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	TGPD_SET_DATA_RXHI(gpd, (u8)(pBuf >> 32));
 #endif
 
@@ -492,7 +475,7 @@ static void prepare_rx_gpd(dma_addr_t pBuf, u32 data_len, u8 ep_num, u8 isioc)
 	TGPD_SET_NEXT(gpd, (uintptr_t)gpd_virt_to_phys(Rx_gpd_end[ep_num]
 		, RXQ, ep_num));
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	TGPD_SET_NEXT_RXHI(gpd,
 		(u8)(gpd_virt_to_phys(Rx_gpd_end[ep_num], RXQ, ep_num) >> 32));
 #endif
@@ -514,7 +497,7 @@ static void prepare_tx_gpd(dma_addr_t pBuf,
 
 	TGPD_SET_DATA(gpd, (uintptr_t)pBuf);
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	TGPD_SET_DATA_TXHI(gpd, (u8)(pBuf >> 32));
 #endif
 
@@ -523,7 +506,7 @@ static void prepare_tx_gpd(dma_addr_t pBuf,
 	TGPD_SET_BUF_LEN(gpd, data_len);
 	TGPD_SET_EXT_LEN(gpd, 0);
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_PURE_ZLP_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_PURE_ZLP_SUPPORT
 	if (zlp | (data_len == 0))
 #else
 	if (zlp)
@@ -553,7 +536,7 @@ static void prepare_tx_gpd(dma_addr_t pBuf,
 	TGPD_SET_NEXT(gpd,
 		(uintptr_t)gpd_virt_to_phys(Tx_gpd_end[ep_num], TXQ, ep_num));
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	TGPD_SET_NEXT_TXHI(gpd,
 		(u8)(gpd_virt_to_phys(Tx_gpd_end[ep_num], TXQ, ep_num) >> 32));
 #endif
@@ -609,7 +592,6 @@ bool mtk_is_qmu_enabled(u8 ep_num, u8 isRx)
 	}
 	return false;
 }
-EXPORT_SYMBOL(mtk_is_qmu_enabled);
 
 void mtk_qmu_enable(struct musb *musb, u8 ep_num, u8 isRx)
 {
@@ -749,7 +731,7 @@ void mtk_qmu_enable(struct musb *musb, u8 ep_num, u8 isRx)
 				QCR | DQMU_TQ_GDP_ZLP(ep_num));
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_PURE_ZLP_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_PURE_ZLP_SUPPORT
 		QCR = musb_readb(mbase, MUSB_GPZCR);
 		musb_writeb(mbase, MUSB_GPZCR, QCR | (1 << (ep_num-1)));
 #endif
@@ -782,15 +764,10 @@ void mtk_qmu_enable(struct musb *musb, u8 ep_num, u8 isRx)
 		MGC_WriteQMU32(base, MGC_O_QMU_TQCSR(ep_num), DQMU_QUE_START);
 	}
 }
-EXPORT_SYMBOL(mtk_qmu_enable);
 
 void mtk_qmu_stop(u8 ep_num, u8 isRx)
 {
 	void __iomem *base = qmu_base;
-	int ret;
-	u32 value = 0;
-
-	DBG(4, "ep_num=%d, isRx=%d\n", ep_num, isRx);
 
 	if (!isRx) {
 		if (MGC_ReadQMU16(base,
@@ -799,34 +776,21 @@ void mtk_qmu_stop(u8 ep_num, u8 isRx)
 				MGC_O_QMU_TQCSR(ep_num),
 				DQMU_QUE_STOP);
 			QMU_INFO("Stop TQ %d\n", ep_num);
-
-			ret = readl_poll_timeout_atomic(base+
-				MGC_O_QMU_TQCSR(ep_num), value,
-				!(value & DQMU_QUE_ACTIVE), 1, 1000);
-			if (ret)
-				QMU_ERR("Stop TQ %d failed\n", ep_num);
 		} else {
 			QMU_INFO("TQ %d already inactive\n", ep_num);
 		}
 	} else {
-		if (MGC_ReadQMU16(base,
-				MGC_O_QMU_RQCSR(ep_num)) & DQMU_QUE_ACTIVE) {
-			MGC_WriteQMU32(base,
-				MGC_O_QMU_RQCSR(ep_num),
-				DQMU_QUE_STOP);
+		if (MGC_ReadQMU16(base
+				, MGC_O_QMU_RQCSR(ep_num)) & DQMU_QUE_ACTIVE) {
+			MGC_WriteQMU32(base
+				, MGC_O_QMU_RQCSR(ep_num)
+				, DQMU_QUE_STOP);
 			QMU_INFO("Stop RQ %d\n", ep_num);
-
-			ret = readl_poll_timeout_atomic(base+
-				MGC_O_QMU_RQCSR(ep_num), value,
-				!(value & DQMU_QUE_ACTIVE), 1, 1000);
-			if (ret)
-				QMU_ERR("Stop RQ %d failed\n", ep_num);
 		} else {
 			QMU_INFO("RQ %d already inactive\n", ep_num);
 		}
 	}
 }
-EXPORT_SYMBOL(mtk_qmu_stop);
 
 static void mtk_qmu_disable(u8 ep_num, u8 isRx)
 {
@@ -943,13 +907,6 @@ void qmu_done_rx(struct musb *musb, u8 ep_num)
 		return;
 	}
 	request = &req->request;
-	if (!request) {
-		QMU_ERR(
-			"[RXD]%s Cannot get next usb_request of %d",
-			"but we should have next request and QMU has done.\n"
-			, __func__, ep_num);
-		return;
-	}
 
 	/*Transfer PHY addr got from QMU register to VIR addr */
 	gpd_current = (struct TGPD *)
@@ -1259,7 +1216,6 @@ void mtk_disable_q(struct musb *musb, u8 ep_num, u8 isRx)
 		flush_ep_csr(musb, ep_num, isRx);
 	}
 }
-EXPORT_SYMBOL(mtk_disable_q);
 
 void h_qmu_done_rx(struct musb *musb, u8 ep_num)
 {
@@ -1648,7 +1604,7 @@ finished:
 
 		sprintf(string, "USB20_HOST, RXQ<%d> ERR, CSR:%x", epnum, val);
 		QMU_ERR("%s\n", string);
-#if IS_ENABLED(CONFIG_MEDIATEK_SOLUTION)
+#ifdef CONFIG_MEDIATEK_SOLUTION
 		{
 			u16 skip_val;
 
@@ -1668,7 +1624,7 @@ finished:
 				break;
 			}
 
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#ifdef CONFIG_MTK_AEE_FEATURE
 			if (val && !skip_val)
 				aee_kernel_warning(string, string);
 #endif
@@ -1774,7 +1730,7 @@ finished:
 
 		sprintf(string, "USB20_HOST, TXQ<%d> ERR, CSR:%x", epnum, val);
 		QMU_ERR("%s\n", string);
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#ifdef CONFIG_MTK_AEE_FEATURE
 		aee_kernel_warning(string, string);
 #endif
 	}
@@ -1882,8 +1838,9 @@ void mtk_err_recover(struct musb *musb, u8 ep_num, u8 isRx, bool is_len_err)
 					, request->request.zero);
 				request->request.actual =
 					request->request.length;
-
-#ifndef CONFIG_MTK_MUSB_QMU_PURE_ZLP_SUPPORT
+#ifdef CONFIG_MTK_MUSB_QMU_PURE_ZLP_SUPPORT
+				if (request->request.length >= 0) {
+#else
 				if (request->request.length > 0) {
 #endif
 					mtk_qmu_insert_task(request->epnum,
@@ -1901,13 +1858,12 @@ void mtk_err_recover(struct musb *musb, u8 ep_num, u8 isRx, bool is_len_err)
 					musb_tx_zlp_qmu(musb, request->epnum);
 					musb_g_giveback(musb_ep
 						, &(request->request), 0);
-
+#endif
 				} else {
 					QMU_ERR(
 						"ERR, TX, request->request.length(%d)\n"
 						, request->request.length);
 				}
-#endif
 			} else {
 				QMU_ERR("[RX] gpd=%p, epnum=%d, len=%d\n",
 					Rx_gpd_end[ep_num], ep_num,

@@ -437,9 +437,8 @@ struct usb_function_instance *alloc_inst_rawbulk(int transfer_id)
 
 	return &fi_rawbulk->func_inst;
 }
-EXPORT_SYMBOL(alloc_inst_rawbulk);
 
-struct usb_function *rawbulk_alloc(struct usb_function_instance *fi,
+static struct usb_function *rawbulk_alloc(struct usb_function_instance *fi,
 							int transfer_id)
 {
 	struct rawbulk_function *fn = rawbulk_lookup_function(transfer_id);
@@ -464,5 +463,68 @@ struct usb_function *rawbulk_alloc(struct usb_function_instance *fi,
 
 	return &fn->function;
 }
-EXPORT_SYMBOL(rawbulk_alloc);
 
+static struct usb_function_instance *via_modem_alloc_inst(void)
+{
+	return alloc_inst_rawbulk(RAWBULK_TID_MODEM);
+}
+
+static struct usb_function *via_modem_alloc(struct usb_function_instance *fi)
+{
+	return rawbulk_alloc(fi, RAWBULK_TID_MODEM);
+}
+
+DECLARE_USB_FUNCTION_INIT(via_modem, via_modem_alloc_inst, via_modem_alloc);
+MODULE_LICENSE("GPL");
+
+static struct usb_function_instance *via_ets_alloc_inst(void)
+{
+	return alloc_inst_rawbulk(RAWBULK_TID_ETS);
+}
+
+static struct usb_function *via_ets_alloc(struct usb_function_instance *fi)
+{
+	return rawbulk_alloc(fi, RAWBULK_TID_ETS);
+}
+
+DECLARE_USB_FUNCTION_INIT(via_ets, via_ets_alloc_inst, via_ets_alloc);
+MODULE_LICENSE("GPL");
+
+static struct usb_function_instance *via_atc_alloc_inst(void)
+{
+	return alloc_inst_rawbulk(RAWBULK_TID_AT);
+}
+
+static struct usb_function *via_atc_alloc(struct usb_function_instance *fi)
+{
+	return rawbulk_alloc(fi, RAWBULK_TID_AT);
+}
+
+DECLARE_USB_FUNCTION_INIT(via_atc, via_atc_alloc_inst, via_atc_alloc);
+MODULE_LICENSE("GPL");
+
+static struct usb_function_instance *via_pcv_alloc_inst(void)
+{
+	return alloc_inst_rawbulk(RAWBULK_TID_PCV);
+}
+
+static struct usb_function *via_pcv_alloc(struct usb_function_instance *fi)
+{
+	return rawbulk_alloc(fi, RAWBULK_TID_PCV);
+}
+
+DECLARE_USB_FUNCTION_INIT(via_pcv, via_pcv_alloc_inst, via_pcv_alloc);
+MODULE_LICENSE("GPL");
+
+static struct usb_function_instance *via_gps_alloc_inst(void)
+{
+	return alloc_inst_rawbulk(RAWBULK_TID_GPS);
+}
+
+static struct usb_function *via_gps_alloc(struct usb_function_instance *fi)
+{
+	return rawbulk_alloc(fi, RAWBULK_TID_GPS);
+}
+
+DECLARE_USB_FUNCTION_INIT(via_gps, via_gps_alloc_inst, via_gps_alloc);
+MODULE_LICENSE("GPL");

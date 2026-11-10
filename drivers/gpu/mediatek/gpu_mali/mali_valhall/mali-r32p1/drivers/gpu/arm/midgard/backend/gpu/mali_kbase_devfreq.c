@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
  * (C) COPYRIGHT 2014-2021 ARM Limited. All rights reserved.
@@ -32,12 +32,6 @@
 
 #include <linux/version.h>
 #include <linux/pm_opp.h>
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ)
-#include <platform/mtk_platform_common/mtk_gpu_devfreq_governor.h>
-#endif
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_THERMAL)
-#include <platform/mtk_platform_common/mtk_gpu_devfreq_thermal.h>
-#endif
 
 /**
  * get_voltage() - Get the voltage value corresponding to the nominal frequency
@@ -633,7 +627,6 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 {
 	struct devfreq_dev_profile *dp;
 	int err;
-#if !IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ)
 	unsigned int i;
 
 	if (kbdev->nr_clocks == 0) {
@@ -649,7 +642,6 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 			kbdev->current_freqs[i] = 0;
 	}
 	kbdev->current_nominal_freq = kbdev->current_freqs[0];
-#endif
 
 	dp = &kbdev->devfreq_profile;
 
@@ -675,16 +667,8 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		return err;
 	}
 
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ)
-	mtk_common_devfreq_update_profile(dp);
-#endif
-
 	kbdev->devfreq = devfreq_add_device(kbdev->dev, dp,
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ)
-				MTK_GPU_DEVFREQ_GOV_DUMMY, NULL);
-#else
 				"simple_ondemand", NULL);
-#endif
 	if (IS_ERR(kbdev->devfreq)) {
 		err = PTR_ERR(kbdev->devfreq);
 		kbdev->devfreq = NULL;
@@ -718,22 +702,16 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	}
 
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-#if !IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_THERMAL)
 	err = kbase_ipa_init(kbdev);
 	if (err) {
 		dev_err(kbdev->dev, "IPA initialization failed\n");
 		goto ipa_init_failed;
 	}
-#endif
 
 	kbdev->devfreq_cooling = of_devfreq_cooling_register_power(
 			kbdev->dev->of_node,
 			kbdev->devfreq,
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_THERMAL)
-			&mtk_common_cooling_power_ops);
-#else
 			&kbase_ipa_power_model_ops);
-#endif
 	if (IS_ERR_OR_NULL(kbdev->devfreq_cooling)) {
 		err = PTR_ERR(kbdev->devfreq_cooling);
 		dev_err(kbdev->dev,
@@ -748,9 +726,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 cooling_reg_failed:
 	kbase_ipa_term(kbdev);
-#if !IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_THERMAL)
 ipa_init_failed:
-#endif
 	devfreq_unregister_opp_notifier(kbdev->dev, kbdev->devfreq);
 #endif /* CONFIG_DEVFREQ_THERMAL */
 
@@ -777,9 +753,7 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 	if (kbdev->devfreq_cooling)
 		devfreq_cooling_unregister(kbdev->devfreq_cooling);
 
-#if !IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_THERMAL)
 	kbase_ipa_term(kbdev);
-#endif
 #endif
 
 	devfreq_unregister_opp_notifier(kbdev->dev, kbdev->devfreq);

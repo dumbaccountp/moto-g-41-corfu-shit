@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/mutex.h>
@@ -92,9 +91,10 @@ static int lt_update_mask_loading(struct LT_USER_DATA *lt_data)
 	for_each_possible_cpu(cpu) {
 		if (cpumask_test_cpu(cpu, lt_data->cpu_mask)) {
 			cur_idle_time_i = get_cpu_idle_time(cpu, &cur_wall_time_i, 1);
-
-			cpu_idle_time += cur_idle_time_i - lt_data->prev_idle_time[cpu];
-			cpu_wall_time += cur_wall_time_i - lt_data->prev_wall_time[cpu];
+			if (!cpu_isolated(cpu)) {
+				cpu_idle_time += cur_idle_time_i - lt_data->prev_idle_time[cpu];
+				cpu_wall_time += cur_wall_time_i - lt_data->prev_wall_time[cpu];
+			}
 		}
 	}
 
@@ -115,10 +115,10 @@ static int lt_update_loading(struct LT_USER_DATA *lt_data)
 	lt_lockprove(__func__);
 	for_each_possible_cpu(cpu) {
 		cur_idle_time_i = get_cpu_idle_time(cpu, &cur_wall_time_i, 1);
-
-		cpu_idle_time += cur_idle_time_i - lt_data->prev_idle_time[cpu];
-		cpu_wall_time += cur_wall_time_i - lt_data->prev_wall_time[cpu];
-
+		if (!cpu_isolated(cpu)) {
+			cpu_idle_time += cur_idle_time_i - lt_data->prev_idle_time[cpu];
+			cpu_wall_time += cur_wall_time_i - lt_data->prev_wall_time[cpu];
+		}
 		lt_data->prev_idle_time[cpu] = cur_idle_time_i;
 		lt_data->prev_wall_time[cpu] = cur_wall_time_i;
 	}
@@ -275,7 +275,6 @@ reg_loading_tracking_out:
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(reg_loading_tracking_sp);
 
 
 int unreg_loading_tracking_sp(void (*fn)(int loading, int mask_loading), const char *caller)
@@ -308,7 +307,6 @@ unreg_loading_tracking_out:
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(unreg_loading_tracking_sp);
 
 static int __init load_track_init(void)
 {
@@ -331,7 +329,3 @@ static void __exit load_track_exit(void)
 
 module_init(load_track_init);
 module_exit(load_track_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("MediaTek LOAD_TRACK");
-MODULE_AUTHOR("MediaTek Inc.");

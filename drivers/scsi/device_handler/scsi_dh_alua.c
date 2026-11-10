@@ -1,9 +1,23 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Generic SCSI-3 ALUA SCSI Device Handler
  *
  * Copyright (C) 2007-2010 Hannes Reinecke, SUSE Linux Products GmbH.
  * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
  */
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -508,8 +522,7 @@ static int alua_rtpg(struct scsi_device *sdev, struct alua_port_group *pg)
 	struct alua_port_group *tmp_pg;
 	int len, k, off, bufflen = ALUA_RTPG_SIZE;
 	unsigned char *desc, *buff;
-	unsigned err;
-	int retval;
+	unsigned err, retval;
 	unsigned int tpg_desc_tbl_off;
 	unsigned char orig_transition_tmo;
 	unsigned long flags;
@@ -549,12 +562,12 @@ static int alua_rtpg(struct scsi_device *sdev, struct alua_port_group *pg)
 			kfree(buff);
 			return SCSI_DH_OK;
 		}
-		if (retval < 0 || !scsi_sense_valid(&sense_hdr)) {
+		if (!scsi_sense_valid(&sense_hdr)) {
 			sdev_printk(KERN_INFO, sdev,
 				    "%s: rtpg failed, result %d\n",
 				    ALUA_DH_NAME, retval);
 			kfree(buff);
-			if (retval < 0)
+			if (driver_byte(retval) == DRIVER_ERROR)
 				return SCSI_DH_DEV_TEMP_BUSY;
 			return SCSI_DH_IO;
 		}
@@ -776,11 +789,11 @@ static unsigned alua_stpg(struct scsi_device *sdev, struct alua_port_group *pg)
 	retval = submit_stpg(sdev, pg->group_id, &sense_hdr);
 
 	if (retval) {
-		if (retval < 0 || !scsi_sense_valid(&sense_hdr)) {
+		if (!scsi_sense_valid(&sense_hdr)) {
 			sdev_printk(KERN_INFO, sdev,
 				    "%s: stpg failed, result %d",
 				    ALUA_DH_NAME, retval);
-			if (retval < 0)
+			if (driver_byte(retval) == DRIVER_ERROR)
 				return SCSI_DH_DEV_TEMP_BUSY;
 		} else {
 			sdev_printk(KERN_INFO, sdev, "%s: stpg failed\n",
@@ -1076,29 +1089,28 @@ static void alua_check(struct scsi_device *sdev, bool force)
  * Fail I/O to all paths not in state
  * active/optimized or active/non-optimized.
  */
-static blk_status_t alua_prep_fn(struct scsi_device *sdev, struct request *req)
+static int alua_prep_fn(struct scsi_device *sdev, struct request *req)
 {
 	struct alua_dh_data *h = sdev->handler_data;
 	struct alua_port_group *pg;
 	unsigned char state = SCSI_ACCESS_STATE_OPTIMAL;
+	int ret = BLKPREP_OK;
 
 	rcu_read_lock();
 	pg = rcu_dereference(h->pg);
 	if (pg)
 		state = pg->state;
 	rcu_read_unlock();
-
-	switch (state) {
-	case SCSI_ACCESS_STATE_OPTIMAL:
-	case SCSI_ACCESS_STATE_ACTIVE:
-	case SCSI_ACCESS_STATE_LBA:
-		return BLK_STS_OK;
-	case SCSI_ACCESS_STATE_TRANSITIONING:
-		return BLK_STS_RESOURCE;
-	default:
+	if (state == SCSI_ACCESS_STATE_TRANSITIONING)
+		ret = BLKPREP_DEFER;
+	else if (state != SCSI_ACCESS_STATE_OPTIMAL &&
+		 state != SCSI_ACCESS_STATE_ACTIVE &&
+		 state != SCSI_ACCESS_STATE_LBA) {
+		ret = BLKPREP_KILL;
 		req->rq_flags |= RQF_QUIET;
-		return BLK_STS_IOERR;
 	}
+	return ret;
+
 }
 
 static void alua_rescan(struct scsi_device *sdev)

@@ -3,7 +3,7 @@
  *
  * Module Name: dsmethod - Parser/Interpreter interface - control method parsing
  *
- * Copyright (C) 2000 - 2020, Intel Corp.
+ * Copyright (C) 2000 - 2018, Intel Corp.
  *
  *****************************************************************************/
 
@@ -517,7 +517,7 @@ acpi_ds_call_control_method(struct acpi_thread_state *thread,
 	info = ACPI_ALLOCATE_ZEROED(sizeof(struct acpi_evaluate_info));
 	if (!info) {
 		status = AE_NO_MEMORY;
-		goto pop_walk_state;
+		goto cleanup;
 	}
 
 	info->parameters = &this_walk_state->operands[0];
@@ -529,11 +529,8 @@ acpi_ds_call_control_method(struct acpi_thread_state *thread,
 
 	ACPI_FREE(info);
 	if (ACPI_FAILURE(status)) {
-		goto pop_walk_state;
+		goto cleanup;
 	}
-
-	next_walk_state->method_nesting_depth =
-	    this_walk_state->method_nesting_depth + 1;
 
 	/*
 	 * Delete the operands on the previous walkstate operand stack
@@ -552,17 +549,6 @@ acpi_ds_call_control_method(struct acpi_thread_state *thread,
 			  "**** Begin nested execution of [%4.4s] **** WalkState=%p\n",
 			  method_node->name.ascii, next_walk_state));
 
-	this_walk_state->method_pathname =
-	    acpi_ns_get_normalized_pathname(method_node, TRUE);
-	this_walk_state->method_is_nested = TRUE;
-
-	/* Optional object evaluation log */
-
-	ACPI_DEBUG_PRINT_RAW((ACPI_DB_EVALUATION,
-			      "%-26s:  %*s%s\n", "   Nested method call",
-			      next_walk_state->method_nesting_depth * 3, " ",
-			      &this_walk_state->method_pathname[1]));
-
 	/* Invoke an internal method if necessary */
 
 	if (obj_desc->method.info_flags & ACPI_METHOD_INTERNAL_ONLY) {
@@ -574,12 +560,6 @@ acpi_ds_call_control_method(struct acpi_thread_state *thread,
 	}
 
 	return_ACPI_STATUS(status);
-
-pop_walk_state:
-
-	/* On error, pop the walk state to be deleted from thread */
-
-	acpi_ds_pop_walk_state(thread);
 
 cleanup:
 

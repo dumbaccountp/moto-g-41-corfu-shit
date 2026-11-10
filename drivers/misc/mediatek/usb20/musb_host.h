@@ -45,7 +45,7 @@ struct musb_qh {
 	u16 frame;		/* for periodic schedule */
 	unsigned int iso_idx;	/* in urb->iso_frame_desc[] */
 	struct sg_mapping_iter sg_miter;	/* for highmem in PIO mode */
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	u8 is_use_qmu;
 #endif
 	bool db_used;
@@ -62,7 +62,6 @@ static inline struct musb_qh *first_qh(struct list_head *q)
 void musb_h_pre_disable(struct musb *musb);
 
 extern void musb_root_disconnect(struct musb *musb);
-extern int musb_port_suspend(struct musb *musb, bool do_suspend);
 
 struct usb_hcd;
 
@@ -87,7 +86,7 @@ static inline struct urb *next_urb(struct musb_qh *qh)
 }
 extern u16 musb_h_flush_rxfifo(struct musb_hw_ep *hw_ep, u16 csr);
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 extern void musb_ep_set_qh(struct musb_hw_ep *ep, int isRx, struct musb_qh *qh);
 extern struct musb_qh *musb_ep_get_qh(struct musb_hw_ep *ep, int isRx);
 extern void musb_advance_schedule(struct musb *musb, struct urb *urb,

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * inode.c
  *
@@ -311,4 +310,3 @@ efs_block_t efs_map_block(struct inode *inode, efs_block_t block) {
 }  
 
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(ANDROID_GKI_VFS_EXPORT_ONLY);

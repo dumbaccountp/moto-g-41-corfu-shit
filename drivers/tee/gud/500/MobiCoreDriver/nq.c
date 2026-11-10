@@ -218,10 +218,10 @@ static inline bool nq_notifications_flush(void)
 
 static inline void nq_update_time(void)
 {
-	struct timespec64 tm1, tm2;
+	struct timespec tm1, tm2;
 
-	ktime_get_real_ts64(&tm1);
-	ktime_get_raw_ts64(&tm2);
+	getnstimeofday(&tm1);
+	getrawmonotonic(&tm2);
 	mutex_lock(&l_ctx.mcp_time_mutex);
 	l_ctx.time->wall_clock_seconds = tm1.tv_sec;
 	l_ctx.time->wall_clock_nsec    = tm1.tv_nsec;
@@ -289,9 +289,9 @@ static irqreturn_t irq_handler(int intr, void *arg)
 cpumask_t tee_set_affinity(void)
 {
 	cpumask_t old_affinity;
-	unsigned long affinity = (unsigned long)raw_smp_processor_id();
+	unsigned long affinity = get_tee_affinity();
 
-	old_affinity = current->cpus_mask;
+	old_affinity = current->cpus_allowed;
 	mc_dev_devel("aff = %lx mask = %lx curr_aff = %*pbl (pid = %u)",
 		     affinity,
 		     l_ctx.default_affinity_mask,
@@ -304,7 +304,7 @@ cpumask_t tee_set_affinity(void)
 
 void tee_restore_affinity(cpumask_t old_affinity)
 {
-	cpumask_t current_affinity = current->cpus_mask;
+	cpumask_t current_affinity = current->cpus_allowed;
 
 	(void)current_affinity;
 	mc_dev_devel("aff = %*pbl mask = %lx curr_aff = %*pbl (pid = %u)",

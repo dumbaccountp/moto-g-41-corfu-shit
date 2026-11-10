@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef PD_PROCESS_EVT_H_
@@ -38,7 +38,7 @@ struct pe_state_reaction {
 bool pd_process_protocol_error(
 	struct pd_port *pd_port, struct pd_event *pd_event);
 
-bool pd_process_tx_failed_discard(struct pd_port *pd_port, uint8_t msg);
+bool pd_process_tx_failed(struct pd_port *pd_port);
 
 /*---------------------------------------------------------------------------*/
 
@@ -190,7 +190,7 @@ extern bool pd_process_event_vcs(struct pd_port *pd_port, struct pd_event *evt);
 extern bool pd_process_event_com(struct pd_port *pd_port, struct pd_event *evt);
 extern bool pd_process_event_tcp(struct pd_port *pd_port, struct pd_event *evt);
 
-#if CONFIG_USB_PD_CUSTOM_DBGACC
+#ifdef CONFIG_USB_PD_CUSTOM_DBGACC
 extern bool pd_process_event_dbg(struct pd_port *pd_port, struct pd_event *evt);
 #endif	/* CONFIG_USB_PD_CUSTOM_DBGACC */
 

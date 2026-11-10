@@ -47,6 +47,7 @@
 #
 ########################################################################
 
+#ifdef CONFIG_AS_AVX
 #include <linux/linkage.h>
 
 .text
@@ -277,7 +278,7 @@ frame_size = frame_GPRSAVE + GPRSAVE_SIZE
 # of SHA512 message blocks.
 # "blocks" is the message length in SHA512 blocks
 ########################################################################
-SYM_FUNC_START(sha512_transform_avx)
+ENTRY(sha512_transform_avx)
 	cmp $0, msglen
 	je nowork
 
@@ -364,8 +365,8 @@ updateblock:
 	mov	frame_RSPSAVE(%rsp), %rsp
 
 nowork:
-	RET
-SYM_FUNC_END(sha512_transform_avx)
+	ret
+ENDPROC(sha512_transform_avx)
 
 ########################################################################
 ### Binary Data
@@ -423,3 +424,4 @@ K512:
 	.quad 0x3c9ebe0a15c9bebc,0x431d67c49c100d4c
 	.quad 0x4cc5d4becb3e42b6,0x597f299cfc657e2a
 	.quad 0x5fcb6fab3ad6faec,0x6c44198c4a475817
+#endif

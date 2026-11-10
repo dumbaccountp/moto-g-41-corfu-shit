@@ -2,7 +2,6 @@
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
-
 #ifndef __EEPROM_DRIVER_H
 #define __EEPROM_DRIVER_H
 

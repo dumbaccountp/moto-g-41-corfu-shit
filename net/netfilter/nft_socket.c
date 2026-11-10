@@ -10,54 +10,9 @@
 struct nft_socket {
 	enum nft_socket_keys		key:8;
 	union {
-		u8			dreg;
+		enum nft_registers	dreg:8;
 	};
 };
-
-static void nft_socket_wildcard(const struct nft_pktinfo *pkt,
-				struct nft_regs *regs, struct sock *sk,
-				u32 *dest)
-{
-	switch (nft_pf(pkt)) {
-	case NFPROTO_IPV4:
-		nft_reg_store8(dest, inet_sk(sk)->inet_rcv_saddr == 0);
-		break;
-#if IS_ENABLED(CONFIG_NF_TABLES_IPV6)
-	case NFPROTO_IPV6:
-		nft_reg_store8(dest, ipv6_addr_any(&sk->sk_v6_rcv_saddr));
-		break;
-#endif
-	default:
-		regs->verdict.code = NFT_BREAK;
-		return;
-	}
-}
-
-static struct sock *nft_socket_do_lookup(const struct nft_pktinfo *pkt)
-{
-	const struct net_device *indev = nft_in(pkt);
-	const struct sk_buff *skb = pkt->skb;
-	struct sock *sk = NULL;
-
-	if (!indev)
-		return NULL;
-
-	switch (nft_pf(pkt)) {
-	case NFPROTO_IPV4:
-		sk = nf_sk_lookup_slow_v4(nft_net(pkt), skb, indev);
-		break;
-#if IS_ENABLED(CONFIG_NF_TABLES_IPV6)
-	case NFPROTO_IPV6:
-		sk = nf_sk_lookup_slow_v6(nft_net(pkt), skb, indev);
-		break;
-#endif
-	default:
-		WARN_ON_ONCE(1);
-		break;
-	}
-
-	return sk;
-}
 
 static void nft_socket_eval(const struct nft_expr *expr,
 			    struct nft_regs *regs,
@@ -72,7 +27,20 @@ static void nft_socket_eval(const struct nft_expr *expr,
 		sk = NULL;
 
 	if (!sk)
-		sk = nft_socket_do_lookup(pkt);
+		switch(nft_pf(pkt)) {
+		case NFPROTO_IPV4:
+			sk = nf_sk_lookup_slow_v4(nft_net(pkt), skb, nft_in(pkt));
+			break;
+#if IS_ENABLED(CONFIG_NF_TABLES_IPV6)
+		case NFPROTO_IPV6:
+			sk = nf_sk_lookup_slow_v6(nft_net(pkt), skb, nft_in(pkt));
+			break;
+#endif
+		default:
+			WARN_ON_ONCE(1);
+			regs->verdict.code = NFT_BREAK;
+			return;
+		}
 
 	if (!sk) {
 		regs->verdict.code = NFT_BREAK;
@@ -90,13 +58,6 @@ static void nft_socket_eval(const struct nft_expr *expr,
 			regs->verdict.code = NFT_BREAK;
 			return;
 		}
-		break;
-	case NFT_SOCKET_WILDCARD:
-		if (!sk_fullsock(sk)) {
-			regs->verdict.code = NFT_BREAK;
-			return;
-		}
-		nft_socket_wildcard(pkt, regs, sk, dest);
 		break;
 	default:
 		WARN_ON(1);
@@ -136,7 +97,6 @@ static int nft_socket_init(const struct nft_ctx *ctx,
 	priv->key = ntohl(nla_get_u32(tb[NFTA_SOCKET_KEY]));
 	switch(priv->key) {
 	case NFT_SOCKET_TRANSPARENT:
-	case NFT_SOCKET_WILDCARD:
 		len = sizeof(u8);
 		break;
 	case NFT_SOCKET_MARK:
@@ -146,8 +106,9 @@ static int nft_socket_init(const struct nft_ctx *ctx,
 		return -EOPNOTSUPP;
 	}
 
-	return nft_parse_register_store(ctx, tb[NFTA_SOCKET_DREG], &priv->dreg,
-					NULL, NFT_DATA_VALUE, len);
+	priv->dreg = nft_parse_register(tb[NFTA_SOCKET_DREG]);
+	return nft_validate_register_store(ctx, priv->dreg, NULL,
+					   NFT_DATA_VALUE, len);
 }
 
 static int nft_socket_dump(struct sk_buff *skb,
@@ -162,16 +123,6 @@ static int nft_socket_dump(struct sk_buff *skb,
 	return 0;
 }
 
-static int nft_socket_validate(const struct nft_ctx *ctx,
-			       const struct nft_expr *expr,
-			       const struct nft_data **data)
-{
-	return nft_chain_validate_hooks(ctx->chain,
-					(1 << NF_INET_PRE_ROUTING) |
-					(1 << NF_INET_LOCAL_IN) |
-					(1 << NF_INET_LOCAL_OUT));
-}
-
 static struct nft_expr_type nft_socket_type;
 static const struct nft_expr_ops nft_socket_ops = {
 	.type		= &nft_socket_type,
@@ -179,7 +130,6 @@ static const struct nft_expr_ops nft_socket_ops = {
 	.eval		= nft_socket_eval,
 	.init		= nft_socket_init,
 	.dump		= nft_socket_dump,
-	.validate	= nft_socket_validate,
 };
 
 static struct nft_expr_type nft_socket_type __read_mostly = {

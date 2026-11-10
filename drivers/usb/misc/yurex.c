@@ -96,13 +96,15 @@ static void yurex_delete(struct kref *kref)
 	if (dev->cntl_urb) {
 		usb_kill_urb(dev->cntl_urb);
 		kfree(dev->cntl_req);
-		usb_free_coherent(dev->udev, YUREX_BUF_SIZE,
+		if (dev->cntl_buffer)
+			usb_free_coherent(dev->udev, YUREX_BUF_SIZE,
 				dev->cntl_buffer, dev->cntl_urb->transfer_dma);
 		usb_free_urb(dev->cntl_urb);
 	}
 	if (dev->urb) {
 		usb_kill_urb(dev->urb);
-		usb_free_coherent(dev->udev, YUREX_BUF_SIZE,
+		if (dev->int_buffer)
+			usb_free_coherent(dev->udev, YUREX_BUF_SIZE,
 				dev->int_buffer, dev->urb->transfer_dma);
 		usb_free_urb(dev->urb);
 	}
@@ -470,7 +472,7 @@ static ssize_t yurex_write(struct file *file, const char __user *user_buffer,
 		break;
 	case CMD_SET:
 		data++;
-		fallthrough;
+		/* FALL THROUGH */
 	case '0' ... '9':
 		set = 1;
 		c = c2 = simple_strtoull(data, NULL, 0);

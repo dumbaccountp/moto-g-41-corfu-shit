@@ -1,1 +1,3 @@
-imgsensor_isp6s-objs += $(subdrv-rpath)/imx499mipiraw_Sensor.o
+# SPDX-License-Identifier: GPL-2.0
+
+obj-y += imx499mipiraw_Sensor.o

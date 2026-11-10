@@ -5,10 +5,8 @@ subdir-ccflags-y += \
 	-I$(N3D_DRIVER_PATH) \
 	-I$(N3D_DRIVER_PATH)/$(FRAME_SYNC) \
 
-LOCAL_FSYNC_PATH := $(LOCAL_N3D_PATH)/$(FRAME_SYNC)
-
-imgsensor_isp6s-objs += \
-	$(LOCAL_FSYNC_PATH)/frame_sync.o \
-	$(LOCAL_FSYNC_PATH)/frame_sync_algo.o \
-	$(LOCAL_FSYNC_PATH)/frame_monitor.o \
+obj-y += \
+	$(FRAME_SYNC)/frame_sync.o \
+	$(FRAME_SYNC)/frame_sync_algo.o \
+	$(FRAME_SYNC)/frame_monitor.o \
 

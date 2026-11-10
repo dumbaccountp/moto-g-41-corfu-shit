@@ -1,14 +1,42 @@
 # SPDX-License-Identifier: GPL-2.0
 menu "Device Drivers"
 
-# Keep I/O buses first
+config MOTO_ELLIS_PROJECT_CAMERA
+        bool "Define for Ellis project camera"
+        help
+          Say Y here for distinguish different projects
+
+config MOTO_MTK_PATCH
+        bool "Define for mtk patch about camera"
+        help
+          Say Y here for submiting by moto
+
+# EKELLIS-137 liangnengjie.wt, SWTP logic modify , 20210421, for RF swtp function fali, start
+config MOTO_ELLIS_PROJECT_SWTP_SETING_APART
+        bool "Define for Ellis SWTP seting apart"
+        help
+          Say Y here for distinguish different projects
+# EKELLIS-137 liangnengjie.wt, SWTP logic modify , 20210421, for RF swtp function fali, end
+# +EKKTONGA-20,longyili.wt,20210429,ADD,RF swtp function
+config MOTO_TONGA_PROJECT_SWTP_SETING_APART
+        bool "Define for Tonga SWTP seting apart"
+        help
+          Say Y here for distinguish different projects
+# -EKKTONGA-20,longyili.wt,20210425,ADD,RF swtp function
+
+# +EKMAUI-7, zhouxin2.wt, RF Bring up swtp cfg, 20220402
+config MOTO_MAUI_PROJECT_SWTP_SETING_APART
+        bool "Define for Maui SWTP seting apart"
+        help
+          Say Y here for distinguish different projects
+# -EKMAUI-7, zhouxin2.wt, RF Bring up swtp cfg, 20220402
+
+config MOTO_MTK_PATCH
+        bool "Define for mtk patch about camera"
+        help
+          Say Y here for submiting by moto
 
 source "drivers/amba/Kconfig"
-source "drivers/eisa/Kconfig"
-source "drivers/pci/Kconfig"
-source "drivers/pcmcia/Kconfig"
-source "drivers/rapidio/Kconfig"
-
 
 source "drivers/base/Kconfig"
 
@@ -29,6 +57,8 @@ source "drivers/pnp/Kconfig"
 source "drivers/block/Kconfig"
 
 source "drivers/nvme/Kconfig"
+
+# misc before ide - BLK_DEV_SGIIOC4 depends on SGI_IOC4
 
 source "drivers/misc/Kconfig"
 
@@ -106,6 +136,8 @@ source "drivers/hid/Kconfig"
 
 source "drivers/usb/Kconfig"
 
+source "drivers/uwb/Kconfig"
+
 source "drivers/mmc/Kconfig"
 
 source "drivers/memstick/Kconfig"
@@ -138,15 +170,9 @@ source "drivers/virt/Kconfig"
 
 source "drivers/virtio/Kconfig"
 
-source "drivers/vdpa/Kconfig"
-
-source "drivers/vhost/Kconfig"
-
 source "drivers/hv/Kconfig"
 
 source "drivers/xen/Kconfig"
-
-source "drivers/greybus/Kconfig"
 
 source "drivers/staging/Kconfig"
 
@@ -190,6 +216,8 @@ source "drivers/ipack/Kconfig"
 
 source "drivers/reset/Kconfig"
 
+source "drivers/fmc/Kconfig"
+
 source "drivers/phy/Kconfig"
 
 source "drivers/powercap/Kconfig"
@@ -232,7 +260,5 @@ source "drivers/slimbus/Kconfig"
 
 source "drivers/interconnect/Kconfig"
 
-source "drivers/counter/Kconfig"
-
-source "drivers/most/Kconfig"
+source "drivers/energy_model/Kconfig"
 endmenu

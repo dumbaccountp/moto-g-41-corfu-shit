@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * dmi-sysfs.c
  *
@@ -262,7 +261,7 @@ struct dmi_system_event_log {
 	u8	header_format;
 	u8	type_descriptors_supported_count;
 	u8	per_log_type_descriptor_length;
-	u8	supported_log_type_descriptos[];
+	u8	supported_log_type_descriptos[0];
 } __packed;
 
 #define DMI_SYSFS_SEL_FIELD(_field) \
@@ -603,7 +602,7 @@ static void __init dmi_sysfs_register_handle(const struct dmi_header *dh,
 				    "%d-%d", dh->type, entry->instance);
 
 	if (*ret) {
-		kobject_put(&entry->kobj);
+		kfree(entry);
 		return;
 	}
 

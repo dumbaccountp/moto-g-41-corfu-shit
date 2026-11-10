@@ -1,11 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Generic waiting primitives.
  *
  * (C) 2004 Nadia Yvette Chambers, Oracle
  */
 #include "sched.h"
-#include <trace/hooks/sched.h>
 
 void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name, struct lock_class_key *key)
 {
@@ -119,12 +117,16 @@ static void __wake_up_common_lock(struct wait_queue_head *wq_head, unsigned int 
 	bookmark.func = NULL;
 	INIT_LIST_HEAD(&bookmark.entry);
 
-	do {
+	spin_lock_irqsave(&wq_head->lock, flags);
+	nr_exclusive = __wake_up_common(wq_head, mode, nr_exclusive, wake_flags, key, &bookmark);
+	spin_unlock_irqrestore(&wq_head->lock, flags);
+
+	while (bookmark.flags & WQ_FLAG_BOOKMARK) {
 		spin_lock_irqsave(&wq_head->lock, flags);
 		nr_exclusive = __wake_up_common(wq_head, mode, nr_exclusive,
 						wake_flags, key, &bookmark);
 		spin_unlock_irqrestore(&wq_head->lock, flags);
-	} while (bookmark.flags & WQ_FLAG_BOOKMARK);
+	}
 }
 
 /**
@@ -170,6 +172,7 @@ EXPORT_SYMBOL_GPL(__wake_up_locked_key_bookmark);
  * __wake_up_sync_key - wake up threads blocked on a waitqueue.
  * @wq_head: the waitqueue
  * @mode: which threads
+ * @nr_exclusive: how many wake-one or wake-many threads to wake up
  * @key: opaque value to be passed to wakeup targets
  *
  * The sync wakeup differs that the waker knows that it will schedule
@@ -183,47 +186,26 @@ EXPORT_SYMBOL_GPL(__wake_up_locked_key_bookmark);
  * accessing the task state.
  */
 void __wake_up_sync_key(struct wait_queue_head *wq_head, unsigned int mode,
-			void *key)
+			int nr_exclusive, void *key)
 {
-	int wake_flags = WF_SYNC;
+	int wake_flags = 1; /* XXX WF_SYNC */
 
 	if (unlikely(!wq_head))
 		return;
 
-	trace_android_vh_set_wake_flags(&wake_flags, &mode);
-	__wake_up_common_lock(wq_head, mode, 1, wake_flags, key);
+	if (unlikely(nr_exclusive != 1))
+		wake_flags = 0;
+
+	__wake_up_common_lock(wq_head, mode, nr_exclusive, wake_flags, key);
 }
 EXPORT_SYMBOL_GPL(__wake_up_sync_key);
-
-/**
- * __wake_up_locked_sync_key - wake up a thread blocked on a locked waitqueue.
- * @wq_head: the waitqueue
- * @mode: which threads
- * @key: opaque value to be passed to wakeup targets
- *
- * The sync wakeup differs in that the waker knows that it will schedule
- * away soon, so while the target thread will be woken up, it will not
- * be migrated to another CPU - ie. the two threads are 'synchronized'
- * with each other. This can prevent needless bouncing between CPUs.
- *
- * On UP it can prevent extra preemption.
- *
- * If this function wakes up a task, it executes a full memory barrier before
- * accessing the task state.
- */
-void __wake_up_locked_sync_key(struct wait_queue_head *wq_head,
-			       unsigned int mode, void *key)
-{
-        __wake_up_common(wq_head, mode, 1, WF_SYNC, key, NULL);
-}
-EXPORT_SYMBOL_GPL(__wake_up_locked_sync_key);
 
 /*
  * __wake_up_sync - see __wake_up_sync_key()
  */
-void __wake_up_sync(struct wait_queue_head *wq_head, unsigned int mode)
+void __wake_up_sync(struct wait_queue_head *wq_head, unsigned int mode, int nr_exclusive)
 {
-	__wake_up_sync_key(wq_head, mode, NULL);
+	__wake_up_sync_key(wq_head, mode, nr_exclusive, NULL);
 }
 EXPORT_SYMBOL_GPL(__wake_up_sync);	/* For internal use only */
 
@@ -260,22 +242,17 @@ prepare_to_wait(struct wait_queue_head *wq_head, struct wait_queue_entry *wq_ent
 }
 EXPORT_SYMBOL(prepare_to_wait);
 
-/* Returns true if we are the first waiter in the queue, false otherwise. */
-bool
+void
 prepare_to_wait_exclusive(struct wait_queue_head *wq_head, struct wait_queue_entry *wq_entry, int state)
 {
 	unsigned long flags;
-	bool was_empty = false;
 
 	wq_entry->flags |= WQ_FLAG_EXCLUSIVE;
 	spin_lock_irqsave(&wq_head->lock, flags);
-	if (list_empty(&wq_entry->entry)) {
-		was_empty = list_empty(&wq_head->head);
+	if (list_empty(&wq_entry->entry))
 		__add_wait_queue_entry_tail(wq_head, wq_entry);
-	}
 	set_current_state(state);
 	spin_unlock_irqrestore(&wq_head->lock, flags);
-	return was_empty;
 }
 EXPORT_SYMBOL(prepare_to_wait_exclusive);
 
@@ -294,7 +271,7 @@ long prepare_to_wait_event(struct wait_queue_head *wq_head, struct wait_queue_en
 	long ret = 0;
 
 	spin_lock_irqsave(&wq_head->lock, flags);
-	if (signal_pending_state(state, current)) {
+	if (unlikely(signal_pending_state(state, current))) {
 		/*
 		 * Exclusive waiter must not fail if it was selected by wakeup,
 		 * it should "consume" the condition we were waiting for.
@@ -400,13 +377,13 @@ void finish_wait(struct wait_queue_head *wq_head, struct wait_queue_entry *wq_en
 }
 EXPORT_SYMBOL(finish_wait);
 
-__sched int autoremove_wake_function(struct wait_queue_entry *wq_entry, unsigned int mode,
-				     int sync, void *key)
+int __sched autoremove_wake_function(struct wait_queue_entry *wq_entry,
+				     unsigned int mode, int sync, void *key)
 {
 	int ret = default_wake_function(wq_entry, mode, sync, key);
 
 	if (ret)
-		list_del_init_careful(&wq_entry->entry);
+		list_del_init(&wq_entry->entry);
 
 	return ret;
 }
@@ -437,7 +414,8 @@ static inline bool is_kthread_should_stop(void)
  * }						smp_mb(); // C
  * remove_wait_queue(&wq_head, &wait);		wq_entry->flags |= WQ_FLAG_WOKEN;
  */
-__sched long wait_woken(struct wait_queue_entry *wq_entry, unsigned int mode, long timeout)
+long __sched wait_woken(struct wait_queue_entry *wq_entry, unsigned int mode,
+			long timeout)
 {
 	/*
 	 * The below executes an smp_mb(), which matches with the full barrier
@@ -462,8 +440,8 @@ __sched long wait_woken(struct wait_queue_entry *wq_entry, unsigned int mode, lo
 }
 EXPORT_SYMBOL(wait_woken);
 
-__sched int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned int mode,
-				int sync, void *key)
+int __sched woken_wake_function(struct wait_queue_entry *wq_entry,
+				unsigned int mode, int sync, void *key)
 {
 	/* Pairs with the smp_store_mb() in wait_woken(). */
 	smp_mb(); /* C */

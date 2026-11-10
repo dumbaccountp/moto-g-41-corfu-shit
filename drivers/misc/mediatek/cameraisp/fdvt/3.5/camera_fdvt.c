@@ -10,6 +10,7 @@
  *     This file provid the other drivers FDVT relative functions
  *
  *****************************************************************************/
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -45,31 +46,28 @@
 
 #include <asm/cacheflush.h>
 
-
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 /* 64 bit */
 #include <linux/fs.h>
 #include <linux/compat.h>
 #endif
 
-#if !IS_ENABLED(CONFIG_MTK_CLKMGR)
+#ifndef CONFIG_MTK_CLKMGR
 #include <linux/clk.h>
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_CLKMGR)
+#ifdef CONFIG_MTK_CLKMGR
 #include <mach/mt_clkmgr.h>
 #endif
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
 #include <linux/pm_wakeup.h>
-#endif
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-struct wakeup_source fdvt_wake_lock;
-#endif
+struct wakeup_source *fdvt_wake_lock;
 
+#define FDVT_SMI_READY
+#ifdef FDVT_SMI_READY
 #include <smi_public.h>
-
+#endif
 #define FDVT_DEVNAME     "camera-fdvt"
 
 #define log_vrb(format, args...) \
@@ -115,7 +113,7 @@ struct FDVTDBuffRegMap {
 };
 #define FDVTDBuffRegMap struct FDVTDBuffRegMap
 
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 
 enum {
 	FDVT_IRQ_IDX = 0,
@@ -250,12 +248,12 @@ static FDVTDBuffRegMap pFDVTWriteBuffer;
 #define FDVT_RESULTNUM             (FDVT_ADDR+0x178)
 #define FDVT_MAX_OFFSET            0x178
 
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 struct fdvt_device {
 	void __iomem *regs[FDVT_BASEADDR_NUM];
 	struct device *dev;
 	int irq[FDVT_IRQ_IDX_NUM];
-#if !IS_ENABLED(CONFIG_MTK_CLKMGR) /* CCF */
+#ifndef CONFIG_MTK_CLKMGR /* CCF */
 	struct clk *clk_SCP_SYS_DIS;
 	struct clk *clk_SCP_SYS_ISP;
 	struct clk *clk_SMI_COMMON;
@@ -376,11 +374,17 @@ static unsigned long us_to_jiffies(unsigned long us)
 /*=======================================================================*/
 #if LDVT_EARLY_PORTING_NO_CCF
 #else
+#ifdef FDVT_SMI_READY
 static inline void FD_Prepare_Enable_ccf_clock(void)
 {
 	int ret;
 
+	/*smi_bus_enable(SMI_LARB_IMGSYS0, "camera_fdvt");*/
+#if (MTK_FD_LARB == 1)
+	smi_bus_prepare_enable(SMI_LARB1, "camera_fdvt");
+#else
 	smi_bus_prepare_enable(SMI_LARB2, "camera_fdvt");
+#endif
 	ret = clk_prepare_enable(fd_clk.CG_IMGSYS_FDVT);
 	if (ret)
 		log_err("cannot prepare and enable CG_IMGSYS_FDVT clock\n");
@@ -391,8 +395,14 @@ static inline void FD_Prepare_Enable_ccf_clock(void)
 static inline void FD_Disable_Unprepare_ccf_clock(void)
 {
 	clk_disable_unprepare(fd_clk.CG_IMGSYS_FDVT);
+	/*smi_bus_disable(SMI_LARB_IMGSYS0, "camera_fdvt");*/
+#if (MTK_FD_LARB == 1)
+	smi_bus_disable_unprepare(SMI_LARB1, "camera_fdvt");
+#else
 	smi_bus_disable_unprepare(SMI_LARB2, "camera_fdvt");
+#endif
 }
+#endif
 #endif
 
 static int mt_fdvt_clk_ctrl(int en)
@@ -408,10 +418,13 @@ static int mt_fdvt_clk_ctrl(int en)
 		FDVT_WR32(setReg, IMGSYS_CONFIG_BASE+0x4);
 	}
 #else
+#ifdef FDVT_SMI_READY
 	if (en)
 		FD_Prepare_Enable_ccf_clock();
 	else
 		FD_Disable_Unprepare_ccf_clock();
+#else
+#endif
 #endif
 	return 0;
 }
@@ -467,9 +480,9 @@ void FDVT_DUMPREG(void)
 	log_dbg("FDVT REG:\n ********************\n");
 
 	/* for(u4Index = 0; u4Index < 0x180; u4Index += 4) { */
-	for (u4Index = 0x158; u4Index < 0x180; u4Index += 4) {
+	for (u4Index = 0x0; u4Index < 0x180; u4Index += 4) {
 		u4RegValue = ioread32((void *)(FDVT_ADDR + u4Index));
-		log_dbg("+0x%x 0x%x\n", u4Index, u4RegValue);
+		log_dbg("0x%x 0x%x\n", u4Index, u4RegValue);
 	}
 }
 
@@ -513,7 +526,7 @@ static int FDVT_SetRegHW(FDVTRegIO *a_pstCfg)
 	/* log_dbg("Count = %d\n", pREGIO->u4Count); */
 
 	for (i = 0; i < pREGIO->u4Count; i++) {
-		if (((FDVT_ADDR + pFDVTWriteBuffer.u4Addr[i]) >= FDVT_ADDR) &&
+		if (((FDVT_ADDR + pFDVTWriteBuffer.u4Addr[i]) >= FDVT_ENABLE) &&
 			((pFDVTWriteBuffer.u4Addr[i]) <= FDVT_MAX_OFFSET) &&
 			((pFDVTWriteBuffer.u4Addr[i] & 0x3) == 0)) {
 			/* log_dbg("Write: FDVT[0x%03lx](0x%08lx) = 0x%08lx\n",
@@ -606,11 +619,12 @@ static int FDVT_WaitIRQ(u32 *u4IRQMask)
 
 	timeout = wait_event_interruptible_timeout(
 		g_FDVTWQ, (g_FDVTIRQMSK & g_FDVTIRQ),
-	us_to_jiffies(15 * 1000000));
+	us_to_jiffies(1000000));
 
 	if (timeout == 0) {
 		log_err("wait_event_interruptible_timeout timeout, %d, %d\n",
 			g_FDVTIRQMSK, g_FDVTIRQ);
+		FDVT_DUMPREG();
 		FDVT_WR32(0x00030000, FDVT_START);  /* LDVT Disable */
 		FDVT_WR32(0x00000000, FDVT_START);  /* LDVT Disable */
 		return -EAGAIN;
@@ -643,6 +657,7 @@ static irqreturn_t FDVT_irq(int irq, void *dev_id)
 	/*g_FDVT_interrupt_handler = VAL_TRUE;*/
 	/*FDVT_ISR();*/
 	g_FDVTIRQ = ioread32((void *)FDVT_INT);
+
 	wake_up_interruptible(&g_FDVTWQ);
 
 	return IRQ_HANDLED;
@@ -735,7 +750,7 @@ static long FDVT_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 
 /***********************************************************
  *
@@ -919,15 +934,11 @@ static int FDVT_open(struct inode *inode, struct file *file)
 	g_drvOpened = 1;
 	spin_unlock(&g_spinLock);
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-	__pm_stay_awake(&fdvt_wake_lock);
-#endif
+	__pm_stay_awake(fdvt_wake_lock);
 
 	mt_fdvt_clk_ctrl(1);
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-	__pm_relax(&fdvt_wake_lock);
-#endif
+	__pm_relax(fdvt_wake_lock);
 
 	if (pBuff != NULL)
 		log_dbg("pBuff is not null\n");
@@ -985,15 +996,11 @@ static int FDVT_release(struct inode *inode, struct file *file)
 	FDVT_WR32(0x00000000, FDVT_INT_EN);
 	g_FDVTIRQ = ioread32((void *)FDVT_INT);
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-	__pm_stay_awake(&fdvt_wake_lock);
-#endif
+	__pm_stay_awake(fdvt_wake_lock);
 
 	mt_fdvt_clk_ctrl(0);
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-	__pm_relax(&fdvt_wake_lock);
-#endif
+	__pm_relax(fdvt_wake_lock);
 
 	spin_lock(&g_spinLock);
 	g_drvOpened = 0;
@@ -1007,7 +1014,7 @@ static const struct file_operations FDVT_fops = {
 	.unlocked_ioctl      = FDVT_ioctl,
 	.open                = FDVT_open,
 	.release             = FDVT_release,
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 	.compat_ioctl        = compat_FD_ioctl,
 #endif
 };
@@ -1023,7 +1030,7 @@ static int FDVT_probe(struct platform_device *dev)
 	int new_count;
 	struct class_device *class_dev = NULL;
 	struct fdvt_device *tempFdvt;
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 	struct fdvt_device *fdvt_dev;
 #endif
 
@@ -1046,7 +1053,7 @@ static int FDVT_probe(struct platform_device *dev)
 	nr_fdvt_devs = 0;
 
 	log_inf("FDVT PROBE!!!\n");
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 
 	log_dbg("[FDVT_DEBUG] %s\n", __func__);
 
@@ -1081,7 +1088,7 @@ static int FDVT_probe(struct platform_device *dev)
 		log_inf("DT, i=%d, map_addr=0x%lx\n", i, gFDVT_Reg[i]);
 	}
 
-#if IS_ENABLED(CONFIG_MTK_CLKMGR)
+#ifdef CONFIG_MTK_CLKMGR
 #else
 	/*of_property_read_u32(
 	 *	pdev->dev.of_node,
@@ -1184,8 +1191,11 @@ static int FDVT_probe(struct platform_device *dev)
 #if LDVT_EARLY_PORTING_NO_CCF
 #else
     /*CCF: Grab clock pointer (struct clk*) */
+#if IS_ENABLED(CONFIG_MACH_MT6763)
+	fd_clk.CG_IMGSYS_FDVT = devm_clk_get(&dev->dev, "IMG_FDVT");
+#else
 	fd_clk.CG_IMGSYS_FDVT = devm_clk_get(&dev->dev, "FD_CLK_CAM_FDVT");
-
+#endif
 	if (IS_ERR(fd_clk.CG_IMGSYS_FDVT)) {
 		log_err("cannot get CG_IMGSYS_FDVT clock\n");
 		return PTR_ERR(fd_clk.CG_IMGSYS_FDVT);
@@ -1203,9 +1213,7 @@ static int FDVT_probe(struct platform_device *dev)
 	/* Initialize waitqueue */
 	init_waitqueue_head(&g_FDVTWQ);
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-	wakeup_source_init(&fdvt_wake_lock, "fdvt_lock_wakelock");
-#endif
+	fdvt_wake_lock = wakeup_source_register(NULL, "fdvt_lock_wakelock");
 
 	log_dbg("[FDVT_DEBUG] %s Done\n", __func__);
 
@@ -1220,15 +1228,11 @@ static int FDVT_remove(struct platform_device *dev)
 	FDVT_WR32(0x00000000, FDVT_INT_EN);
 	g_FDVTIRQ = ioread32((void *)FDVT_INT);
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-	__pm_stay_awake(&fdvt_wake_lock);
-#endif
+	__pm_stay_awake(fdvt_wake_lock);
 
 	mt_fdvt_clk_ctrl(0);
 
-#if IS_ENABLED(CONFIG_PM_SLEEP)
-	__pm_relax(&fdvt_wake_lock);
-#endif
+	__pm_relax(fdvt_wake_lock);
 
 	device_destroy(FDVT_class, FDVT_devno);
 	class_destroy(FDVT_class);
@@ -1274,7 +1278,7 @@ static int FDVT_resume(struct platform_device *dev)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 static const struct of_device_id fdvt_of_ids[] = {
 	{ .compatible = "mediatek,fdvt", },
 	{}
@@ -1285,7 +1289,7 @@ static struct platform_driver FDVT_driver = {
 	.driver      = {
 	.name        = FDVT_DEVNAME,
 	.owner       = THIS_MODULE,
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 	.of_match_table = fdvt_of_ids,
 #endif
 	},
@@ -1302,7 +1306,7 @@ static struct platform_driver FDVT_driver = {
  *};
  */
 
-#if IS_ENABLED(CONFIG_HAS_EARLYSUSPEND)
+#ifdef CONFIG_HAS_EARLYSUSPEND
 static void FDVT_early_suspend(struct early_suspend *h)
 {
 	/* log_dbg("[FDVT_DEBUG] FDVT_suspend\n"); */
@@ -1334,7 +1338,7 @@ static int __init FDVT_driver_init(void)
 		ret = -ENODEV;
 		return ret;
 	}
-	#if IS_ENABLED(CONFIG_HAS_EARLYSUSPEND)
+	#ifdef CONFIG_HAS_EARLYSUSPEND
 	register_early_suspend(&FDVT_early_suspend_desc);
 	#endif
 

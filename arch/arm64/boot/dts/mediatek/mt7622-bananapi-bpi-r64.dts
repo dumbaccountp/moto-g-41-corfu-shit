@@ -1,28 +1,22 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 /*
  * Copyright (c) 2018 MediaTek Inc.
  * Author: Ryder Lee <ryder.lee@mediatek.com>
- *
- * SPDX-License-Identifier: (GPL-2.0 OR MIT)
  */
 
 /dts-v1/;
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/gpio/gpio.h>
 
-#include "mt7622.dtsi"
-#include "mt6380.dtsi"
+#include "mediatek/mt7622.dtsi"
+#include "mediatek/mt6380.dtsi"
 
 / {
 	model = "Bananapi BPI-R64";
 	compatible = "bananapi,bpi-r64", "mediatek,mt7622";
 
-	aliases {
-		serial0 = &uart0;
-	};
-
 	chosen {
-		stdout-path = "serial0:115200n8";
-		bootargs = "earlycon=uart8250,mmio32,0x11002000 swiotlb=512";
+		bootargs = "earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512";
 	};
 
 	cpus {
@@ -49,8 +43,15 @@
 		wps {
 			label = "wps";
 			linux,code = <KEY_WPS_BUTTON>;
-			gpios = <&pio 102 GPIO_ACTIVE_LOW>;
+			gpios = <&pio 102 GPIO_ACTIVE_HIGH>;
 		};
+	};
+
+	gsw: gsw@0 {
+		compatible = "mediatek,mt753x";
+		mediatek,ethsys = <&ethsys>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 	};
 
 	leds {
@@ -119,80 +120,56 @@
 	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
-		phy-mode = "2500base-x";
-
-		fixed-link {
-			speed = <2500>;
-			full-duplex;
-			pause;
-		};
-	};
-
-	gmac1: mac@1 {
-		compatible = "mediatek,eth-mac";
-		reg = <1>;
-		phy-mode = "rgmii";
-
+		phy-mode = "sgmii";
 		fixed-link {
 			speed = <1000>;
 			full-duplex;
 			pause;
 		};
 	};
-
+	gmac1: mac@1 {
+		compatible = "mediatek,eth-mac";
+		reg = <1>;
+		phy-mode = "rgmii";
+		fixed-link {
+			speed = <1000>;
+			full-duplex;
+			pause;
+		};
+	};
 	mdio: mdio-bus {
 		#address-cells = <1>;
 		#size-cells = <0>;
+	};
+};
 
-		switch@0 {
-			compatible = "mediatek,mt7531";
-			reg = <0>;
-			reset-gpios = <&pio 54 0>;
+&gsw {
+	mediatek,mdio = <&mdio>;
+	mediatek,portmap = "wllll";
+	mediatek,mdio_master_pinmux = <0>;
+	reset-gpios = <&pio 54 0>;
+	interrupt-parent = <&pio>;
+	interrupts = <53 IRQ_TYPE_LEVEL_HIGH>;
+	status = "okay";
 
-			ports {
-				#address-cells = <1>;
-				#size-cells = <0>;
-
-				port@0 {
-					reg = <0>;
-					label = "wan";
-				};
-
-				port@1 {
-					reg = <1>;
-					label = "lan0";
-				};
-
-				port@2 {
-					reg = <2>;
-					label = "lan1";
-				};
-
-				port@3 {
-					reg = <3>;
-					label = "lan2";
-				};
-
-				port@4 {
-					reg = <4>;
-					label = "lan3";
-				};
-
-				port@6 {
-					reg = <6>;
-					label = "cpu";
-					ethernet = <&gmac0>;
-					phy-mode = "2500base-x";
-
-					fixed-link {
-						speed = <2500>;
-						full-duplex;
-						pause;
-					};
-				};
-			};
+	port5: port@5 {
+		compatible = "mediatek,mt753x-port";
+		reg = <5>;
+		phy-mode = "rgmii";
+		fixed-link {
+			speed = <1000>;
+			full-duplex;
 		};
+	};
 
+	port6: port@6 {
+		compatible = "mediatek,mt753x-port";
+		reg = <6>;
+		phy-mode = "sgmii";
+		fixed-link {
+			speed = <2500>;
+			full-duplex;
+		};
 	};
 };
 
@@ -591,9 +568,5 @@
 &watchdog {
 	pinctrl-names = "default";
 	pinctrl-0 = <&watchdog_pins>;
-	status = "okay";
-};
-
-&wmac {
 	status = "okay";
 };

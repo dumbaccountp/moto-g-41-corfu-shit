@@ -1,9 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * kxsd9.c	simple support for the Kionix KXSD9 3D
  *		accelerometer.
  *
  * Copyright (c) 2008-2009 Jonathan Cameron <jic23@kernel.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
  * The i2c interface is very similar, so shouldn't be a problem once
  * I have a suitable wire made up.
@@ -224,14 +227,14 @@ static irqreturn_t kxsd9_trigger_handler(int irq, void *p)
 			       hw_values.chan,
 			       sizeof(hw_values.chan));
 	if (ret) {
-		dev_err(st->dev, "error reading data: %d\n", ret);
-		goto out;
+		dev_err(st->dev,
+			"error reading data\n");
+		return ret;
 	}
 
 	iio_push_to_buffers_with_timestamp(indio_dev,
 					   &hw_values,
 					   iio_get_time_ns(indio_dev));
-out:
 	iio_trigger_notify_done(indio_dev->trig);
 
 	return IRQ_HANDLED;
@@ -258,6 +261,8 @@ static int kxsd9_buffer_postdisable(struct iio_dev *indio_dev)
 
 static const struct iio_buffer_setup_ops kxsd9_buffer_setup_ops = {
 	.preenable = kxsd9_buffer_preenable,
+	.postenable = iio_triggered_buffer_postenable,
+	.predisable = iio_triggered_buffer_predisable,
 	.postdisable = kxsd9_buffer_postdisable,
 };
 
@@ -415,12 +420,15 @@ int kxsd9_common_probe(struct device *dev,
 	indio_dev->channels = kxsd9_channels;
 	indio_dev->num_channels = ARRAY_SIZE(kxsd9_channels);
 	indio_dev->name = name;
+	indio_dev->dev.parent = dev;
 	indio_dev->info = &kxsd9_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->available_scan_masks = kxsd9_scan_masks;
 
 	/* Read the mounting matrix, if present */
-	ret = iio_read_mount_matrix(dev, "mount-matrix", &st->orientation);
+	ret = of_iio_read_mount_matrix(dev,
+				       "mount-matrix",
+				       &st->orientation);
 	if (ret)
 		return ret;
 

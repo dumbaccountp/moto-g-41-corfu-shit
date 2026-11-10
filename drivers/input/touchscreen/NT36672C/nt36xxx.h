@@ -1,20 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2010 - 2018 Novatek, Inc.
- *
- * $Revision: 46000 $
- * $Date: 2019-06-12 14:25:52 +0800 (週三, 12 六月 2019) $
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
+ * Copyright (C) 2016 MediaTek Inc.
  */
+
 #ifndef _LINUX_NVT_TOUCH_H
 #define	_LINUX_NVT_TOUCH_H
 
@@ -24,12 +12,11 @@
 #include <linux/spi/spi.h>
 #include <linux/uaccess.h>
 
-#include "nt36xxx_mem_map.h"
-
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-#include "mtk_panel_ext.h"
-#include "mtk_disp_notify.h"
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
 #endif
+
+#include "nt36xxx_mem_map.h"
 
 #ifdef CONFIG_MTK_SPI
 /* Please copy mt_spi.h file under mtk spi driver folder */
@@ -110,10 +97,15 @@ struct nvt_ts_data {
 	struct kthread_delayed_work nvt_fwu_dw;
 	uint16_t addr;
 	int8_t phys[32];
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	struct notifier_block disp_notifier;
+#if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	struct notifier_block drm_notif;
+#else
+	struct notifier_block fb_notif;
 #endif
-
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	struct early_suspend early_suspend;
+#endif
 	uint8_t fw_ver;
 	uint8_t x_num;
 	uint8_t y_num;

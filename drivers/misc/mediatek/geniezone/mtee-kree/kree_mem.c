@@ -494,7 +494,6 @@ TZ_RESULT KREE_RegisterSharedmem(KREE_SESSION_HANDLE session,
 	}
 	return TZ_RESULT_SUCCESS;
 }
-EXPORT_SYMBOL(KREE_RegisterSharedmem);
 
 TZ_RESULT KREE_UnregisterSharedmem(KREE_SESSION_HANDLE session,
 	KREE_SHAREDMEM_HANDLE shm_handle)
@@ -599,7 +598,6 @@ TZ_RESULT KREE_AllocSecuremem(KREE_SESSION_HANDLE session,
 		alignment, size, "KREE Alloc Secure mem");
 	return ret;
 }
-EXPORT_SYMBOL(KREE_AllocSecuremem);
 
 TZ_RESULT KREE_ZallocSecuremem(KREE_SESSION_HANDLE session,
 	KREE_SECUREMEM_HANDLE *mem_handle, uint32_t alignment, uint32_t size)
@@ -634,7 +632,6 @@ TZ_RESULT KREE_ZallocSecurememWithTag(KREE_SESSION_HANDLE session,
 		alignment, size, "KREE_ZallocSecurememWithTag");
 	return ret;
 }
-EXPORT_SYMBOL(KREE_ZallocSecurememWithTag);
 
 TZ_RESULT KREE_ReferenceSecuremem(KREE_SESSION_HANDLE session,
 	KREE_SECUREMEM_HANDLE mem_handle)
@@ -645,7 +642,6 @@ TZ_RESULT KREE_ReferenceSecuremem(KREE_SESSION_HANDLE session,
 		"KREE_ReferenceSecuremem");
 	return ret;
 }
-EXPORT_SYMBOL(KREE_ReferenceSecuremem);
 
 TZ_RESULT KREE_UnreferenceSecuremem(KREE_SESSION_HANDLE session,
 	KREE_SECUREMEM_HANDLE mem_handle)
@@ -658,11 +654,11 @@ TZ_RESULT KREE_UnreferenceSecuremem(KREE_SESSION_HANDLE session,
 	KREE_DEBUG("[%s] unref count = 0x%x\n", __func__, count);
 	return ret;
 }
-EXPORT_SYMBOL(KREE_UnreferenceSecuremem);
 
 #endif
 
 #if API_chunkMem /*chunk memory APIs */
+
 static TZ_RESULT _kree_mcm_Append(KREE_SESSION_HANDLE session,
 	KREE_SHAREDMEM_HANDLE *cm_hd, KREE_SHAREDMEM_PARAM *param,
 	uint32_t cmd)

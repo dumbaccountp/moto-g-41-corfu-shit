@@ -49,7 +49,7 @@
 #include "hw.h"
 #include "reg.h"
 
-static const char alx_drv_name[] = "alx";
+const char alx_drv_name[] = "alx";
 
 static void alx_free_txbuf(struct alx_tx_queue *txq, int entry)
 {
@@ -660,9 +660,10 @@ static int alx_alloc_rings(struct alx_priv *alx)
 			    alx->num_txq +
 			    sizeof(struct alx_rrd) * alx->rx_ringsz +
 			    sizeof(struct alx_rfd) * alx->rx_ringsz;
-	alx->descmem.virt = dma_alloc_coherent(&alx->hw.pdev->dev,
-					       alx->descmem.size,
-					       &alx->descmem.dma, GFP_KERNEL);
+	alx->descmem.virt = dma_zalloc_coherent(&alx->hw.pdev->dev,
+						alx->descmem.size,
+						&alx->descmem.dma,
+						GFP_KERNEL);
 	if (!alx->descmem.virt)
 		return -ENOMEM;
 
@@ -1420,7 +1421,10 @@ static int alx_tso(struct sk_buff *skb, struct alx_txd *first)
 							 0, IPPROTO_TCP, 0);
 		first->word1 |= 1 << TPD_IPV4_SHIFT;
 	} else if (skb_is_gso_v6(skb)) {
-		tcp_v6_gso_csum_prep(skb);
+		ipv6_hdr(skb)->payload_len = 0;
+		tcp_hdr(skb)->check = ~csum_ipv6_magic(&ipv6_hdr(skb)->saddr,
+						       &ipv6_hdr(skb)->daddr,
+						       0, IPPROTO_TCP, 0);
 		/* LSOv2: the first TPD only provides the packet length */
 		first->adrl.l.pkt_len = skb->len;
 		first->word1 |= 1 << TPD_LSO_V2_SHIFT;
@@ -1466,7 +1470,9 @@ static int alx_map_tx_skb(struct alx_tx_queue *txq, struct sk_buff *skb)
 	tpd->len = cpu_to_le16(maplen);
 
 	for (f = 0; f < skb_shinfo(skb)->nr_frags; f++) {
-		skb_frag_t *frag = &skb_shinfo(skb)->frags[f];
+		struct skb_frag_struct *frag;
+
+		frag = &skb_shinfo(skb)->frags[f];
 
 		if (++txq->write_idx == txq->count)
 			txq->write_idx = 0;
@@ -1554,7 +1560,7 @@ static netdev_tx_t alx_start_xmit(struct sk_buff *skb,
 	return alx_start_xmit_ring(skb, alx_tx_queue_mapping(alx, skb));
 }
 
-static void alx_tx_timeout(struct net_device *dev, unsigned int txqueue)
+static void alx_tx_timeout(struct net_device *dev)
 {
 	struct alx_priv *alx = netdev_priv(dev);
 
@@ -1849,7 +1855,6 @@ out_free_netdev:
 	free_netdev(netdev);
 out_pci_release:
 	pci_release_mem_regions(pdev);
-	pci_disable_pcie_error_reporting(pdev);
 out_pci_disable:
 	pci_disable_device(pdev);
 	return err;
@@ -1876,7 +1881,8 @@ static void alx_remove(struct pci_dev *pdev)
 #ifdef CONFIG_PM_SLEEP
 static int alx_suspend(struct device *dev)
 {
-	struct alx_priv *alx = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct alx_priv *alx = pci_get_drvdata(pdev);
 
 	if (!netif_running(alx->dev))
 		return 0;
@@ -1887,7 +1893,8 @@ static int alx_suspend(struct device *dev)
 
 static int alx_resume(struct device *dev)
 {
-	struct alx_priv *alx = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct alx_priv *alx = pci_get_drvdata(pdev);
 	struct alx_hw *hw = &alx->hw;
 	int err;
 
@@ -1961,6 +1968,8 @@ static pci_ers_result_t alx_pci_error_slot_reset(struct pci_dev *pdev)
 	if (!alx_reset_mac(hw))
 		rc = PCI_ERS_RESULT_RECOVERED;
 out:
+	pci_cleanup_aer_uncorrect_error_status(pdev);
+
 	rtnl_unlock();
 
 	return rc;

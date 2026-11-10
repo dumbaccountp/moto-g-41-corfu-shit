@@ -2,7 +2,8 @@
 #ifndef __ASM_VDSOCLOCKSOURCE_H
 #define __ASM_VDSOCLOCKSOURCE_H
 
-#define VDSO_ARCH_CLOCKMODES	\
-	VDSO_CLOCKMODE_ARCHTIMER
+struct arch_clocksource_data {
+	bool vdso_direct;	/* Usable for direct VDSO access? */
+};
 
 #endif /* __ASM_VDSOCLOCKSOURCE_H */

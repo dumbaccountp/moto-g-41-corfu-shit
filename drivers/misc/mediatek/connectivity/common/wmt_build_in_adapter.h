@@ -23,7 +23,6 @@ typedef int (*wmt_bridge_conninfra_reg_is_bus_hang)(void);
 typedef ssize_t (*wmt_bridge_debug_write_cb)(struct file *, const char __user *, size_t, loff_t *);
 typedef ssize_t (*wmt_bridge_debug_read_cb)(struct file *, char __user *, size_t, loff_t *);
 
-
 struct wmt_platform_bridge {
 	wmt_bridge_thermal_query_cb thermal_query_cb;
 	wmt_bridge_trigger_assert_cb trigger_assert_cb;

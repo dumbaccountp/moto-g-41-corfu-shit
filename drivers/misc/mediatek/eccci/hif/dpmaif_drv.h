@@ -6,11 +6,8 @@
 #ifndef __MODEM_DPMAIF_DRV_H__
 #define __MODEM_DPMAIF_DRV_H__
 #include "ccci_config.h"
-#ifdef MT6297
-#include "dpmaif_reg_v2.h"
-#else
 #include "dpmaif_reg.h"
-#endif
+
 /* == RX part == */
 #ifdef HW_FRG_FEATURE_ENABLE
 unsigned short drv_dpmaif_dl_get_frg_bat_ridx(unsigned char q_num);
@@ -33,6 +30,7 @@ void drv_dpmaif_mask_ul_que_interrupt(unsigned char q_num);
 void drv_dpmaif_unmask_ul_interrupt(unsigned char q_num);
 unsigned int drv_dpmaif_ul_get_ridx(unsigned char q_num);
 unsigned int drv_dpmaif_ul_get_rwidx(unsigned char q_num);
+unsigned int drv_dpmaif_ul_get_hw_widx_01(void);
 int drv_dpmaif_ul_add_wcnt(unsigned char q_num, unsigned short drb_wcnt);
 /* isr part */
 #define drv_dpmaif_get_dl_isr_event() \

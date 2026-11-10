@@ -40,7 +40,6 @@
 #include "kd_imgsensor_errcode.h"
 
 #include "imx576mipiraw_Sensor.h"
-#include "platform_common.h"
 
 #define PFX "IMX576_camera_sensor"
 #define NO_USE_3HDR 1
@@ -55,8 +54,6 @@
 
 static kal_uint32 streaming_control(kal_bool enable);
 static kal_uint16 imx576_HDR_synthesis = 1;
-
-static unsigned int g_platform_id;
 
 #define LOG_INF(format, args...) pr_debug(PFX "[%s] " format, __func__, ##args)
 static DEFINE_SPINLOCK(imgsensor_drv_lock);
@@ -340,12 +337,18 @@ static kal_uint16 imx576_seq_write_cmos_sensor(kal_uint16 addr,
 static kal_uint16 imx576_table_write_cmos_sensor(kal_uint16 *para,
 						 kal_uint32 len)
 {
-	char puSendCmd[I2C_BUFFER_LEN];
-	kal_uint32 tosend, IDX;
+	kal_uint32 tosend = 0, IDX = 0;
 	kal_uint16 addr = 0, addr_last = 0, data;
+	char *puSendCmd = NULL;
 
-	tosend = 0;
-	IDX = 0;
+	puSendCmd = kmalloc(
+		sizeof(char) * I2C_BUFFER_LEN,
+		GFP_KERNEL);
+
+	if (puSendCmd == NULL) {
+		pr_info("allocate mem failed\n");
+		return -ENOMEM;
+	}
 
 	while (len > IDX) {
 		addr = para[IDX];
@@ -377,12 +380,8 @@ static kal_uint16 imx576_table_write_cmos_sensor(kal_uint16 *para,
 		tosend = 0;
 #endif
 	}
+	kfree(puSendCmd);
 
-#if 0 /*for debug*/
-	for (int i = 0; i < len/2; i++)
-		LOG_INF("readback addr(0x%x)=0x%x\n",
-			para[2*i], read_cmos_sensor_8(para[2*i]));
-#endif
 	return 0;
 }
 
@@ -394,6 +393,8 @@ static void set_dummy(void)
 	write_cmos_sensor_8(0x0104, 0x01);
 	write_cmos_sensor_8(0x0340, imgsensor.frame_length >> 8);
 	write_cmos_sensor_8(0x0341, imgsensor.frame_length & 0xFF);
+	write_cmos_sensor_8(0x0342, imgsensor.line_length >> 8);
+	write_cmos_sensor_8(0x0343, imgsensor.line_length & 0xFF);
 	write_cmos_sensor_8(0x0104, 0x00);
 }	/*	set_dummy  */
 
@@ -432,10 +433,10 @@ static void write_shutter(kal_uint16 shutter)
 
 
 	spin_lock(&imgsensor_drv_lock);
-	// if (shutter > imgsensor.min_frame_length - imgsensor_info.margin)
-		// imgsensor.frame_length = shutter + imgsensor_info.margin;
-	// else
-	imgsensor.frame_length = imgsensor.min_frame_length;
+	if (shutter > imgsensor.min_frame_length - imgsensor_info.margin)
+		imgsensor.frame_length = shutter + imgsensor_info.margin;
+	else
+		imgsensor.frame_length = imgsensor.min_frame_length;
 	if (imgsensor.frame_length > imgsensor_info.max_frame_length)
 		imgsensor.frame_length = imgsensor_info.max_frame_length;
 	spin_unlock(&imgsensor_drv_lock);
@@ -450,6 +451,21 @@ static void write_shutter(kal_uint16 shutter)
 			set_max_framerate(296, 0);
 		else if (realtime_fps >= 147 && realtime_fps <= 150)
 			set_max_framerate(146, 0);
+		else {
+			/* Extend frame length */
+			write_cmos_sensor_8(0x0104, 0x01);
+			write_cmos_sensor_8(0x0340,
+					    imgsensor.frame_length >> 8);
+			write_cmos_sensor_8(0x0341,
+					    imgsensor.frame_length & 0xFF);
+			write_cmos_sensor_8(0x0104, 0x00);
+		}
+	} else {
+		/* Extend frame length */
+		write_cmos_sensor_8(0x0104, 0x01);
+		write_cmos_sensor_8(0x0340, imgsensor.frame_length >> 8);
+		write_cmos_sensor_8(0x0341, imgsensor.frame_length & 0xFF);
+		write_cmos_sensor_8(0x0104, 0x00);
 	}
 
 	/* Update Shutter */
@@ -1490,8 +1506,8 @@ static kal_uint32 get_imgsensor_id(UINT32 *sensor_id)
 		do {
 			*sensor_id = return_lot_id_from_otp();
 			if (*sensor_id == imgsensor_info.sensor_id) {
-				pr_info("[%s] i2c write id: 0x%x, sensor id: 0x%x\n",
-					__func__, imgsensor.i2c_write_id, *sensor_id);
+				LOG_INF("i2c write id: 0x%x, sensor id: 0x%x\n",
+					imgsensor.i2c_write_id, *sensor_id);
 				return ERROR_NONE;
 			}
 			LOG_INF(
@@ -2403,7 +2419,8 @@ static void imx576_set_lsc_reg_setting(
 			regDa[i]);
 	}
 	#endif
-	write_cmos_sensor_8(0x0B00, 0x00); /* lsc disable */
+	write_cmos_sensor_8(0x0B00, 0x00); /*lsc disable*/
+
 }
 
 static void set_imx576_ATR(
@@ -2491,10 +2508,6 @@ static kal_uint32 streaming_control(kal_bool enable)
 {
 	LOG_INF("streaming_enable(0=Sw Standby,1=streaming): %d\n", enable);
 	if (enable) {
-		if (read_cmos_sensor_8(0x0350) != 0x01) {
-			pr_info("single cam scenario enable auto-extend");
-			write_cmos_sensor_8(0x0350, 0x01);
-		}
 		write_cmos_sensor_8(0x0100, 0x01);
 		check_stream_is_on();
 	} else
@@ -2509,7 +2522,7 @@ static kal_uint32 get_sensor_temperature(void)
 
 	temperature = read_cmos_sensor_8(0x013a);
 
-	if (temperature <= 0x4F)
+	if (temperature >= 0x0 && temperature <= 0x4F)
 		temperature_convert = temperature;
 	else if (temperature >= 0x50 && temperature <= 0x7F)
 		temperature_convert = 80;
@@ -2594,10 +2607,11 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 			break;
 		}
 		break;
+#ifdef IMGSENSOR_MT6885
 	case SENSOR_FEATURE_GET_OFFSET_TO_START_OF_EXPOSURE:
-		if (IS_MT6893(g_platform_id) || IS_MT6885(g_platform_id))
-			*(MUINT32 *)(uintptr_t)(*(feature_data + 1)) = 1500000;
+		*(MUINT32 *)(uintptr_t)(*(feature_data + 1)) = 1500000;
 		break;
+#endif
 	case SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO:
 		switch (*feature_data) {
 		case MSDK_SCENARIO_ID_CAMERA_CAPTURE_JPEG:
@@ -2811,8 +2825,10 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 				   (UINT16)*(feature_data+2));
 		break;
 	case SENSOR_FEATURE_GET_VC_INFO:
+	#if 0
 		LOG_INF("SENSOR_FEATURE_GET_VC_INFO %d\n",
 			(UINT16) *feature_data);
+	#endif
 		pvcinfo =
 	     (struct SENSOR_VC_INFO_STRUCT *) (uintptr_t) (*(feature_data + 1));
 		switch (*feature_data_32) {
@@ -3024,20 +3040,13 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 	return ERROR_NONE;
 }	/*	feature_control()  */
 
-static void set_platform_info(unsigned int platform_id)
-{
-	g_platform_id = platform_id;
-	pr_info("%s id:%x\n", __func__, g_platform_id);
-}
-
 static struct SENSOR_FUNCTION_STRUCT sensor_func = {
 	open,
 	get_info,
 	get_resolution,
 	feature_control,
 	control,
-	close,
-	set_platform_info
+	close
 };
 
 /* kin0603 */

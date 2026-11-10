@@ -11,9 +11,8 @@
 
 #define CLK_26M				(26)
 
-#define GPIO_ELEM_CNT			(3)
-#define CALI_CONFIG_ELEM_CNT		(3)
-#define OPP_ELEM_CNT			(7)
+#define CALI_CONFIG_ELEM_CNT	(3)
+#define OPP_ELEM_CNT			(8)
 
 #define REG_MAX_MASK			(0xFFFFFFFF)
 #define SCP_ULPOSC_SEL_CORE		(0x4)
@@ -42,7 +41,7 @@
 #define REG_DEFINE(reg, ofs, msk, bit)					\
 	REG_DEFINE_WITH_INIT(reg, ofs, msk, bit, 0, 0)
 
-enum scp_core_enum {
+enum {
 	SCP_CORE_0,
 	SCP_CORE_1,
 	SCP_MAX_CORE_NUM,
@@ -54,7 +53,6 @@ enum scp_dvfs_err_enum {
 	ESCP_DVFS_PMIC_REGULATOR_FAILED,
 	ESCP_DVFS_IPI_FAILED,
 	ESCP_DVFS_CALI_FAILED,
-	ESCP_DVFS_GPIO_CONFIG_FAILED,
 	ESCP_DVFS_NO_CALI_CONFIG_FOUND,
 	ESCP_DVFS_NO_CALI_HW_FOUND,
 	ESCP_DVFS_DATA_RE_INIT,
@@ -96,7 +94,7 @@ enum scp_power_status {
 	POW_ON = 1 << 1, /* 1: cpu-on, 0: cpu-off */
 };
 
-enum scp_ipi_cmd {
+enum {
 	SCP_SLEEP_OFF,
 	SCP_SLEEP_ON,
 	SCP_SLEEP_NO_WAKEUP,
@@ -119,21 +117,11 @@ enum scp_ipi_cmd {
 
 enum ulposc_ver_enum {
 	ULPOSC_VER_1, /* APMIXED_SYS */
-	ULPOSC_VER_2, /* VLP_CKSYS */
 	MAX_ULPOSC_VERSION,
-};
-
-enum scp_dvfs_chip_hw_enum {
-	MT6853,
-	MT6873,
-	MT6893,
-	MT6833,
-	MAX_SCP_DVFS_CHIP_HW,
 };
 
 enum clk_dbg_ver_enum {
 	CLK_DBG_VER_1,
-	CLK_DBG_VER_2,
 	MAX_CLK_DBG_VERSION,
 };
 
@@ -205,6 +193,7 @@ struct ulposc_cali_hw {
 	unsigned short *cali_freq;
 	bool do_ulposc_cali;
 	bool cali_failed;
+	unsigned int fmeter_id_ulposc2;
 };
 
 struct scp_clk_hw {
@@ -233,12 +222,12 @@ struct dvfs_opp {
 	unsigned int freq;
 	unsigned int clk_mux;
 	unsigned int resource_req;
+	unsigned int uv_idx;
 };
 
 struct scp_dvfs_hw {
 	struct dvfs_opp *opp;
 	struct regmap *pmic_regmap;
-	struct regmap *gpio_regmap;
 	struct scp_pmic_regs *pmic_regs;
 	struct ulposc_cali_hw ulposc_hw;
 	struct scp_clk_hw *clk_hw;
@@ -249,25 +238,25 @@ struct scp_dvfs_hw {
 	bool vlpck_bypass_phase1;
 	bool vlp_support; /* Moving regulator & PMIC setting into SCP side */
 	bool pmic_sshub_en;
-	bool sleep_init_done;
+	bool ipi_init_done;
 	bool pre_mux_en;
 	u32 scp_opp_nums;
 	int vow_lp_en_gear;
 	int cur_dbg_core;
 	u32 core_nums;
-	unsigned int secure_access_scp;
-	bool bypass_pmic_rg_access;
 };
 
 extern int scp_pll_ctrl_set(unsigned int pll_ctrl_flag, unsigned int pll_sel);
 extern int scp_request_freq(void);
 extern int scp_resource_req(unsigned int req);
 extern uint32_t scp_get_freq(void);
+extern unsigned int scp_get_dvfs_opp(void);
 extern void scp_init_vcore_request(void);
+extern void scp_pll_mux_set(unsigned int pll_ctrl_flag);
 extern void wait_scp_dvfs_init_done(void);
-extern bool sync_ulposc_cali_data_to_scp(void);
+extern void sync_ulposc_cali_data_to_scp(void);
 extern int __init scp_dvfs_init(void);
-extern void scp_dvfs_exit(void);
+extern void __exit scp_dvfs_exit(void);
 extern int scp_dvfs_feature_enable(void);
 
 /* scp dvfs variable*/

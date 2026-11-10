@@ -6,8 +6,6 @@
 #ifndef _UFS_MEDIATEK_DBG_H
 #define _UFS_MEDIATEK_DBG_H
 
-#if IS_ENABLED(CONFIG_SCSI_UFS_MEDIATEK_DBG)
-
 #include <linux/device.h>
 #include <linux/seq_file.h>
 #include <linux/types.h>
@@ -35,14 +33,30 @@ do { \
 	} \
 } while (0)
 
+#define SPREAD_DEV_PRINTF(buff, size, evt, dev, fmt, args...) \
+do { \
+	if (buff && size && *(size)) { \
+		unsigned long var = snprintf(*(buff), *(size), fmt, ##args); \
+		if (var > 0) { \
+			*(size) -= var; \
+			*(buff) += var; \
+		} \
+	} \
+	if (evt) \
+		seq_printf(evt, fmt, ##args); \
+	if (!buff && !evt) { \
+		dev_info(dev, fmt, ##args); \
+	} \
+} while (0)
+
 enum ufsdbg_cmd_type {
 	UFSDBG_CMD_LIST_DUMP    = 0,
 	UFSDBG_PWR_MODE_DUMP    = 1,
 	UFSDBG_HEALTH_DUMP      = 2,
 	UFSDBG_CMD_LIST_ENABLE  = 3,
 	UFSDBG_CMD_LIST_DISABLE = 4,
-	UFSDBG_CMD_QOS_ON       = 5,
-	UFSDBG_CMD_QOS_OFF      = 6,
+	UFS_CMD_QOS_ON          = 5,
+	UFS_CMD_QOS_OFF         = 6,
 	UFSDBG_UNKNOWN
 };
 
@@ -53,7 +67,6 @@ enum cmd_hist_event {
 	CMD_DEV_COMPLETED,
 	CMD_TM_SEND,
 	CMD_TM_COMPLETED,
-	CMD_TM_COMPLETED_ERR,
 	CMD_UIC_SEND,
 	CMD_UIC_CMPL_GENERAL,
 	CMD_UIC_CMPL_PWR_CTRL,
@@ -65,13 +78,6 @@ enum cmd_hist_event {
 	CMD_DEBUG_PROC,
 	CMD_GENERIC,
 	CMD_CLK_GATING,
-};
-
-struct tm_cmd_struct {
-	u8 lun;
-	u8 tag;
-	u8 task_tag;
-	u16 tm_func;
 };
 
 struct utp_cmd_struct {
@@ -103,23 +109,20 @@ struct cmd_hist_struct {
 	u64 time;
 	u64 duration;
 	union {
-		struct tm_cmd_struct tm;
 		struct utp_cmd_struct utp;
 		struct uic_cmd_struct uic;
 		struct clk_gating_event_struct clk_gating;
 	} cmd;
 };
 
-int ufs_mtk_dbg_register(struct ufs_hba *hba);
-void ufs_mtk_dbg_dump(u32 latest_cnt);
+int ufsdbg_register(struct device *dev);
 int cmd_hist_enable(void);
 int cmd_hist_disable(void);
-
-#else
-
-#define ufs_mtk_dbg_register(...)
-
-#endif
-
+void ufs_mediatek_dbg_dump(void);
+void ufs_mtk_dbg_add_trace(const char *dev_name,
+				 const char *str, unsigned int tag,
+				 u32 doorbell, int transfer_len, u32 intr,
+				 u64 lba, u8 opcode,
+				 u8 crypt_en, u8 crypt_keyslot);
 #endif
 

@@ -36,6 +36,4 @@ int mtk_lpm_sysfs_sub_entry_node_add(const char *name
 		, struct mtk_lp_sysfs_handle *parent
 		, struct mtk_lp_sysfs_handle *handle);
 
-int mtk_lpm_sysfs_remove(void);
-
 #endif

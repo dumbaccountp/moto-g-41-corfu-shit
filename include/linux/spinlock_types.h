@@ -15,13 +15,16 @@
 # include <linux/spinlock_types_up.h>
 #endif
 
-#include <linux/lockdep_types.h>
+#include <linux/lockdep.h>
 
 typedef struct raw_spinlock {
 	arch_spinlock_t raw_lock;
 #ifdef CONFIG_DEBUG_SPINLOCK
 	unsigned int magic, owner_cpu;
 	void *owner;
+	/* timestamp of lock/unlock*/
+	unsigned long long lock_t;
+	unsigned long long unlock_t;
 #endif
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	struct lockdep_map dep_map;
@@ -33,18 +36,8 @@ typedef struct raw_spinlock {
 #define SPINLOCK_OWNER_INIT	((void *)-1L)
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
-# define RAW_SPIN_DEP_MAP_INIT(lockname)		\
-	.dep_map = {					\
-		.name = #lockname,			\
-		.wait_type_inner = LD_WAIT_SPIN,	\
-	}
-# define SPIN_DEP_MAP_INIT(lockname)			\
-	.dep_map = {					\
-		.name = #lockname,			\
-		.wait_type_inner = LD_WAIT_CONFIG,	\
-	}
+# define SPIN_DEP_MAP_INIT(lockname)	.dep_map = { .name = #lockname }
 #else
-# define RAW_SPIN_DEP_MAP_INIT(lockname)
 # define SPIN_DEP_MAP_INIT(lockname)
 #endif
 
@@ -61,7 +54,7 @@ typedef struct raw_spinlock {
 	{					\
 	.raw_lock = __ARCH_SPIN_LOCK_UNLOCKED,	\
 	SPIN_DEBUG_INIT(lockname)		\
-	RAW_SPIN_DEP_MAP_INIT(lockname) }
+	SPIN_DEP_MAP_INIT(lockname) }
 
 #define __RAW_SPIN_LOCK_UNLOCKED(lockname)	\
 	(raw_spinlock_t) __RAW_SPIN_LOCK_INITIALIZER(lockname)
@@ -82,17 +75,11 @@ typedef struct spinlock {
 	};
 } spinlock_t;
 
-#define ___SPIN_LOCK_INITIALIZER(lockname)	\
-	{					\
-	.raw_lock = __ARCH_SPIN_LOCK_UNLOCKED,	\
-	SPIN_DEBUG_INIT(lockname)		\
-	SPIN_DEP_MAP_INIT(lockname) }
-
 #define __SPIN_LOCK_INITIALIZER(lockname) \
-	{ { .rlock = ___SPIN_LOCK_INITIALIZER(lockname) } }
+	{ { .rlock = __RAW_SPIN_LOCK_INITIALIZER(lockname) } }
 
 #define __SPIN_LOCK_UNLOCKED(lockname) \
-	(spinlock_t) __SPIN_LOCK_INITIALIZER(lockname)
+	(spinlock_t ) __SPIN_LOCK_INITIALIZER(lockname)
 
 #define DEFINE_SPINLOCK(x)	spinlock_t x = __SPIN_LOCK_UNLOCKED(x)
 

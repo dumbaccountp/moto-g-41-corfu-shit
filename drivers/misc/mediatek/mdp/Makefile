@@ -13,44 +13,94 @@
 
 # driver code for MDP
 
+ifeq ($(CONFIG_MACH_MT6833),y)
+MTK_PLATFORM := "mt6833"
+else ifeq ($(CONFIG_MACH_MT6781),y)
+MTK_PLATFORM := "mt6781"
+else
+MTK_PLATFORM := $(CONFIG_MTK_PLATFORM)
+endif
+
+ccflags-$(CONFIG_MACH_MT6885) += -DCMDQ_MDP_ENABLE_SPR
+ccflags-$(CONFIG_MACH_MT6885) += -DMDP_MMPATH
+ccflags-$(CONFIG_MACH_MT6893) += -DCMDQ_MDP_ENABLE_SPR
+ccflags-$(CONFIG_MACH_MT6893) += -DMDP_MMPATH
+ccflags-$(CONFIG_MACH_MT6873) += -DCMDQ_MDP_ENABLE_SPR
+ccflags-$(CONFIG_MACH_MT6873) += -DMDP_MMPATH
+ccflags-$(CONFIG_MACH_MT6853) += -DCMDQ_MDP_ENABLE_SPR
+ccflags-$(CONFIG_MACH_MT6853) += -DMDP_MMPATH
+ccflags-$(CONFIG_MACH_MT6833) += -DCMDQ_MDP_ENABLE_SPR
+ccflags-$(CONFIG_MACH_MT6833) += -DMDP_MMPATH
+ccflags-$(CONFIG_MACH_MT6877) += -DCMDQ_MDP_ENABLE_SPR
+ccflags-$(CONFIG_MACH_MT6877) += -DMDP_MMPATH
+ccflags-$(CONFIG_MACH_MT6781) += -DCMDQ_MDP_ENABLE_SPR
+ccflags-$(CONFIG_MACH_MT6781) += -DMDP_MMPATH
+
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/smi/ \
-             -I$(srctree)/drivers/misc/mediatek/mmdvfs/ \
-             -I$(srctree)/drivers/misc/mediatek/mtk-interconnect/ \
-             -I$(srctree)/drivers/misc/mediatek/include/ \
-             -I$(srctree)/drivers/misc/mediatek/mmp/ \
-             -I$(srctree)/drivers/iommu \
-             -I$(srctree)/drivers/misc/mediatek/iommu/
+	     -I$(srctree)/drivers/misc/mediatek/smi/$(MTK_PLATFORM)/ \
+	     -I$(srctree)/drivers/misc/mediatek/mmdvfs/ \
+	     -I$(srctree)/drivers/misc/mediatek/mmp/ \
+	     -I$(srctree)/drivers/misc/mediatek/mach/$(MTK_PLATFORM)/include \
+	     -I$(srctree)/drivers/iommu/ \
+	     -I$(srctree)/drivers/misc/mediatek/trusted_mem/public
 
-ifeq ($(CONFIG_MICROTRUST_TEE_SUPPORT),m)
-ifeq ($(CONFIG_MTK_MDP_MTEE_SUPPORT),m)
-ccflags-y += -I$(srctree)/drivers/dma-buf/heaps
-endif
-endif
+ccflags-$(CONFIG_MTK_CMDQ_MBOX_EXT) += -I$(srctree)/drivers/misc/mediatek/cmdq/mailbox/
 
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/mailbox/
-
-ifeq ($(strip $(CONFIG_MTK_PQ_COLOR_MODE)),"MDP")
-ccflags-y += -DCMDQ_MDP_COLOR
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6761" "mt6765" "mt6771" "mt6779" "mt6781" "mt6785" "mt6877" "mt6893" "mt6833" "mt6739" "mt6768" "mt6853" "mt6885" "mt6873"))
+	ccflags-y += -I$(srctree)/drivers/staging/android/mtk_ion \
+		-I$(srctree)/drivers/staging/android/mtk_ion/mtk
+else
+	ccflags-y += -I$(srctree)/drivers/staging/android/ion \
+		-I$(srctree)/drivers/staging/android/ion/mtk
 endif
 
-# Enable MET
-ccflags-y += -DMET_USER_EVENT_SUPPORT
-
-# Enable AEE
-ccflags-y += -DCMDQ_AEE_READY
-
-# iommu callback support
-ifeq ($(strip $(CONFIG_MTK_IOMMU)),y)
-#ccflags-y += -DMDP_IOMMU_DEBUG
+ifeq ($(CONFIG_MTK_CMDQ_V3),y)
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6739" "mt6768" "mt6771" "mt8168" "mt6785" "mt6761" "mt6765" "mt6779"))
+	ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3/ \
+		-I$(srctree)/drivers/misc/mediatek/cmdq/v3/$(MTK_PLATFORM)
+endif
+else ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt8167" "mt6761" "mt6765" "mt6779"))
+	ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v2/ \
+		-I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(MTK_PLATFORM)
 endif
 
-# dump mdp command
-#ccflags-y += -DMDP_COMMAND_SIMULATE
+ifeq ($(or $(strip $(CONFIG_MTK_SVP_ON_MTEE_SUPPORT)), $(strip $(CONFIG_MTK_CAM_GENIEZONE_SUPPORT))),y)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include/trustzone/m4u
+ccflags-y += -I$(srctree)/drivers/iommu
+endif
 
-# Secure path for SVP/HDCP/SecCam
-ifeq ($(CONFIG_MICROTRUST_TEE_SUPPORT),m)
-ifeq ($(CONFIG_MTK_MDP_MTEE_SUPPORT),m)
+# mdp platform code
+MDP_PLATFORM_DIR=$(srctree)/drivers/misc/mediatek/mdp/$(MTK_PLATFORM)
+
+platformdir_exists=$(shell if [ -d ${MDP_PLATFORM_DIR} ]; then echo "y"; else echo "n"; fi;)
+ifeq ($(platformdir_exists), y)
+ccflags-y += -I$(MDP_PLATFORM_DIR)/
+else
+ccflags-y += -DMDP_COMMON_ENG_SUPPORT
+endif
+
+ifeq ($(CONFIG_MTK_ENG_BUILD),y)
+ccflags-y += -DCMDQ_TEST_PROC
+ccflags-y += -DCMDQ_PROFILE_LOCK
+ccflags-y += -DCMDQ_DEBUG_LOOP_IRQ
+ccflags-y += -DMDP_COMMAND_SIMULATE
+endif
+
+# secure path
+# use CONFIG_MTK_CMDQ_MBOX_EXT support
+# secure path
+ifeq ($(or $(strip $(CONFIG_TRUSTONIC_TEE_SUPPORT)), $(strip $(CONFIG_MICROTRUST_TEE_SUPPORT)), \
+	$(strip $(CONFIG_MTK_ENABLE_GENIEZONE))),y)
+ifeq ($(or $(strip $(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)), $(strip $(CONFIG_MTK_CAM_SECURITY_SUPPORT))),y)
 ccflags-y += -DCMDQ_SECURE_PATH_SUPPORT
+endif	# end of CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT or CONFIG_MTK_CAM_SECURITY_SUPPORT
+endif	# end of CONFIG_TRUSTONIC_TEE_SUPPORT or CONFIG_MICROTRUST_TEE_SUPPORT
+
+ifeq ($(or $(strip $(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)), $(strip $(CONFIG_MTK_CAM_SECURITY_SUPPORT))),y)
+ifeq ($(strip $(CONFIG_MTK_ENABLE_GENIEZONE)),y)
+ifeq ($(strip $(CONFIG_MTK_CAM_GENIEZONE_SUPPORT)),y)
+ccflags-y += -DCMDQ_SECURE_MTEE_SUPPORT
+endif
 endif
 endif
 
@@ -60,62 +110,27 @@ ccflags-y += -DCMDQ_LARGE_MAX_FIRSTERROR_BUFFER
 endif
 
 # driver module
-obj-$(CONFIG_MTK_MDP) += cmdq_helper_inf.o
-obj-$(CONFIG_MTK_MDP_MT6873) += mdp_drv_mt6873.o
-obj-$(CONFIG_MTK_MDP_MT6853) += mdp_drv_mt6853.o
-ifneq ($(wildcard $(srctree)/$(src)/mdp_mt6893.c),)
-obj-$(CONFIG_MTK_MDP) += mdp_drv_mt6893.o
-endif
-ifneq ($(wildcard $(srctree)/$(src)/mdp_mt6983.c),)
-obj-$(CONFIG_MTK_MDP) += mdp_drv_mt6983.o
-endif
-
-ifneq ($(wildcard $(srctree)/$(src)/mdp_mt6879.c),)
-obj-$(CONFIG_MTK_MDP) += mdp_drv_mt6879.o
-endif
-
-ifneq ($(wildcard $(srctree)/$(src)/mdp_mt6895.c),)
-obj-$(CONFIG_MTK_MDP) += mdp_drv_mt6895.o
-endif
-
-ifneq ($(wildcard $(srctree)/$(src)/mdp_mt6855.c),)
-obj-$(CONFIG_MTK_MDP) += mdp_drv_mt6855.o
-endif
-
-ifneq ($(wildcard $(srctree)/$(src)/mdp_mt6833.c),)
-obj-$(CONFIG_MTK_MDP) += mdp_drv_mt6833.o
-endif
-
-ifneq ($(wildcard $(srctree)/$(src)/mdp_mt6789.c),)
-obj-$(CONFIG_MTK_MDP) += mdp_drv_mt6789.o
-endif
-
-mdp_drv_mt6873-objs := mdp_drv.o mdp_mt6873.o
-mdp_drv_mt6853-objs := mdp_drv.o mdp_mt6853.o
-mdp_drv_mt6833-objs := mdp_drv.o mdp_mt6833.o
-mdp_drv_mt6893-objs := mdp_drv.o mdp_mt6893.o
-mdp_drv_mt6983-objs := mdp_drv.o mdp_mt6983.o
-mdp_drv_mt6879-objs := mdp_drv.o mdp_mt6879.o
-mdp_drv_mt6895-objs := mdp_drv.o mdp_mt6895.o
-mdp_drv_mt6855-objs := mdp_drv.o mdp_mt6855.o
-mdp_drv_mt6789-objs := mdp_drv.o mdp_mt6789.o
-
-mdp_drv-objs := mdp_driver.o \
-	mdp_ioctl_ex.o \
-	mdp_common.o \
-	cmdq_record.o \
-	cmdq_virtual.o \
-	cmdq_device.o \
-	mdp_event_common.o \
-	cmdq_subsys_common.o \
-	cmdq_helper_ext.o \
-	cmdq_mmp.o \
-	mdp_fence.o
-
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += cmdq_record.o
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += cmdq_virtual.o
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += cmdq_device.o
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += mdp_driver.o
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += mdp_common.o
 #obj-y += cmdq_prof.o
 #obj-y += cmdq_test.o
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += mdp_event_common.o
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += cmdq_subsys_common.o
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += cmdq_helper_ext.o
+obj-y += mdp_ioctl_ex.o
+obj-y += mdp_m4u.o
 
-#ifeq ($(strip $(CONFIG_MMPROFILE)),y)
-#obj-y += cmdq_mmp.o
-#endif
+ifeq ($(strip $(CONFIG_MMPROFILE)),y)
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += cmdq_mmp.o
+endif
+
+ifeq ($(platformdir_exists), y)
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += $(subst ",,$(MTK_PLATFORM))/
+endif
+
+# mdp_sw_sync
+obj-$(CONFIG_MTK_CMDQ_MBOX_EXT) += sync/
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
  * (C) COPYRIGHT 2010-2021 ARM Limited. All rights reserved.
@@ -349,7 +349,7 @@ static void kbase_pm_gpu_poweroff_wait_wq(struct work_struct *data)
 
 static void kbase_pm_l2_clock_slow(struct kbase_device *kbdev)
 {
-#if defined(CONFIG_MALI_MIDGARD_DVFS) && !defined(CONFIG_MALI_DEVFREQ)
+#if defined(CONFIG_MALI_MIDGARD_DVFS)
 	struct clk *clk = kbdev->clocks[0];
 #endif
 
@@ -394,7 +394,7 @@ static void kbase_pm_l2_clock_slow(struct kbase_device *kbdev)
 
 static void kbase_pm_l2_clock_normalize(struct kbase_device *kbdev)
 {
-#if defined(CONFIG_MALI_MIDGARD_DVFS) && !defined(CONFIG_MALI_DEVFREQ)
+#if defined(CONFIG_MALI_MIDGARD_DVFS)
 	struct clk *clk = kbdev->clocks[0];
 #endif
 

@@ -11,9 +11,9 @@
  *
  * Based on:
  *	o MAX3421E datasheet
- *		https://datasheets.maximintegrated.com/en/ds/MAX3421E.pdf
+ *		http://datasheets.maximintegrated.com/en/ds/MAX3421E.pdf
  *	o MAX3421E Programming Guide
- *		https://www.hdl.co.jp/ftpdata/utl-001/AN3785.pdf
+ *		http://www.hdl.co.jp/ftpdata/utl-001/AN3785.pdf
  *	o gadget/dummy_hcd.c
  *		For USB HCD implementation.
  *	o Arduino MAX3421 driver
@@ -125,6 +125,8 @@ struct max3421_hcd {
 
 	struct task_struct *spi_thread;
 
+	struct max3421_hcd *next;
+
 	enum max3421_rh_state rh_state;
 	/* lower 16 bits contain port status, upper 16 bits the change mask: */
 	u32 port_status;
@@ -171,6 +173,8 @@ struct max3421_ep {
 	u8 retries;
 	u8 retransmit;			/* packet needs retransmission */
 };
+
+static struct max3421_hcd *max3421_hcd_list;
 
 #define MAX3421_FIFO_SIZE	64
 
@@ -311,7 +315,7 @@ static const int hrsl_to_error[] = {
 };
 
 /*
- * See https://www.beyondlogic.org/usbnutshell/usb4.shtml#Control for a
+ * See http://www.beyondlogic.org/usbnutshell/usb4.shtml#Control for a
  * reasonable overview of how control transfers use the the IN/OUT
  * tokens.
  */
@@ -895,7 +899,7 @@ max3421_handle_error(struct usb_hcd *hcd, u8 hrsl)
 			spi_wr8(hcd, MAX3421_REG_HCTL,
 				BIT(sndtog + MAX3421_HCTL_SNDTOG0_BIT));
 		}
-		fallthrough;
+		/* FALL THROUGH */
 	case MAX3421_HRSL_BADBC:	/* bad byte count */
 	case MAX3421_HRSL_PIDERR:	/* received PID is corrupted */
 	case MAX3421_HRSL_PKTERR:	/* packet error (stuff, EOP) */
@@ -1695,7 +1699,7 @@ max3421_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, u16 index,
 			dev_dbg(hcd->self.controller, "power-off\n");
 			max3421_gpout_set_value(hcd, pdata->vbus_gpout,
 						!pdata->vbus_active_level);
-			fallthrough;
+			/* FALLS THROUGH */
 		default:
 			max3421_hcd->port_status &= ~(1 << value);
 		}
@@ -1748,7 +1752,7 @@ max3421_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, u16 index,
 			break;
 		case USB_PORT_FEAT_RESET:
 			max3421_reset_port(hcd);
-			fallthrough;
+			/* FALLS THROUGH */
 		default:
 			if ((max3421_hcd->port_status & USB_PORT_STAT_POWER)
 			    != 0)
@@ -1780,6 +1784,21 @@ max3421_bus_resume(struct usb_hcd *hcd)
 	return -1;
 }
 
+/*
+ * The SPI driver already takes care of DMA-mapping/unmapping, so no
+ * reason to do it twice.
+ */
+static int
+max3421_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags)
+{
+	return 0;
+}
+
+static void
+max3421_unmap_urb_for_dma(struct usb_hcd *hcd, struct urb *urb)
+{
+}
+
 static const struct hc_driver max3421_hcd_desc = {
 	.description =		"max3421",
 	.product_desc =		DRIVER_DESC,
@@ -1791,6 +1810,8 @@ static const struct hc_driver max3421_hcd_desc = {
 	.get_frame_number =	max3421_get_frame_number,
 	.urb_enqueue =		max3421_urb_enqueue,
 	.urb_dequeue =		max3421_urb_dequeue,
+	.map_urb_for_dma =	max3421_map_urb_for_dma,
+	.unmap_urb_for_dma =	max3421_unmap_urb_for_dma,
 	.endpoint_disable =	max3421_endpoint_disable,
 	.hub_status_data =	max3421_hub_status_data,
 	.hub_control =		max3421_hub_control,
@@ -1878,8 +1899,9 @@ max3421_probe(struct spi_device *spi)
 	}
 	set_bit(HCD_FLAG_POLL_RH, &hcd->flags);
 	max3421_hcd = hcd_to_max3421(hcd);
+	max3421_hcd->next = max3421_hcd_list;
+	max3421_hcd_list = max3421_hcd;
 	INIT_LIST_HEAD(&max3421_hcd->ep_list);
-	spi_set_drvdata(spi, max3421_hcd);
 
 	max3421_hcd->tx = kmalloc(sizeof(*max3421_hcd->tx), GFP_KERNEL);
 	if (!max3421_hcd->tx)
@@ -1929,18 +1951,28 @@ error:
 static int
 max3421_remove(struct spi_device *spi)
 {
-	struct max3421_hcd *max3421_hcd;
-	struct usb_hcd *hcd;
+	struct max3421_hcd *max3421_hcd = NULL, **prev;
+	struct usb_hcd *hcd = NULL;
 	unsigned long flags;
 
-	max3421_hcd = spi_get_drvdata(spi);
-	hcd = max3421_to_hcd(max3421_hcd);
+	for (prev = &max3421_hcd_list; *prev; prev = &(*prev)->next) {
+		max3421_hcd = *prev;
+		hcd = max3421_to_hcd(max3421_hcd);
+		if (hcd->self.controller == &spi->dev)
+			break;
+	}
+	if (!max3421_hcd) {
+		dev_err(&spi->dev, "no MAX3421 HCD found for SPI device %p\n",
+			spi);
+		return -ENODEV;
+	}
 
 	usb_remove_hcd(hcd);
 
 	spin_lock_irqsave(&max3421_hcd->lock, flags);
 
 	kthread_stop(max3421_hcd->spi_thread);
+	*prev = max3421_hcd->next;
 
 	spin_unlock_irqrestore(&max3421_hcd->lock, flags);
 

@@ -7,41 +7,21 @@
 #define _UFS_MEDIATEK_H
 
 #include <linux/bitops.h>
-#include <linux/soc/mediatek/mtk_sip_svc.h>
 #include <linux/pm_qos.h>
+#include <linux/soc/mediatek/mtk_sip_svc.h>
+#include <linux/soc/mediatek/mtk-pm-qos.h>
 
-#ifdef CONFIG_UFSFEATURE
 #include "ufshcd.h"
-#include "ufsfeature.h"
-#endif
-
-/* UFSHCD error handling flags */
-enum {
-	UFSHCD_EH_IN_PROGRESS = (1 << 0),
-};
-
-#define ufshcd_eh_in_progress(h) \
-	((h)->eh_flags & UFSHCD_EH_IN_PROGRESS)
-
-#if defined(CONFIG_SCSI_SKHID)
-#include "ufs-manual-gc.h"
-#endif
 
 /*
  * Vendor specific UFSHCI Registers
  */
-#define REG_UFS_XOUFS_CTRL          0x140
 #define REG_UFS_REFCLK_CTRL         0x144
 #define REG_UFS_EXTREG              0x2100
 #define REG_UFS_MPHYCTRL            0x2200
-#define REG_UFS_MTK_HW_VER          0x2240
 #define REG_UFS_REJECT_MON          0x22AC
 #define REG_UFS_DEBUG_SEL           0x22C0
 #define REG_UFS_PROBE               0x22C8
-#define REG_UFS_DEBUG_SEL_B0        0x22D0
-#define REG_UFS_DEBUG_SEL_B1        0x22D4
-#define REG_UFS_DEBUG_SEL_B2        0x22D8
-#define REG_UFS_DEBUG_SEL_B3        0x22DC
 
 /*
  * Ref-clk control
@@ -77,15 +57,6 @@ enum {
 #define VS_SAVEPOWERCONTROL         0xD0A6
 #define VS_UNIPROPOWERDOWNCONTROL   0xD0A8
 
-#if defined(CONFIG_UFSFEATURE)
-extern unsigned int ram_size;
-extern char storage_mfrid[32];
-#define IS_SAMSUNG_DEVICE(mfrid)   (0 == strcmp(mfrid,"SAMSUNG"))
-#define IS_SKHYNIX_DEVICE(mfrid)   (0 == strcmp(mfrid,"SKHYNIX"))
-#define IS_MICRON_DEVICE(mfrid)   (0 == strcmp(mfrid,"MICRON"))
-#define IS_RAM_SIZE_GREATER_THAN_4G(ram_size) (ram_size > 4)
-#endif
-
 /*
  * Vendor specific link state
  */
@@ -99,26 +70,6 @@ enum {
 };
 
 /*
- * Vendor specific host controller state
- */
-enum {
-	VS_HCE_RESET                = 0,
-	VS_HCE_BASE                 = 1,
-	VS_HCE_OOCPR_WAIT           = 2,
-	VS_HCE_DME_RESET            = 3,
-	VS_HCE_MIDDLE               = 4,
-	VS_HCE_DME_ENABLE           = 5,
-	VS_HCE_DEFAULTS             = 6,
-	VS_HIB_IDLEEN               = 7,
-	VS_HIB_ENTER                = 8,
-	VS_HIB_ENTER_CONF           = 9,
-	VS_HIB_MIDDLE               = 10,
-	VS_HIB_WAITTIMER            = 11,
-	VS_HIB_EXIT_CONF            = 12,
-	VS_HIB_EXIT                 = 13,
-};
-
-/*
  * SiP commands
  */
 #define MTK_SIP_UFS_CONTROL               MTK_SIP_SMC_CMD(0x276)
@@ -126,56 +77,26 @@ enum {
 #define UFS_MTK_SIP_DEVICE_RESET          BIT(1)
 #define UFS_MTK_SIP_CRYPTO_CTRL           BIT(2)
 #define UFS_MTK_SIP_REF_CLK_NOTIFICATION  BIT(3)
-#define UFS_MTK_SIP_HOST_PWR_CTRL         BIT(5)
-#define UFS_MTK_SIP_GET_VCC_INFO          BIT(6)
-#define UFS_MTK_SIP_DEVICE_PWR_CTRL       BIT(7)
 
 /*
- * SMC call wapper function
+ * Quirks
  */
-#define _ufs_mtk_smc(cmd, res, v1, v2, v3, v4, v5, v6) \
-		arm_smccc_smc(MTK_SIP_UFS_CONTROL, \
-				  cmd, v1, v2, v3, v4, v5, v6, &(res))
+enum ufs_mtk_host_quirks {
+	/*
+	 * Auto-hibern8 shall be disabled while doorbell is not empty
+	 */
+	UFS_MTK_HOST_QUIRK_BROKEN_AUTO_HIBERN8 = BIT(0),
 
-#define _ufs_mtk_smc_0(cmd, res) \
-	_ufs_mtk_smc(cmd, res, 0, 0, 0, 0, 0, 0)
+	/*
+	 * This quirk needs to be enabled if we apply performance heuristic
+	 * to UFS host.
+	 */
+	UFS_MTK_HOST_QUIRK_UFS_HCI_PERF_HEURISTIC = BIT(1),
 
-#define _ufs_mtk_smc_1(cmd, res, v1) \
-	_ufs_mtk_smc(cmd, res, v1, 0, 0, 0, 0, 0)
-
-#define _ufs_mtk_smc_2(cmd, res, v1, v2) \
-	_ufs_mtk_smc(cmd, res, v1, v2, 0, 0, 0, 0)
-
-#define _ufs_mtk_smc_3(cmd, res, v1, v2, v3) \
-	_ufs_mtk_smc(cmd, res, v1, v2, v3, 0, 0, 0)
-
-#define _ufs_mtk_smc_4(cmd, res, v1, v2, v3, v4) \
-	_ufs_mtk_smc(cmd, res, v1, v2, v3, v4, 0, 0)
-
-#define _ufs_mtk_smc_5(cmd, res, v1, v2, v3, v4, v5) \
-	_ufs_mtk_smc(cmd, res, v1, v2, v3, v4, v5, 0)
-
-#define _ufs_mtk_smc_6(cmd, res, v1, v2, v3, v4, v5, v6) \
-	_ufs_mtk_smc(cmd, res, v1, v2, v3, v4, v5, v6)
-
-#define _ufs_mtk_smc_selector(cmd, res, v1, v2, v3, v4, v5, v6, FUNC, ...) FUNC
-
-#define ufs_mtk_smc(...) \
-	_ufs_mtk_smc_selector(__VA_ARGS__, \
-	_ufs_mtk_smc_6(__VA_ARGS__), \
-	_ufs_mtk_smc_5(__VA_ARGS__), \
-	_ufs_mtk_smc_4(__VA_ARGS__), \
-	_ufs_mtk_smc_3(__VA_ARGS__), \
-	_ufs_mtk_smc_2(__VA_ARGS__), \
-	_ufs_mtk_smc_1(__VA_ARGS__), \
-	_ufs_mtk_smc_0(__VA_ARGS__) \
-	)
-
-/* Sip UFS GET VCC INFO */
-enum {
-	VCC_NONE = 0,
-	VCC_1,
-	VCC_2
+	/*
+	 * This quirk needs to be enabled if VCC drop slow
+	 */
+	UFS_MTK_HOST_QUIRK_UFS_VCC_ALWAYS_ON = BIT(2),
 };
 
 /*
@@ -195,27 +116,25 @@ enum {
 };
 
 /*
- * Host capability
+ * Ref-clk control mode
  */
-enum ufs_mtk_host_caps {
-	UFS_MTK_CAP_BOOST_CRYPT_ENGINE         = 1 << 0,
-	UFS_MTK_CAP_VA09_PWR_CTRL              = 1 << 1,
-	UFS_MTK_CAP_DISABLE_AH8                = 1 << 2,
-	UFS_MTK_CAP_BROKEN_VCC                 = 1 << 3,
-	UFS_MTK_CAP_DEALY_AFTER_VCC_OFF        = 1 << 4,
-
-	/* Override UFS_MTK_CAP_BROKEN_VCC's behavior to
-	 * allow vccqx upstream to enter LPM
-	 */
-	UFS_MTK_CAP_FORCE_VSx_LPM              = 1 << 5,
+enum {
+	REF_CLK_SW_MODE         = 0,
+	REF_CLK_HALF_HW_MODE    = 1,
+	REF_CLK_HW_MODE         = 2
 };
 
-struct ufs_mtk_crypt_cfg {
-	struct regulator *reg_vcore;
-	struct clk *clk_crypt_perf;
-	struct clk *clk_crypt_mux;
-	struct clk *clk_crypt_lp;
-	int vcore_volt;
+/*
+ * perf control mode
+ */
+enum perf_mode {
+	PERF_FORCE_DISABLE   = 0,
+	PERF_FORCE_ENABLE    = 1,
+	PERF_AUTO            = 2,
+};
+
+struct ufs_mtk_host_cfg {
+	enum ufs_mtk_host_quirks quirks;
 };
 
 struct ufs_mtk_hw_ver {
@@ -225,112 +144,58 @@ struct ufs_mtk_hw_ver {
 };
 
 struct ufs_mtk_host {
+	struct ufs_mtk_host_cfg *cfg;
+	struct ufs_hba *hba;
 	struct phy *mphy;
 	struct regulator *reg_va09;
 	struct reset_control *hci_reset;
 	struct reset_control *unipro_reset;
 	struct reset_control *crypto_reset;
-	struct ufs_hba *hba;
-	struct ufs_mtk_crypt_cfg *crypt;
 	struct ufs_mtk_hw_ver hw_ver;
-	enum ufs_mtk_host_caps caps;
 	bool mphy_powered_on;
 	bool unipro_lpm;
 	bool ref_clk_enabled;
+	bool auto_hibern_enabled;
 	u16 ref_clk_ungating_wait_us;
 	u16 ref_clk_gating_wait_us;
+	u32 refclk_ctrl;
+
 	bool pm_qos_init;
-	struct pm_qos_request pm_qos_req;
+	struct pm_qos_request req_cpu_dma_latency;
+
+	/* performance mode */
+	enum perf_mode perf_mode;
+	bool perf_enable;
+	int crypto_vcore_opp;
+	struct clk *crypto_clk_mux;
+	struct clk *crypto_parent_clk_normal;
+	struct clk *crypto_parent_clk_perf;
+	struct mtk_pm_qos_request *req_vcore;
+
+	/* vufs regulator lpm */
+	bool vreg_lpm_supported;
+
+	/*
+	 * RPMB device
+	 */
+	struct scsi_device *sdev_ufs_rpmb;
+	struct rpmb_dev *rawdev_ufs_rpmb;
+	struct mutex rpmb_lock;
+
 	bool qos_allowed;
 	bool qos_enabled;
-	bool boot_device;
-	struct ufs_vreg *vcc;
-
-	struct semaphore rpmb_sem;
-#if defined(CONFIG_UFSFEATURE)
-	struct ufsf_feature ufsf;
-#endif
-#if defined(CONFIG_SCSI_SKHID)
-	struct work_struct update_sysfs_work;
-	/* manual_gc */
-	struct ufs_manual_gc manual_gc;
-#endif
 };
 
-/*
- *  IOCTL opcode for ufs queries has the following opcode after
- *  SCSI_IOCTL_GET_PCI
- */
-#define UFS_IOCTL_QUERY			0x5388
+struct ufs_hba *ufs_mtk_get_hba(void);
 
-/**
- * struct ufs_ioctl_query_data - used to transfer data to and from user via
- * ioctl
- * @opcode: type of data to query (descriptor/attribute/flag)
- * @idn: id of the data structure
- * @buf_size: number of allocated bytes/data size on return
- * @buffer: data location
- *
- * Received: buffer and buf_size (available space for transferred data)
- * Submitted: opcode, idn, length, buf_size
- */
-struct ufs_ioctl_query_data {
-	/*
-	 * User should select one of the opcode defined in "enum query_opcode".
-	 * Please check include/uapi/scsi/ufs/ufs.h for the definition of it.
-	 * Note that only UPIU_QUERY_OPCODE_READ_DESC,
-	 * UPIU_QUERY_OPCODE_READ_ATTR & UPIU_QUERY_OPCODE_READ_FLAG are
-	 * supported as of now. All other query_opcode would be considered
-	 * invalid.
-	 * As of now only read query operations are supported.
-	 */
-	__u32 opcode;
-	/*
-	 * User should select one of the idn from "enum flag_idn" or "enum
-	 * attr_idn" or "enum desc_idn" based on whether opcode above is
-	 * attribute, flag or descriptor.
-	 * Please check include/uapi/scsi/ufs/ufs.h for the definition of it.
-	 */
-	__u8 idn;
-	/*
-	 * User should specify the size of the buffer (buffer[0] below) where
-	 * it wants to read the query data (attribute/flag/descriptor).
-	 * As we might end up reading less data then what is specified in
-	 * buf_size. So we are updating buf_size to what exactly we have read.
-	 */
-	__u16 buf_size;
-	/*
-	 * placeholder for the start of the data buffer where kernel will copy
-	 * the query data (attribute/flag/descriptor) read from the UFS device
-	 * Note:
-	 * For Read/Write Attribute you will have to allocate 4 bytes
-	 * For Read/Write Flag you will have to allocate 1 byte
-	 */
-	__u8 buffer[0];
-};
-
-enum {
-	BOOTDEV_SDMMC = 1,
-	BOOTDEV_UFS   = 2
-};
-
-struct tag_bootmode {
-	u32 size;
-	u32 tag;
-	u32 bootmode;
-	u32 boottype;
-};
-
-#if IS_ENABLED(CONFIG_RPMB)
 struct rpmb_dev *ufs_mtk_rpmb_get_raw_dev(void);
-#endif
+void ufs_mtk_rpmb_add(struct ufs_hba *hba, struct scsi_device *sdev_rpmb);
+void ufs_mtk_rpmb_remove(struct ufs_hba *hba);
+void ufs_mtk_rpmb_quiesce(struct ufs_hba *hba);
+int ufs_mtk_ioctl_rpmb(struct ufs_hba *hba, const void __user *buf_user);
+bool ufs_mtk_perf_is_supported(struct ufs_mtk_host *host);
+int ufs_mtk_perf_setup_crypto_clk(struct ufs_mtk_host *host, bool perf);
+int ufs_mtk_perf_heurisic_if_allow_cmd(struct ufs_hba *hba, struct scsi_cmnd *cmd);
+void ufs_mtk_perf_heurisic_req_done(struct ufs_hba *hba, struct scsi_cmnd *cmd);
 
-#if defined(CONFIG_UFSFEATURE)
-static inline struct ufsf_feature *ufs_mtk_get_ufsf(struct ufs_hba *hba)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-
-	return &host->ufsf;
-}
-#endif
 #endif /* !_UFS_MEDIATEK_H */

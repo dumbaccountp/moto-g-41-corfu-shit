@@ -1,6 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2021 MediaTek Inc.
+ * Copyright (C) 2015-2016 Intel Corp. All rights reserved
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -246,7 +254,7 @@ int rpmb_cmd_req(struct rpmb_dev *rdev, struct rpmb_data *rpmbd)
 	case RPMB_PROGRAM_KEY:
 		cnt_in = 1;
 		cnt_out = 1;
-		fallthrough;
+		/* fall through */
 	case RPMB_WRITE_DATA:
 		rpmb_cmd_set(&cmd[0], RPMB_F_WRITE | RPMB_F_REL_WRITE,
 			     rpmbd->icmd.frames, cnt_in);
@@ -262,7 +270,7 @@ int rpmb_cmd_req(struct rpmb_dev *rdev, struct rpmb_data *rpmbd)
 	case RPMB_GET_WRITE_COUNTER:
 		cnt_in = 1;
 		cnt_out = 1;
-		fallthrough;
+		/* fall through */
 	case RPMB_READ_DATA:
 		rpmb_cmd_set(&cmd[0], RPMB_F_WRITE, rpmbd->icmd.frames, cnt_in);
 		rpmb_cmd_set(&cmd[1], 0, rpmbd->ocmd.frames, cnt_out);
@@ -299,11 +307,7 @@ static void rpmb_dev_release(struct device *dev)
 }
 
 struct class rpmb_class = {
-#if IS_ENABLED(CONFIG_ARCH_MEDIATEK)
 	.name = "rpmb_dummy",
-#else
-	.name = "rpmb",
-#endif
 	.owner = THIS_MODULE,
 	.dev_release = rpmb_dev_release,
 };
@@ -515,11 +519,7 @@ struct rpmb_dev *rpmb_dev_register(struct device *dev,
 	rdev->ops = ops;
 	rdev->id = id;
 
-#if IS_ENABLED(CONFIG_ARCH_MEDIATEK)
 	dev_set_name(&rdev->dev, "rpmb_dummy%d", id);
-#else
-	dev_set_name(&rdev->dev, "rpmb%d", id);
-#endif
 	rdev->dev.class = &rpmb_class;
 	rdev->dev.parent = dev;
 	rdev->dev.groups = rpmb_attr_groups;

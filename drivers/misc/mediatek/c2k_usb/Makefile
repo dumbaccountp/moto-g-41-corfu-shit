@@ -13,24 +13,19 @@
 #
 
 
+ifeq ($(CONFIG_MTK_ECCCI_C2K), y)
 
-# ccflags-y += -DC2K_USB_UT
+#ccflags-y += -DC2K_USB_UT
 
 ccflags-y += -I$(srctree)/drivers/usb/gadget
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/usb_boost/
 
-obj-$(CONFIG_MTK_ECCCI_C2K_USB) := c2k_usb.o
-c2k_usb-$(CONFIG_MTK_ECCCI_C2K_USB) += f_rawbulk.o rawbulk.o rawbulk_transfer.o
 
-# C2K Functions
-c2k_usb_f_via_modem-y		:= f_via_modem.o
-obj-$(CONFIG_MTK_ECCCI_C2K_USB)	+= c2k_usb_f_via_modem.o
-c2k_usb_f_via_ets-y		:= f_via_ets.o
-obj-$(CONFIG_MTK_ECCCI_C2K_USB)	+= c2k_usb_f_via_ets.o
-c2k_usb_f_via_atc-y		:= f_via_atc.o
-obj-$(CONFIG_MTK_ECCCI_C2K_USB)	+= c2k_usb_f_via_atc.o
-c2k_usb_f_via_pcv-y		:= f_via_pcv.o
-obj-$(CONFIG_MTK_ECCCI_C2K_USB)	+= c2k_usb_f_via_pcv.o
-c2k_usb_f_via_gps-y		:= f_via_gps.o
-obj-$(CONFIG_MTK_ECCCI_C2K_USB)	+= c2k_usb_f_via_gps.o
+obj-$(CONFIG_MTK_ECCCI_C2K) += c2k_usb.o
+c2k_usb-y := f_rawbulk.o rawbulk.o rawbulk_transfer.o
 
+else
+
+obj- :=dummy.o
+
+endif

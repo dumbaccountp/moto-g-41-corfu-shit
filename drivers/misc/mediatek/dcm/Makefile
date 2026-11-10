@@ -1,35 +1,17 @@
-ccflags-y += -I$(srctree)/include/linux/soc/mediatek/
+
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/dcm/include/
+#ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include/dcm_v1/$(MTK_PLATFORM)/
+#ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)/
+#ccflags-y += -I$(srctree)/drivers/misc/mediatek/dramc/$(MTK_PLATFORM)/
+#ccflags-y += -I$(srctree)/drivers/misc/mediatek/dcm/include/
 
 # Core
 obj-$(CONFIG_MTK_DCM_COMMON)	+= mtk_dcm.o
 
 # SoC Drivers
-obj-$(CONFIG_MTK_DCM_MT6873) += mt6873_dcm.o
-mt6873_dcm-objs := mt6873_dcm_internal.o mt6873_dcm_autogen.o
-obj-$(CONFIG_MTK_DCM_MT6853) += mt6853_dcm.o
-mt6853_dcm-objs := mt6853_dcm_internal.o mt6853_dcm_autogen.o
-ifneq ($(wildcard $(srctree)/$(src)/mt6983_dcm_autogen.c),)
-obj-$(CONFIG_MTK_DCM_MT6983) += mt6983_dcm.o
-mt6983_dcm-objs := mt6983_dcm_internal.o mt6983_dcm_autogen.o
-endif
-ifneq ($(wildcard $(srctree)/$(src)/mt6879_dcm_autogen.c),)
-obj-$(CONFIG_MTK_DCM_MT6879) += mt6879_dcm.o
-mt6879_dcm-objs := mt6879_dcm_internal.o mt6879_dcm_autogen.o
-endif
-ifneq ($(wildcard $(srctree)/$(src)/mt6895_dcm_autogen.c),)
-obj-$(CONFIG_MTK_DCM_MT6895) += mt6895_dcm.o
-mt6895_dcm-objs := mt6895_dcm_internal.o mt6895_dcm_autogen.o
-endif
-ifneq ($(wildcard $(srctree)/$(src)/mt6855_dcm_autogen.c),)
-obj-$(CONFIG_MTK_DCM_MT6855) += mt6855_dcm.o
-mt6855_dcm-objs := mt6855_dcm_internal.o mt6855_dcm_autogen.o
-endif
-ifneq ($(wildcard $(srctree)/$(src)/mt6833_dcm_autogen.c),)
-obj-$(CONFIG_MTK_DCM_MT6833) += mt6833_dcm.o
-mt6833_dcm-objs := mt6833_dcm_internal.o mt6833_dcm_autogen.o
-endif
-ifneq ($(wildcard $(srctree)/$(src)/mt6789_dcm_autogen.c),)
-obj-$(CONFIG_MTK_DCM_MT6789) += mt6789_dcm.o
-mt6789_dcm-objs := mt6789_dcm_internal.o mt6789_dcm_autogen.o
-endif
+obj-$(CONFIG_MTK_DCM_MT6779) += mt6779_dcm.o
+mt6779_dcm-objs := mt6779_dcm_internal.o mt6779_dcm_autogen.o
+obj-$(CONFIG_MTK_DCM_MT6761) += mt6761_dcm.o
+mt6761_dcm-objs := mt6761_dcm_internal.o mt6761_dcm_autogen.o
+obj-$(CONFIG_MTK_DCM_MT6765) += mt6765_dcm.o
+mt6765_dcm-objs := mt6765_dcm_internal.o mt6765_dcm_autogen.o

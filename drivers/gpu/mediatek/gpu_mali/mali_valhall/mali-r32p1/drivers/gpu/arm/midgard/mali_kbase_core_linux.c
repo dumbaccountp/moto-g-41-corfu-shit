@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2010-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -115,7 +115,7 @@
 #include "platform/mtk_platform_common.h"
 #include <mtk_gpufreq.h>
 
-#if defined(CONFIG_MALI_MTK_GPU_BM_2)
+#if defined(MTK_GPU_BM_2) && !defined(GPU_BM_PORTING)
 #include <gpu_bm.h>
 #if IS_ENABLED(CONFIG_MTK_TINYSYS_SSPM_SUPPORT)
 #include <sspm_reservedmem_define.h>
@@ -172,7 +172,7 @@ static mali_kbase_capability_def kbase_caps_table[MALI_KBASE_NUM_CAPS] = {
 #endif
 };
 
-#if defined(CONFIG_MALI_MTK_GPU_BM_2)
+#if defined(MTK_GPU_BM_2) && !defined(GPU_BM_PORTING)
 static void get_rec_addr(void)
 {
 #if IS_ENABLED(CONFIG_MTK_TINYSYS_SSPM_SUPPORT)
@@ -212,7 +212,6 @@ static int mtk_bandwith_resource_init(struct kbase_device *kbdev)
 		return err;
 }
 #endif
-
 
 /**
  * mali_kbase_supports_cap - Query whether a kbase capability is supported
@@ -1487,6 +1486,9 @@ static int kbasep_kcpu_queue_enqueue(struct kbase_context *kctx,
 static int kbasep_cs_tiler_heap_init(struct kbase_context *kctx,
 		union kbase_ioctl_cs_tiler_heap_init *heap_init)
 {
+	if (heap_init->in.group_id >= MEMORY_GROUP_MANAGER_NR_GROUPS)
+		return -EINVAL;
+
 	kctx->jit_group_id = heap_init->in.group_id;
 
 	return kbase_csf_tiler_heap_init(kctx, heap_init->in.chunk_size,
@@ -2068,6 +2070,9 @@ static ssize_t kbase_read(struct file *filp, char __user *buf, size_t count, lof
 	if (unlikely(!kctx))
 		return -EPERM;
 
+	if (count < data_size)
+		return -ENOBUFS;
+
 	if (atomic_read(&kctx->event_count))
 		read_event = true;
 	else
@@ -2112,6 +2117,8 @@ static ssize_t kbase_read(struct file *filp, char __user *buf, size_t count, lof
 
 	if (count < sizeof(uevent))
 		return -ENOBUFS;
+
+	memset(&uevent, 0, sizeof(uevent));
 
 	do {
 		while (kbase_event_dequeue(kctx, &uevent)) {
@@ -3006,7 +3013,7 @@ struct kbasep_debug_command {
 	kbasep_debug_command_func *func;
 };
 
-void kbasep_ktrace_dump_wrapper(struct kbase_device *kbdev)
+static void kbasep_ktrace_dump_wrapper(struct kbase_device *kbdev)
 {
 	KBASE_KTRACE_DUMP(kbdev);
 }
@@ -4833,10 +4840,8 @@ int kbase_device_debugfs_init(struct kbase_device *kbdev)
 
 #ifdef CONFIG_MALI_DEVFREQ
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-#if !IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_THERMAL)
 	if (kbdev->devfreq)
 		kbase_ipa_debugfs_init(kbdev);
-#endif
 #endif /* CONFIG_DEVFREQ_THERMAL */
 #endif /* CONFIG_MALI_DEVFREQ */
 
@@ -5226,35 +5231,34 @@ int kbase_backend_devfreq_init(struct kbase_device *kbdev)
 	return 0;
 }
 
-/* the lock prove have false alarm when driver probe. skip it*/
-#define MTK_SKIP_LOCK_PROVE 1
-
-#if MTK_SKIP_LOCK_PROVE
-#define RETURN_ERROR(X) do { lockdep_on(); return X; } while (0)
-#else
-#define RETURN_ERROR(X) do { return X; } while (0)
-#endif
-
 static int kbase_platform_device_probe(struct platform_device *pdev)
 {
 	struct kbase_device *kbdev;
 	int err = 0;
 
-#if MTK_SKIP_LOCK_PROVE
-	lockdep_off();
+	// *** MTK *** : make sure gpufreq driver is ready
+	pr_info("%s start\n", __func__);
+#if !defined(CONFIG_MACH_MT6768) && !defined(CONFIG_MACH_MT6785)
+	if (mt_gpufreq_not_ready()) {
+		pr_info("gpufreq driver is not ready: %d\n", -EPROBE_DEFER);
+		return -EPROBE_DEFER;
+	}
 #endif
-
 	mali_kbase_print_cs_experimental();
 
 	kbdev = kbase_device_alloc();
 	if (!kbdev) {
 		dev_err(&pdev->dev, "Allocate device failed\n");
-		RETURN_ERROR(-ENOMEM);
+		return -ENOMEM;
 	}
 
 	kbdev->dev = &pdev->dev;
 	dev_set_drvdata(kbdev->dev, kbdev);
 
+#if defined(CONFIG_MACH_MT6768) || defined(CONFIG_MACH_MT6785)
+	err |= mtk_common_device_init(kbdev);
+	err |= mtk_platform_device_init(kbdev);
+#endif
 	err = kbase_device_init(kbdev);
 
 	if (err) {
@@ -5271,17 +5275,11 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_PROC_FS)
 		mtk_common_procfs_init();
 #endif
-
-#if defined(CONFIG_MALI_MTK_GPU_BM_2)
+#if defined(MTK_GPU_BM_2) && !defined(GPU_BM_PORTING)
 		mtk_bandwith_resource_init(kbdev);
 #endif
-#if MALI_USE_CSF
 		dev_info(kbdev->dev,
-			"Probed as %s (CSF)\n", dev_name(kbdev->mdev.this_device));
-#else
-		dev_info(kbdev->dev,
-			"Probed as %s (JM)\n", dev_name(kbdev->mdev.this_device));
-#endif
+			"Probed as %s\n", dev_name(kbdev->mdev.this_device));
 #endif /* MALI_KBASE_BUILD */
 		kbase_increment_device_id();
 #ifdef CONFIG_MALI_ARBITER_SUPPORT
@@ -5291,7 +5289,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 #endif
 	}
 
-	RETURN_ERROR(err);
+	return err;
 }
 
 #undef KBASEP_DEFAULT_REGISTER_HISTORY_SIZE

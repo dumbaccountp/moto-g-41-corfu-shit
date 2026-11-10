@@ -1,8 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MediaTek display pulse-width-modulation controller driver.
  * Copyright (c) 2015 MediaTek Inc.
  * Author: YH Huang <yh.huang@mediatek.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -14,6 +22,8 @@
 #include <linux/platform_device.h>
 #include <linux/pwm.h>
 #include <linux/slab.h>
+#include <linux/of_address.h>
+#include <linux/delay.h>
 
 #define DISP_PWM_EN		0x00
 
@@ -26,6 +36,9 @@
 
 #define PWM_HIGH_WIDTH_SHIFT	16
 #define PWM_HIGH_WIDTH_MASK	(0x1fff << PWM_HIGH_WIDTH_SHIFT)
+
+#undef pr_fmt
+#define pr_fmt(fmt) "[mtk_disp_pwm]" fmt
 
 struct mtk_pwm_data {
 	u32 enable_mask;
@@ -47,6 +60,8 @@ struct mtk_disp_pwm {
 	struct clk *clk_main;
 	struct clk *clk_mm;
 	void __iomem *base;
+	void __iomem *pmw_src_addr;
+	bool pwm_src_enabled;
 };
 
 static inline struct mtk_disp_pwm *to_mtk_disp_pwm(struct pwm_chip *chip)
@@ -64,6 +79,78 @@ static void mtk_disp_pwm_update_bits(struct mtk_disp_pwm *mdp, u32 offset,
 	value &= ~mask;
 	value |= data;
 	writel(value, address);
+}
+
+static int get_pwm_src_base(struct device *dev, struct mtk_disp_pwm *mdp)
+{
+	int ret = 0;
+	struct device_node *node;
+	void __iomem *pmw_src_base;
+	u32 addr_offset = 0;
+
+	node = of_parse_phandle(dev->of_node, "pwm_src_base", 0);
+	if (!node) {
+		dev_info(dev, "find pwm_src node failed\n");
+		return -1;
+	}
+	pmw_src_base = of_iomap(node, 0);
+	if (!pmw_src_base) {
+		dev_info(dev, "find pwm_src address failed\n");
+		of_node_put(node);
+		return -1;
+	}
+	ret = of_property_read_u32(dev->of_node, "pwm_src_addr", &addr_offset);
+	if (ret >= 0)
+		mdp->pmw_src_addr = pmw_src_base + addr_offset;
+
+	dev_info(dev, "get pwm_src_addr=%x\n", addr_offset);
+	of_node_put(node);
+	return ret;
+}
+
+static int pwm_src_power_on(struct mtk_disp_pwm *mdp)
+{
+	u32 regosc;
+
+	if (!mdp->pmw_src_addr || mdp->pwm_src_enabled)
+		return 0;
+
+	mdp->pwm_src_enabled = true;
+	regosc = readl(mdp->pmw_src_addr);
+
+	regosc = regosc | 0x1;
+	writel(regosc, mdp->pmw_src_addr);
+	udelay(150);
+
+	regosc = readl(mdp->pmw_src_addr);
+	regosc = regosc | 0x4;
+	writel(regosc, mdp->pmw_src_addr);
+	regosc = readl(mdp->pmw_src_addr);
+
+	return 0;
+}
+
+static int pwm_src_power_off(struct mtk_disp_pwm *mdp)
+{
+	u32 regosc;
+
+	if (!mdp->pmw_src_addr || !mdp->pwm_src_enabled)
+		return 0;
+
+	mdp->pwm_src_enabled = false;
+	regosc = readl(mdp->pmw_src_addr);
+
+	regosc = regosc & (~0x4);
+	writel(regosc, mdp->pmw_src_addr);
+
+	udelay(150);
+	regosc = readl(mdp->pmw_src_addr);
+
+	regosc = regosc & (~0x1);
+	writel(regosc, mdp->pmw_src_addr);
+	regosc = readl(mdp->pmw_src_addr);
+
+	return 0;
 }
 
 static int mtk_disp_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
@@ -84,14 +171,13 @@ static int mtk_disp_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	 * period = (PWM_CLK_RATE * period_ns) / (10^9 * (clk_div + 1)) - 1
 	 * high_width = (PWM_CLK_RATE * duty_ns) / (10^9 * (clk_div + 1))
 	 */
-	pr_notice("%s duty=%d period=%d\n", __func__, duty_ns, period_ns);
-
+	dev_dbg(mdp->chip.dev, "duty=%d period=%d\n", duty_ns, period_ns);
 	rate = clk_get_rate(mdp->clk_main);
 	clk_div = div_u64(rate * period_ns, NSEC_PER_SEC) >>
 			  PWM_PERIOD_BIT_WIDTH;
-
 	if (clk_div > PWM_CLKDIV_MAX)
 		return -EINVAL;
+	dev_dbg(mdp->chip.dev, "rate=%lld clk_div=%d\n", rate, clk_div);
 
 	div = NSEC_PER_SEC * (clk_div + 1);
 	period = div64_u64(rate * period_ns, div);
@@ -100,26 +186,24 @@ static int mtk_disp_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 
 	high_width = div64_u64(rate * duty_ns, div);
 	value = period | (high_width << PWM_HIGH_WIDTH_SHIFT);
+	dev_dbg(mdp->chip.dev, "high_width=%d period=%d\n",
+		high_width, period);
 
-	pr_notice("%s rate[%llx] clk_div[%u] div[%llx] high_width[%u] value[%u] period[%u]",
-		__func__, rate, clk_div, div, high_width, value, period);
+	pwm_src_power_on(mdp);
+
 	err = clk_enable(mdp->clk_main);
-	if (err < 0) {
-		pr_notice("%s clk_main is error", __func__);
+	if (err < 0)
 		return err;
-	}
 
 	err = clk_enable(mdp->clk_mm);
 	if (err < 0) {
 		clk_disable(mdp->clk_main);
-		pr_notice("%s clk_mm is error", __func__);
 		return err;
 	}
 
 	mtk_disp_pwm_update_bits(mdp, mdp->data->con0,
 				 PWM_CLKDIV_MASK,
 				 clk_div << PWM_CLKDIV_SHIFT);
-
 	mtk_disp_pwm_update_bits(mdp, mdp->data->con1,
 				 PWM_PERIOD_MASK | PWM_HIGH_WIDTH_MASK,
 				 value);
@@ -144,6 +228,7 @@ static int mtk_disp_pwm_enable(struct pwm_chip *chip, struct pwm_device *pwm)
 	struct mtk_disp_pwm *mdp = to_mtk_disp_pwm(chip);
 	int err;
 
+	dev_info(mdp->chip.dev, "%s\n", __func__);
 	err = clk_enable(mdp->clk_main);
 	if (err < 0)
 		return err;
@@ -153,6 +238,8 @@ static int mtk_disp_pwm_enable(struct pwm_chip *chip, struct pwm_device *pwm)
 		clk_disable(mdp->clk_main);
 		return err;
 	}
+
+	pwm_src_power_on(mdp);
 
 	mtk_disp_pwm_update_bits(mdp, DISP_PWM_EN, mdp->data->enable_mask,
 				 mdp->data->enable_mask);
@@ -164,11 +251,14 @@ static void mtk_disp_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
 {
 	struct mtk_disp_pwm *mdp = to_mtk_disp_pwm(chip);
 
+	dev_dbg(mdp->chip.dev, "%s\n", __func__);
 	mtk_disp_pwm_update_bits(mdp, DISP_PWM_EN, mdp->data->enable_mask,
 				 0x0);
 
 	clk_disable(mdp->clk_mm);
 	clk_disable(mdp->clk_main);
+
+	pwm_src_power_off(mdp);
 }
 
 static const struct pwm_ops mtk_disp_pwm_ops = {
@@ -182,9 +272,9 @@ static int mtk_disp_pwm_probe(struct platform_device *pdev)
 {
 	struct mtk_disp_pwm *mdp;
 	struct resource *r;
+	struct clk *pwm_src;
 	int ret;
 
-	pr_notice("%s start", __func__);
 	mdp = devm_kzalloc(&pdev->dev, sizeof(*mdp), GFP_KERNEL);
 	if (!mdp)
 		return -ENOMEM;
@@ -193,22 +283,16 @@ static int mtk_disp_pwm_probe(struct platform_device *pdev)
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	mdp->base = devm_ioremap_resource(&pdev->dev, r);
-	if (IS_ERR(mdp->base)) {
-		pr_notice("%s mdp base null", __func__);
+	if (IS_ERR(mdp->base))
 		return PTR_ERR(mdp->base);
-	}
 
 	mdp->clk_main = devm_clk_get(&pdev->dev, "main");
-	if (IS_ERR(mdp->clk_main)) {
-		pr_notice("%s clk_main is null", __func__);
+	if (IS_ERR(mdp->clk_main))
 		return PTR_ERR(mdp->clk_main);
-	}
 
 	mdp->clk_mm = devm_clk_get(&pdev->dev, "mm");
-	if (IS_ERR(mdp->clk_mm)) {
-		pr_notice("%s clk_mm is null", __func__);
+	if (IS_ERR(mdp->clk_mm))
 		return PTR_ERR(mdp->clk_mm);
-	}
 
 	ret = clk_prepare(mdp->clk_main);
 	if (ret < 0)
@@ -217,6 +301,14 @@ static int mtk_disp_pwm_probe(struct platform_device *pdev)
 	ret = clk_prepare(mdp->clk_mm);
 	if (ret < 0)
 		goto disable_clk_main;
+
+	pwm_src = devm_clk_get(&pdev->dev, "pwm_src");
+	if (!IS_ERR(pwm_src) && get_pwm_src_base(&pdev->dev, mdp) >= 0) {
+		clk_enable(mdp->clk_mm);
+		clk_set_parent(mdp->clk_mm, pwm_src);
+		clk_disable(mdp->clk_mm);
+		dev_info(&pdev->dev, "select clk_mm with pwm_src\n");
+	}
 
 	mdp->chip.dev = &pdev->dev;
 	mdp->chip.ops = &mtk_disp_pwm_ops;
@@ -244,7 +336,6 @@ static int mtk_disp_pwm_probe(struct platform_device *pdev)
 					 mdp->data->con0_sel);
 	}
 
-	pr_notice("%s end", __func__);
 	return 0;
 
 disable_clk_mm:
@@ -276,16 +367,6 @@ static const struct mtk_pwm_data mt2701_pwm_data = {
 	.bls_debug_mask = 0x3,
 };
 
-static const struct mtk_pwm_data mt6799_pwm_data = {
-	.enable_mask = BIT(0),
-	.con0 = 0x18,
-	.con0_sel = 0x0,
-	.con1 = 0x1C,
-	.has_commit = true,
-	.commit = 0xC,
-	.commit_mask = 0x1,
-};
-
 static const struct mtk_pwm_data mt8173_pwm_data = {
 	.enable_mask = BIT(0),
 	.con0 = 0x10,
@@ -296,30 +377,28 @@ static const struct mtk_pwm_data mt8173_pwm_data = {
 	.commit_mask = 0x1,
 };
 
-static const struct mtk_pwm_data mt8183_pwm_data = {
+static const struct mtk_pwm_data mt6799_pwm_data = {
 	.enable_mask = BIT(0),
 	.con0 = 0x18,
 	.con0_sel = 0x0,
-	.con1 = 0x1c,
-	.has_commit = false,
-	.bls_debug = 0x80,
-	.bls_debug_mask = 0x3,
+	.con1 = 0x1C,
+	.has_commit = true,
+	.commit = 0xC,
+	.commit_mask = 0x1,
 };
 
 static const struct of_device_id mtk_disp_pwm_of_match[] = {
-	{ .compatible = "mediatek,mt2701-disp-pwm", .data = &mt2701_pwm_data},
-	{ .compatible = "mediatek,mt6595-disp-pwm", .data = &mt8173_pwm_data},
-	{ .compatible = "mediatek,mt6873-disp-pwm", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt6853-disp-pwm", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt6833-disp-pwm", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt6983-disp-pwm0", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt6879-disp-pwm", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt6895-disp-pwm0", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt6855-disp-pwm", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt6789-disp-pwm", .data = &mt6799_pwm_data},
-	{ .compatible = "mediatek,mt8173-disp-pwm", .data = &mt8173_pwm_data},
-	{ .compatible = "mediatek,mt8183-disp-pwm", .data = &mt8183_pwm_data},
-	{ }
+	{.compatible = "mediatek,mt2701-disp-pwm", .data = &mt2701_pwm_data},
+	{.compatible = "mediatek,mt6595-disp-pwm", .data = &mt8173_pwm_data},
+	{.compatible = "mediatek,mt6779-disp-pwm", .data = &mt6799_pwm_data},
+	{.compatible = "mediatek,mt6873-disp-pwm", .data = &mt6799_pwm_data},
+	{.compatible = "mediatek,mt6885-disp-pwm", .data = &mt6799_pwm_data},
+	{.compatible = "mediatek,mt6853-disp-pwm", .data = &mt6799_pwm_data},
+	{.compatible = "mediatek,mt8173-disp-pwm", .data = &mt8173_pwm_data},
+	{.compatible = "mediatek,mt6833-disp-pwm", .data = &mt6799_pwm_data},
+	{.compatible = "mediatek,mt6877-disp-pwm", .data = &mt6799_pwm_data},
+	{.compatible = "mediatek,mt6781-disp-pwm", .data = &mt6799_pwm_data},
+	{}
 };
 MODULE_DEVICE_TABLE(of, mtk_disp_pwm_of_match);
 

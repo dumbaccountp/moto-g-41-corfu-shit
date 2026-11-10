@@ -2,11 +2,12 @@
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
+
 /*****************************************************************************
  *
  * Filename:
  * ---------
- *     imx766mipiraw_Sensor.h
+ *     IMX766mipi_Sensor.h
  *
  * Project:
  * --------

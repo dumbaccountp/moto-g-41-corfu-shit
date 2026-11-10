@@ -1,9 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * kernel/power/main.c - PM subsystem core functionality.
  *
  * Copyright (c) 2003 Patrick Mochel
  * Copyright (c) 2003 Open Source Development Lab
+ *
+ * This file is released under the GPLv2
+ *
  */
 
 #include <linux/export.h>
@@ -14,8 +16,6 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/suspend.h>
-#include <linux/syscalls.h>
-#include <linux/pm_runtime.h>
 
 #include "power.h"
 
@@ -51,19 +51,6 @@ void unlock_system_sleep(void)
 }
 EXPORT_SYMBOL_GPL(unlock_system_sleep);
 
-void ksys_sync_helper(void)
-{
-	ktime_t start;
-	long elapsed_msecs;
-
-	start = ktime_get();
-	ksys_sync();
-	elapsed_msecs = ktime_to_ms(ktime_sub(ktime_get(), start));
-	pr_info("Filesystems sync: %ld.%03ld seconds\n",
-		elapsed_msecs / MSEC_PER_SEC, elapsed_msecs % MSEC_PER_SEC);
-}
-EXPORT_SYMBOL_GPL(ksys_sync_helper);
-
 /* Routines for PM-transition notifications */
 
 static BLOCKING_NOTIFIER_HEAD(pm_chain_head);
@@ -80,18 +67,18 @@ int unregister_pm_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL_GPL(unregister_pm_notifier);
 
-int pm_notifier_call_chain_robust(unsigned long val_up, unsigned long val_down)
+int __pm_notifier_call_chain(unsigned long val, int nr_to_call, int *nr_calls)
 {
 	int ret;
 
-	ret = blocking_notifier_call_chain_robust(&pm_chain_head, val_up, val_down, NULL);
+	ret = __blocking_notifier_call_chain(&pm_chain_head, val, NULL,
+						nr_to_call, nr_calls);
 
 	return notifier_to_errno(ret);
 }
-
 int pm_notifier_call_chain(unsigned long val)
 {
-	return blocking_notifier_call_chain(&pm_chain_head, val, NULL);
+	return __pm_notifier_call_chain(val, -1, NULL);
 }
 
 /* If set, devices may be suspended and resumed asynchronously. */
@@ -190,38 +177,6 @@ static ssize_t mem_sleep_store(struct kobject *kobj, struct kobj_attribute *attr
 }
 
 power_attr(mem_sleep);
-
-/*
- * sync_on_suspend: invoke ksys_sync_helper() before suspend.
- *
- * show() returns whether ksys_sync_helper() is invoked before suspend.
- * store() accepts 0 or 1.  0 disables ksys_sync_helper() and 1 enables it.
- */
-bool sync_on_suspend_enabled = !IS_ENABLED(CONFIG_SUSPEND_SKIP_SYNC);
-
-static ssize_t sync_on_suspend_show(struct kobject *kobj,
-				   struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%d\n", sync_on_suspend_enabled);
-}
-
-static ssize_t sync_on_suspend_store(struct kobject *kobj,
-				    struct kobj_attribute *attr,
-				    const char *buf, size_t n)
-{
-	unsigned long val;
-
-	if (kstrtoul(buf, 10, &val))
-		return -EINVAL;
-
-	if (val > 1)
-		return -EINVAL;
-
-	sync_on_suspend_enabled = !!val;
-	return n;
-}
-
-power_attr(sync_on_suspend);
 #endif /* CONFIG_SUSPEND */
 
 #ifdef CONFIG_PM_SLEEP_DEBUG
@@ -448,12 +403,23 @@ static int suspend_stats_show(struct seq_file *s, void *unused)
 
 	return 0;
 }
-DEFINE_SHOW_ATTRIBUTE(suspend_stats);
+
+static int suspend_stats_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, suspend_stats_show, NULL);
+}
+
+static const struct file_operations suspend_stats_operations = {
+	.open           = suspend_stats_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = single_release,
+};
 
 static int __init pm_debugfs_init(void)
 {
 	debugfs_create_file("suspend_stats", S_IFREG | S_IRUGO,
-			NULL, NULL, &suspend_stats_fops);
+			NULL, NULL, &suspend_stats_operations);
 	return 0;
 }
 
@@ -504,10 +470,7 @@ static ssize_t pm_wakeup_irq_show(struct kobject *kobj,
 					struct kobj_attribute *attr,
 					char *buf)
 {
-	if (!pm_wakeup_irq())
-		return -ENODATA;
-
-	return sprintf(buf, "%u\n", pm_wakeup_irq());
+	return pm_wakeup_irq ? sprintf(buf, "%u\n", pm_wakeup_irq) : -ENODATA;
 }
 
 power_attr_ro(pm_wakeup_irq);
@@ -537,13 +500,6 @@ static ssize_t pm_debug_messages_store(struct kobject *kobj,
 }
 
 power_attr(pm_debug_messages);
-
-static int __init pm_debug_messages_setup(char *str)
-{
-	pm_debug_messages_on = true;
-	return 1;
-}
-__setup("pm_debug_messages", pm_debug_messages_setup);
 
 /**
  * __pm_pr_dbg - Print a suspend debug message to the kernel log.
@@ -579,6 +535,7 @@ static inline void pm_print_times_init(void) {}
 #endif /* CONFIG_PM_SLEEP_DEBUG */
 
 struct kobject *power_kobj;
+EXPORT_SYMBOL_GPL(power_kobj);
 
 /**
  * state - control system sleep states.
@@ -623,7 +580,7 @@ static suspend_state_t decode_state(const char *buf, size_t n)
 	len = p ? p - buf : n;
 
 	/* Check hibernation first. */
-	if (len == 4 && str_has_prefix(buf, "disk"))
+	if (len == 4 && !strncmp(buf, "disk", len))
 		return PM_SUSPEND_MAX;
 
 #ifdef CONFIG_SUSPEND
@@ -897,7 +854,6 @@ static struct attribute * g[] = {
 	&wakeup_count_attr.attr,
 #ifdef CONFIG_SUSPEND
 	&mem_sleep_attr.attr,
-	&sync_on_suspend_attr.attr,
 #endif
 #ifdef CONFIG_PM_AUTOSLEEP
 	&autosleep_attr.attr,

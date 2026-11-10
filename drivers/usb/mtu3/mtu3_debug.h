@@ -1,18 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * mtu3_debug.h - debug header
- *
  * Copyright (C) 2019 MediaTek Inc.
- *
- * Author: Chunfeng Yun <chunfeng.yun@mediatek.com>
+ * Author Chunfeng Yun <chunfeng.yun@mediatek.com>
  */
 
 #ifndef __MTU3_DEBUG_H__
 #define __MTU3_DEBUG_H__
 
 #include <linux/debugfs.h>
-
-struct ssusb_mtk;
 
 #define MTU3_DEBUGFS_NAME_LEN 32
 

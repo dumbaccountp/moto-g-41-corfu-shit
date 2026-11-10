@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Network device driver for the BMAC ethernet controller on
  * Apple Powermacs.  Assumes it's under a DBDMA controller.
@@ -24,11 +23,11 @@
 #include <linux/bitrev.h>
 #include <linux/ethtool.h>
 #include <linux/slab.h>
-#include <linux/pgtable.h>
 #include <asm/prom.h>
 #include <asm/dbdma.h>
 #include <asm/io.h>
 #include <asm/page.h>
+#include <asm/pgtable.h>
 #include <asm/machdep.h>
 #include <asm/pmac_feature.h>
 #include <asm/macio.h>
@@ -778,7 +777,7 @@ static irqreturn_t bmac_txdma_intr(int irq, void *dev_id)
 
 		if (bp->tx_bufs[bp->tx_empty]) {
 			++dev->stats.tx_packets;
-			dev_consume_skb_irq(bp->tx_bufs[bp->tx_empty]);
+			dev_kfree_skb_irq(bp->tx_bufs[bp->tx_empty]);
 		}
 		bp->tx_bufs[bp->tx_empty] = NULL;
 		bp->tx_fullup = 0;
@@ -815,8 +814,8 @@ static int reverse6[64] = {
 static unsigned int
 crc416(unsigned int curval, unsigned short nxtval)
 {
-	unsigned int counter, cur = curval, next = nxtval;
-	int high_crc_set, low_data_set;
+	register unsigned int counter, cur = curval, next = nxtval;
+	register int high_crc_set, low_data_set;
 
 	/* Swap bytes */
 	next = ((next & 0x00FF) << 8) | (next >> 8);
@@ -1511,7 +1510,7 @@ static void bmac_tx_timeout(struct timer_list *t)
 	i = bp->tx_empty;
 	++dev->stats.tx_errors;
 	if (i != bp->tx_fill) {
-		dev_kfree_skb_irq(bp->tx_bufs[i]);
+		dev_kfree_skb(bp->tx_bufs[i]);
 		bp->tx_bufs[i] = NULL;
 		if (++i >= N_TX_RING) i = 0;
 		bp->tx_empty = i;

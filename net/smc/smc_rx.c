@@ -129,8 +129,17 @@ out:
 	sock_put(sk);
 }
 
+static int smc_rx_pipe_buf_nosteal(struct pipe_inode_info *pipe,
+				   struct pipe_buffer *buf)
+{
+	return 1;
+}
+
 static const struct pipe_buf_operations smc_pipe_ops = {
+	.can_merge = 0,
+	.confirm = generic_pipe_buf_confirm,
 	.release = smc_rx_pipe_buf_release,
+	.steal = smc_rx_pipe_buf_nosteal,
 	.get = generic_pipe_buf_get
 };
 
@@ -193,8 +202,6 @@ int smc_rx_wait(struct smc_sock *smc, long *timeo,
 {
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	struct smc_connection *conn = &smc->conn;
-	struct smc_cdc_conn_state_flags *cflags =
-					&conn->local_tx_ctrl.conn_state_flags;
 	struct sock *sk = &smc->sk;
 	int rc;
 
@@ -204,9 +211,7 @@ int smc_rx_wait(struct smc_sock *smc, long *timeo,
 	add_wait_queue(sk_sleep(sk), &wait);
 	rc = sk_wait_event(sk, timeo,
 			   sk->sk_err ||
-			   cflags->peer_conn_abort ||
 			   sk->sk_shutdown & RCV_SHUTDOWN ||
-			   conn->killed ||
 			   fcrit(conn),
 			   &wait);
 	remove_wait_queue(sk_sleep(sk), &wait);
@@ -310,13 +315,11 @@ int smc_rx_recvmsg(struct smc_sock *smc, struct msghdr *msg,
 		if (read_done >= target || (pipe && read_done))
 			break;
 
-		if (conn->killed)
-			break;
-
 		if (smc_rx_recvmsg_data_available(smc))
 			goto copy;
 
-		if (sk->sk_shutdown & RCV_SHUTDOWN) {
+		if (sk->sk_shutdown & RCV_SHUTDOWN ||
+		    conn->local_tx_ctrl.conn_state_flags.peer_conn_abort) {
 			/* smc_cdc_msg_recv_action() could have run after
 			 * above smc_rx_recvmsg_data_available()
 			 */
@@ -346,12 +349,12 @@ int smc_rx_recvmsg(struct smc_sock *smc, struct msghdr *msg,
 				}
 				break;
 			}
-			if (!timeo)
-				return -EAGAIN;
 			if (signal_pending(current)) {
 				read_done = sock_intr_errno(timeo);
 				break;
 			}
+			if (!timeo)
+				return -EAGAIN;
 		}
 
 		if (!smc_rx_data_available(conn)) {

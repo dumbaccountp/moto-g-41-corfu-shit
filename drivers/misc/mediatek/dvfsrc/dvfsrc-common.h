@@ -12,38 +12,40 @@
 #define DVFSRC_HIFI_DDR_REQ		3
 #define DVFSRC_HIFI_RISING_DDR_REQ	4
 #define DVFSRC_HRT_BW_DDR_REQ		6
-#define DVFSRC_MD_SCEN_DDR_REQ		7
-#define DVFSRC_MD_IMP_DDR_REQ		8
+#define DVFSRC_MD_SCENARIO_REQ		7
 
 
 /* SIP COMMON COMMAND*/
+#define MTK_SIP_VCOREFS_INIT 0
+#define MTK_SIP_VCOREFS_KICK 1
 #define MTK_SIP_VCOREFS_GET_OPP_TYPE 2
 #define MTK_SIP_VCOREFS_GET_FW_TYPE 3
 #define MTK_SIP_VCOREFS_GET_VCORE_UV  4
 #define MTK_SIP_VCOREFS_GET_DRAM_FREQ 5
+#define MTK_SIP_VCOREFS_GET_NUM_V  6
+
 #define MTK_SIP_VCOREFS_FB_ACTION 8
-#define MTK_SIP_VCOREFS_QOS_MODE 32
+
 
 #if IS_ENABLED(CONFIG_MTK_DVFSRC)
 extern void register_dvfsrc_opp_handler(int (*handler)(u32 id));
 extern void register_dvfsrc_debug_handler(int (*handler)(u32 id));
+extern void register_dvfsrc_cm_ddr_handler(void (*handler)(u32 level));
+extern void register_dvfsrc_hopping_handler(void (*handler)(int on));
+extern void register_dvfsrc_md_scenario_handler(u32 (*handler)(void));
 extern int mtk_dvfsrc_query_debug_info(u32 id);
-extern int register_dvfsrc_debug_notifier(struct notifier_block *nb);
-extern int unregister_dvfsrc_debug_notifier(struct notifier_block *nb);
 #else
 static inline void register_dvfsrc_opp_handler(int (*handler)(u32 id))
 { }
 static inline void register_dvfsrc_debug_handler(int (*handler)(u32 id))
 { }
+static inline void register_dvfsrc_cm_ddr_handler(void (*handler)(u32 level))
+{ }
+static inline void register_dvfsrc_hopping_handler(void (*handler)(int on))
+{ }
+static inline void register_dvfsrc_md_scenario_handler(u32 (*handler)(void))
+{ }
 static inline int mtk_dvfsrc_query_debug_info(u32 id)
-{ return 0; }
-static inline int register_dvfsrc_debug_notifier(struct notifier_block *nb)
-{ return 0; }
-static inline int unregister_dvfsrc_debug_notifier(struct notifier_block *nb)
 { return 0; }
 #endif /* CONFIG_MTK_DVFSRC */
 #endif
-
-extern int __init mtk_dvfsrc_met_init(void);
-extern void __exit mtk_dvfsrc_met_exit(void);
-

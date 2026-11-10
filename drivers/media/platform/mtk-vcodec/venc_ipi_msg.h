@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016 MediaTek Inc.
- * Author: Jungchang Tsao <jungchang.tsao@mediatek.com>
- *         Daniel Hsiao <daniel.hsiao@mediatek.com>
- *         Tiffany Lin <tiffany.lin@mediatek.com>
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef _VENC_IPI_MSG_H_
@@ -13,8 +10,13 @@
 #include "vcodec_ipi_msg.h"
 
 #define MTK_MAX_ENC_CODECS_SUPPORT       (64)
+#define AP_IPIMSG_VENC_BASE 0xC000
+#define VCU_IPIMSG_VENC_BASE 0xD000
+#define VCU_IPIMSG_VENC_SEND_BASE 0xE000
+
 #define VENC_MAX_FB_NUM              VIDEO_MAX_FRAME
 #define VENC_MAX_BS_NUM              VIDEO_MAX_FRAME
+
 
 /**
  * enum venc_ipi_msg_id - message id between AP and VCU
@@ -23,50 +25,38 @@
  * @VCU_IPIMSG_ENC_XXX_DONE:    VCU ack AP cmd message id
  */
 enum venc_ipi_msg_id {
-	AP_IPIMSG_ENC_INIT = AP_IPIMSG_VENC_SEND_BASE,
+	AP_IPIMSG_ENC_INIT = AP_IPIMSG_VENC_BASE,
 	AP_IPIMSG_ENC_SET_PARAM,
 	AP_IPIMSG_ENC_ENCODE,
 	AP_IPIMSG_ENC_DEINIT,
 	AP_IPIMSG_ENC_QUERY_CAP,
-	AP_IPIMSG_ENC_BACKUP,
 
-	VCU_IPIMSG_ENC_INIT_DONE = VCU_IPIMSG_VENC_ACK_BASE,
+	VCU_IPIMSG_ENC_INIT_DONE = VCU_IPIMSG_VENC_BASE,
 	VCU_IPIMSG_ENC_SET_PARAM_DONE,
 	VCU_IPIMSG_ENC_ENCODE_DONE,
 	VCU_IPIMSG_ENC_DEINIT_DONE,
-	VCU_IPIMSG_ENC_QUERY_CAP_DONE,
-	VCU_IPIMSG_ENC_TRACE,
-	VCU_IPIMSG_ENC_BACKUP_DONE,
+	VCU_IPIMSG_ENC_QUERY_CAP_ACK,
+	VCU_IPIMSG_ENC_ENCODE_ACK,
 
 	VCU_IPIMSG_ENC_POWER_ON = VCU_IPIMSG_VENC_SEND_BASE,
 	VCU_IPIMSG_ENC_POWER_OFF,
-	VCU_IPIMSG_ENC_PUT_BUFFER,
-	VCU_IPIMSG_ENC_MEM_ALLOC,
-	VCU_IPIMSG_ENC_MEM_FREE,
 	VCU_IPIMSG_ENC_WAIT_ISR,
-	VCU_IPIMSG_ENC_CHECK_CODEC_ID,
-
-	AP_IPIMSG_ENC_POWER_ON_DONE = AP_IPIMSG_VENC_ACK_BASE,
-	AP_IPIMSG_ENC_POWER_OFF_DONE,
-	AP_IPIMSG_ENC_PUT_BUFFER_DONE,
-	AP_IPIMSG_ENC_MEM_ALLOC_DONE,
-	AP_IPIMSG_ENC_MEM_FREE_DONE,
-	AP_IPIMSG_ENC_WAIT_ISR_DONE,
-	AP_IPIMSG_ENC_CHECK_CODEC_ID_DONE
+	VCU_IPIMSG_ENC_PUT_BUFFER
 };
 
 /* enum venc_get_param_type - The type of set parameter used in
  *                            venc_if_get_param()
- * GET_PARAM_VENC_CAP_SUPPORTED_FORMATS: get codec supported format capability
- * GET_PARAM_VENC_CAP_FRAME_SIZES:
+ * VENC_GET_PARAM_CAPABILITY_SUPPORTED_FORMATS: get codec supported format capability
+ * VENC_GET_PARAM_CAPABILITY_FRAME_SIZES:
  *         get codec supported frame size & alignment info
  */
 enum venc_get_param_type {
-	GET_PARAM_VENC_CAP_SUPPORTED_FORMATS,
-	GET_PARAM_VENC_CAP_FRAME_SIZES,
-	GET_PARAM_FREE_BUFFERS,
-	GET_PARAM_ROI_RC_QP,
-	GET_PARAM_RESOLUTION_CHANGE,
+	VENC_GET_PARAM_CAPABILITY_SUPPORTED_FORMATS,
+	VENC_GET_PARAM_CAPABILITY_FRAME_SIZES,
+	VENC_GET_PARAM_FREE_BUFFERS,
+	VENC_GET_PARAM_ROI_RC_QP,
+	VENC_GET_PARAM_RESOLUTION_CHANGE,
+	VENC_GET_PARAM_REFBUF_FRAME_NUM,
 };
 
 /*
@@ -84,6 +74,7 @@ enum venc_get_param_type {
  * @VENC_SET_PARAM_TS_MODE: set VP8 temporal scalability mode
  * @VENC_SET_PARAM_SCENARIO: set encoder scenario mode for different RC control
  * @VENC_SET_PARAM_NONREFP: set encoder non reference P period
+ * @VENC_SET_PARAM_LOG: set encoder log
  */
 enum venc_set_param_type {
 	VENC_SET_PARAM_ENC,
@@ -112,10 +103,11 @@ enum venc_set_param_type {
 	VENC_SET_PARAM_ADJUST_MIN_QP,
 	VENC_SET_PARAM_ADJUST_I_P_QP_DELTA,
 	VENC_SET_PARAM_ADJUST_FRAME_LEVEL_QP,
-	VENC_SET_PARAM_ENABLE_HIGHQUALITY,
+	VENC_SET_PARAM_MAX_REFP_NUM,
+	VENC_SET_PARAM_REFP_DISTANCE,
+	VENC_SET_PARAM_REFP_FRMNUM,
+	VENC_SET_PARAM_LOG,
 	VENC_SET_PARAM_ENABLE_DUMMY_NAL,
-	VENC_SET_PARAM_PROPERTY,
-	VENC_SET_PARAM_VCP_LOG_INFO
 };
 
 /**
@@ -223,10 +215,13 @@ struct venc_ap_ipi_msg_enc {
 	__u32 bs_addr;
 	__u32 bs_size;
 	__u32 data_offset[3];
+	__s16 input_fd[3];
+	__s16 bs_fd;
 	__u8 fb_num_planes;
 	__u8 bs_mode;
 	__u32 meta_size;
-	__u32 sec_mem_handle;
+	__s16 meta_fd;
+	__u32 qpmap;
 };
 
 /**
@@ -251,28 +246,13 @@ enum venc_ipi_msg_status {
 /**
  * struct venc_vcu_ipi_msg_common - VCU ack AP cmd common structure
  * @msg_id:     message id (VCU_IPIMSG_XXX_DONE)
- * @status:     cmd status (venc_ipi_msg_status, carries hw id when lock/unlock)
+ * @status:     cmd status (venc_ipi_msg_status)
  * @venc_inst:  AP encoder instance (struct venc_vp8_inst/venc_h264_inst *)
  */
 struct venc_vcu_ipi_msg_common {
 	__u32 msg_id;
 	__s32 status;
 	__u64 venc_inst;
-	__s32 codec_id;
-};
-
-/**
- * struct venc_vcu_ipi_msg_trace - VCU ack AP cmd trace structure
- * @msg_id:     message id (VCU_IPIMSG_XXX_DONE)
- * @status:     cmd status (venc_ipi_msg_status, carries hw id when lock/unlock)
- * @venc_inst:  AP encoder instance (struct venc_vp8_inst/venc_h264_inst *)
- */
-struct venc_vcu_ipi_msg_trace {
-	__u32 msg_id;
-	__s32 status;
-	__u64 venc_inst;
-	__u32 trace_id;
-	__u32 flag;
 };
 
 /**
@@ -361,7 +341,7 @@ struct venc_vcu_ipi_msg_deinit {
 };
 
 /**
- * struct venc_vcu_ipi_msg_waitisr - VCU to AP wait isr cmd structure
+ * struct venc_vcu_ipi_msg_waitisr - VCU ack AP wait isr cmd structure
  * @msg_id:   message id (VCU_IPIMSG_XXX_ENC_DEINIT_DONE)
  * @status:   cmd status (venc_ipi_msg_status)
  * @venc_inst:  AP encoder instance (struct venc_vp8_inst/venc_h264_inst *)
@@ -374,21 +354,6 @@ struct venc_vcu_ipi_msg_waitisr {
 	__u64 venc_inst;
 	__u32 irq_status;
 	__u32 timeout;
-};
-
-/**
- * struct venc_vcu_ipi_mem_op -VCU/AP bi-direction memory operation cmd structure
- * @msg_id:   message id (VCU_IPIMSG_XXX_ENC_DEINIT_DONE)
- * @status:   cmd status (venc_ipi_msg_status)
- * @venc_inst:	AP encoder instance (struct venc_inst *)
- * @struct vcodec_mem_obj: encoder memories
- */
-struct venc_vcu_ipi_mem_op {
-	__u32 msg_id;
-	__s32 status;
-	__u64 venc_inst;
-	struct vcodec_mem_obj mem;
-	__u32 reserved[2];
 };
 
 /*
@@ -441,16 +406,15 @@ struct venc_vcu_config {
 	__u32 p_qp;
 	__u32 b_qp;
 	__u32 svp_mode;
-	__u32 svp_is_hal_secure_handle;
 	__u32 tsvc;
 	__u32 max_qp;
 	__u32 min_qp;
 	__u32 i_p_qp_delta;
 	__u32 qp_control_mode;
 	__u32 frame_level_qp;
-	__u32 highquality;
+	__u32 maxrefpnum;
+	__u32 maxrefbufFrameNum;
 	__u32 dummynal;
-	__u32 slbc_addr;
 };
 
 /**
@@ -486,6 +450,7 @@ struct venc_info {
 	__u32 fb_num_planes;
 	__u32 index;
 	__u64 timestamp;
+	__u32 roimap;
 	__u32 qpmap;
 };
 
@@ -528,11 +493,9 @@ struct venc_vsi {
 	struct ring_input_list list_free;
 	struct venc_info       venc;
 	__u32 sync_mode;
-	__u64 meta_addr;
 	__u32 meta_size;
-	__u32 meta_offset;
-	__u64 qpmap_addr;
-	__u32 qpmap_size;
+	__u64 meta_addr;
+	__s16 meta_fd;
 };
 
 #endif /* _VENC_IPI_MSG_H_ */

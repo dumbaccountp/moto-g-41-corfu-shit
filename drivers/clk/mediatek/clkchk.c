@@ -1,478 +1,147 @@
 // SPDX-License-Identifier: GPL-2.0
-//
-// Copyright (c) 2020 MediaTek Inc.
-// Author: Owen Chen <owen.chen@mediatek.com>
+/*
+ * Copyright (c) 2019 MediaTek Inc.
+ */
 
 #define pr_fmt(fmt) "[clkchk] " fmt
 
-#include <linux/notifier.h>
-#include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_platform.h>
-#include <linux/slab.h>
-#include <linux/delay.h>
-
-#include <linux/proc_fs.h>
-#include <linux/fs.h>
-#include <linux/seq_file.h>
-#include <linux/uaccess.h>
-
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
-#include <linux/pm_domain.h>
-#include <linux/pm_runtime.h>
-#include <linux/module.h>
+#include <linux/slab.h>
+#include <linux/syscore_ops.h>
 
-#include "clk-mtk.h"
+#if IS_ENABLED(CONFIG_MTK_DEVAPC) && !IS_ENABLED(CONFIG_DEVAPC_LEGACY)
+#include <mt-plat/devapc_public.h>
+#endif
 #include "clkchk.h"
-#include "mt-plat/aee.h"
+#include "clkdbg.h"
+#define AEE_EXCP_CHECK_PLL_FAIL	0
+#define CLKDBG_CCF_API_4_4	1
+#define MAX_PLLS		32
+#define MAX_MTCMOS			32
+#define CLKCHK_OFF_MODE			0
+#define CLKCHK_NOTICE_MODE		1
+#define PLL_TYPE			0
+#define MTCMOS_TYPE			1
 
-#define MAX_CLK_NUM			1024
-#define PLL_LEN				20
-#define INV_MSK				0xFFFFFFFF
+#if AEE_EXCP_CHECK_PLL_FAIL
+#include <mt-plat/aee.h>
+#endif
 
-void __attribute__((weak)) clkchk_set_cfg(void)
+
+#if !CLKDBG_CCF_API_4_4
+
+/* backward compatible */
+
+static const char *clk_hw_get_name(const struct clk_hw *hw)
 {
+	return __clk_get_name(hw->clk);
 }
 
-static const struct clkchk_ops *clkchk_ops;
-static struct notifier_block mtk_clkchk_notifier;
-
-void set_clkchk_ops(const struct clkchk_ops *ops)
+static bool clk_hw_is_prepared(const struct clk_hw *hw)
 {
-	clkchk_ops = ops;
+	return __clk_is_prepared(hw->clk);
 }
-EXPORT_SYMBOL(set_clkchk_ops);
+
+static bool clk_hw_is_enabled(const struct clk_hw *hw)
+{
+	return __clk_is_enabled(hw->clk);
+}
+
+static unsigned long clk_hw_get_rate(const struct clk_hw *hw)
+{
+	return __clk_get_rate(hw->clk);
+}
+
+static struct clk_hw *clk_hw_get_parent(const struct clk_hw *hw)
+{
+	return __clk_get_hw(clk_get_parent(hw->clk));
+}
+
+#endif /* !CLKDBG_CCF_API_4_4 */
+
+static struct clkchk_cfg_t *clkchk_cfg;
+static struct clk **off_plls;
+static struct clk **notice_plls;
+static struct clk **off_mtcmos;
+static struct clk **notice_mtcmos;
+
+#define clk_readl(addr)		readl(addr)
+#define clk_writel(addr, val)	\
+	do { writel(val, addr); wmb(); } while (0) /* sync write */
 
 /*
  * for mtcmos debug
  */
 bool is_valid_reg(void __iomem *addr)
 {
-#if IS_ENABLED(CONFIG_64BIT)
+#ifdef CONFIG_64BIT
 	return ((u64)addr & 0xf0000000) != 0UL ||
 			(((u64)addr >> 32U) & 0xf0000000) != 0UL;
 #else
 	return ((u32)addr & 0xf0000000) != 0U;
 #endif
 }
-EXPORT_SYMBOL(is_valid_reg);
 
-const struct regname *get_all_regnames(void)
+#if (defined(CONFIG_MACH_MT6877) \
+			|| defined(CONFIG_MACH_MT6768) \
+			|| defined(CONFIG_MACH_MT6781) \
+			|| defined(CONFIG_MACH_MT6739))
+#if IS_ENABLED(CONFIG_MTK_DEVAPC) && !IS_ENABLED(CONFIG_DEVAPC_LEGACY)
+static void devapc_dump_regs(void)
 {
-	if (clkchk_ops == NULL || clkchk_ops->get_all_regnames == NULL)
-		return NULL;
-
-	return clkchk_ops->get_all_regnames();
-}
-EXPORT_SYMBOL(get_all_regnames);
-
-void clkchk_devapc_dump(void)
-{
-	if (clkchk_ops == NULL || clkchk_ops->devapc_dump == NULL)
+	if (!clkchk_cfg || !clkchk_cfg->get_devapc_dump)
 		return;
-
-	clkchk_ops->devapc_dump();
-}
-EXPORT_SYMBOL(clkchk_devapc_dump);
-
-static const char *get_provider_name(struct device_node *node, u32 *cells)
-{
-	const char *name;
-	const char *p;
-	u32 cc = 0;
-
-	if (of_property_read_u32(node, "#clock-cells", &cc) != 0)
-		cc = 0;
-
-	if (cells != NULL)
-		*cells = cc;
-
-	if (cc == 0U) {
-		if (of_property_read_string(node,
-				"clock-output-names", &name) < 0)
-			name = node->name;
-
-		return name;
-	}
-
-	if (of_property_read_string(node, "compatible", &name) < 0)
-		name = node->name;
-
-	p = strchr(name, (int)'-');
-
-	if (p != NULL)
-		return p + 1;
-	else
-		return name;
+	clkchk_cfg->get_devapc_dump();
 }
 
-static void setup_provider_clk(struct provider_clk *pvdck)
-{
-	const char *pvdname = pvdck->provider_name;
-	struct pvd_msk *pm;
-
-	if (!pvdname)
-		return;
-
-	if (clkchk_ops == NULL || clkchk_ops->get_pvd_pwr_mask == NULL)
-		return;
-
-	pm = clkchk_ops->get_pvd_pwr_mask();
-
-	for (; pm->pvdname != NULL; pm++) {
-		if (!strcmp(pvdname, pm->pvdname)) {
-			pvdck->pwr_mask = pm->pwr_mask;
-			pvdck->sta_type = pm->sta_type;
-			return;
-		}
-	}
-
-	pvdck->pwr_mask = INV_MSK;
-}
-
-struct provider_clk *get_all_provider_clks(void)
-{
-	static struct provider_clk provider_clks[MAX_CLK_NUM];
-	struct device_node *node = NULL;
-	unsigned int n = 0;
-
-	if (provider_clks[0].ck != NULL)
-		return provider_clks;
-
-	do {
-		const char *node_name;
-		u32 cells;
-
-		node = of_find_node_with_property(node, "#clock-cells");
-
-		if (node == NULL)
-			break;
-
-		node_name = get_provider_name(node, &cells);
-
-		if (cells != 0U)  {
-			unsigned int i;
-
-			for (i = 0; i < MAX_CLK_NUM; i++) {
-				struct of_phandle_args pa;
-				struct clk *ck;
-
-				pa.np = node;
-				pa.args[0] = i;
-				pa.args_count = 1;
-				ck = of_clk_get_from_provider(&pa);
-
-				if (PTR_ERR(ck) == -EINVAL)
-					break;
-				else if (IS_ERR_OR_NULL(ck))
-					continue;
-
-				provider_clks[n].ck = ck;
-				provider_clks[n].ck_name = __clk_get_name(ck);
-				provider_clks[n].idx = i;
-				provider_clks[n].provider_name = node_name;
-				setup_provider_clk(&provider_clks[n]);
-
-				++n;
-			}
-		}
-	} while (node != NULL && n < MAX_CLK_NUM);
-
-	return provider_clks;
-}
-EXPORT_SYMBOL(get_all_provider_clks);
-
-static struct provider_clk *__clk_chk_lookup_pvdck(const char *name)
-{
-	struct provider_clk *pvdck = get_all_provider_clks();
-
-	for (; pvdck->ck != NULL; pvdck++) {
-		if (!strcmp(pvdck->ck_name, name))
-			return pvdck;
-	}
-
-	return NULL;
-}
-
-static struct clk *__clk_chk_lookup(const char *name)
-{
-	struct provider_clk *pvdck = __clk_chk_lookup_pvdck(name);
-
-	if (pvdck)
-		return pvdck->ck;
-
-	return NULL;
-}
-
-struct clk *clk_chk_lookup(const char *name)
-{
-	return __clk_chk_lookup(name);
-}
-EXPORT_SYMBOL(clk_chk_lookup);
-
-static s32 *read_spm_pwr_status_array(void)
-{
-	if (clkchk_ops == NULL || clkchk_ops->get_spm_pwr_status_array  == NULL)
-		return  ERR_PTR(-EINVAL);
-
-	return clkchk_ops->get_spm_pwr_status_array();
-}
-
-int pwr_hw_is_on(enum PWR_STA_TYPE type, u32 mask)
-{
-	u32 *pval = read_spm_pwr_status_array();
-
-	if (type == PWR_STA) {
-		if ((pval[PWR_STA] & mask) != mask &&
-				(pval[PWR_STA2] & mask) != mask)
-			return 0;
-		else if ((pval[PWR_STA] & mask) == mask &&
-				(pval[PWR_STA2] & mask) == mask)
-			return 1;
-		else
-			return -1;
-	}  else {
-		if ((pval[type] & mask) == mask)
-			return 1;
-		else if ((pval[type] & mask) != 0)
-			return -1;
-
-		else
-			return 0;
-	}
-}
-EXPORT_SYMBOL(pwr_hw_is_on);
-
-int clkchk_pvdck_is_on(struct provider_clk *pvdck)
-{
-	if (!pvdck)
-		return -1;
-
-	if (clkchk_ops == NULL || clkchk_ops->is_pwr_on == NULL) {
-		if (clkchk_ops == NULL || clkchk_ops->get_pvd_pwr_mask == NULL)
-			return -1;
-
-		if (pvdck->pwr_mask == INV_MSK) {
-			return 0;
-		}
-
-		if (!pvdck->pwr_mask) {
-			return 1;
-		}
-
-		return pwr_hw_is_on(pvdck->sta_type, pvdck->pwr_mask);
-	}
-
-	return clkchk_ops->is_pwr_on(pvdck);
-}
-EXPORT_SYMBOL(clkchk_pvdck_is_on);
-
-bool clkchk_pvdck_is_prepared(struct provider_clk *pvdck)
-{
-	struct clk_hw *hw;
-
-	if (clkchk_pvdck_is_on(pvdck) == 1) {
-		hw = __clk_get_hw(pvdck->ck);
-
-		if (IS_ERR_OR_NULL(hw))
-			return false;
-
-		return clk_hw_is_prepared(hw);
-	}
-
-	return false;
-}
-EXPORT_SYMBOL(clkchk_pvdck_is_prepared);
-
-bool clkchk_pvdck_is_enabled(struct provider_clk *pvdck)
-{
-	struct clk_hw *hw;
-
-	if (clkchk_pvdck_is_on(pvdck) == 1) {
-		hw = __clk_get_hw(pvdck->ck);
-
-		if (IS_ERR_OR_NULL(hw))
-			return false;
-
-		if (IS_ERR_OR_NULL(clk_hw_get_parent(hw)))
-			return false;
-
-		if (!clk_hw_is_enabled(clk_hw_get_parent(hw)))
-			return false;
-
-		return clk_hw_is_enabled(hw);
-	}
-
-	return false;
-}
-EXPORT_SYMBOL(clkchk_pvdck_is_enabled);
-
-static const char *ccf_state(struct provider_clk *pvdck)
-{
-	if (clkchk_pvdck_is_enabled(pvdck))
-		return "enabled";
-
-	if (clkchk_pvdck_is_prepared(pvdck))
-		return "prepared";
-
-	return "disabled";
-}
-
-static void dump_enabled_clks(struct provider_clk *pvdck)
-{
-	const char * const *pll_names;
-	const char *c_name;
-	const char *p_name;
-	const char *comp_name;
-	struct clk_hw *c_hw = __clk_get_hw(pvdck->ck);
-	struct clk_hw *p_hw;
-
-	if (!clkchk_pvdck_is_prepared(pvdck) && !clkchk_pvdck_is_enabled(pvdck))
-		return;
-
-	if (clkchk_ops == NULL || clkchk_ops->get_off_pll_names == NULL)
-		return;
-
-	if (IS_ERR_OR_NULL(c_hw))
-		return;
-
-	c_name = clk_hw_get_name(c_hw);
-
-	p_hw = clk_hw_get_parent(c_hw);
-	if (IS_ERR_OR_NULL(p_hw))
-		return;
-
-	p_name = clk_hw_get_name(c_hw);
-	comp_name = clk_hw_get_name(p_hw);
-	while (strcmp(comp_name, "clk26m")) {
-		p_name = p_hw ? clk_hw_get_name(p_hw) : NULL;
-		p_hw = clk_hw_get_parent(p_hw);
-		if (IS_ERR_OR_NULL(p_hw))
-			return;
-
-		comp_name = clk_hw_get_name(p_hw);
-	}
-
-	pll_names = clkchk_ops->get_off_pll_names();
-	for (; *pll_names != NULL && p_name != NULL; pll_names++) {
-		if (!strncmp(p_name, *pll_names, PLL_LEN)) {
-			p_hw = clk_hw_get_parent(c_hw);
-			pr_notice("[%-21s: %8s, %3d, %3d, %10ld, %21s]\n",
-					c_name,
-					ccf_state(pvdck),
-					clkchk_pvdck_is_prepared(pvdck),
-					clkchk_pvdck_is_enabled(pvdck),
-					clk_hw_get_rate(c_hw),
-					p_hw ? clk_hw_get_name(p_hw) : "None");
-			break;
-		}
-	}
-}
-
-static bool __check_pll_off(const char * const *name)
-{
-	int valid = 0;
-
-	for (; *name != NULL; name++) {
-		struct provider_clk *pvdck = __clk_chk_lookup_pvdck(*name);
-
-		if (!clkchk_pvdck_is_enabled(pvdck))
-			continue;
-
-		pr_notice("suspend warning[0m: %s is on\n", *name);
-
-		valid++;
-	}
-
-	if (valid)
-		return true;
-
-	return false;
-}
-
-static bool check_pll_off(void)
-{
-	const char * const *name;
-	int ret = 0;
-
-	if (clkchk_ops == NULL || clkchk_ops->get_off_pll_names == NULL)
-		return false;
-
-	name = clkchk_ops->get_off_pll_names();
-
-	ret = __check_pll_off(name);
-
-	if (clkchk_ops == NULL || clkchk_ops->get_notice_pll_names == NULL)
-		return false;
-
-	name = clkchk_ops->get_notice_pll_names();
-
-	__check_pll_off(name);
-
-	if (ret)
-		return true;
-
-	return false;
-}
-
-static bool is_pll_chk_bug_on(void)
-{
-	if (clkchk_ops == NULL || clkchk_ops->is_pll_chk_bug_on == NULL)
-		return false;
-
-	return clkchk_ops->is_pll_chk_bug_on();
-}
-
-/*
- * clkchk vf table checking
- */
-
-static struct mtk_vf *clkchk_get_vf_table(void)
-{
-	if (clkchk_ops == NULL || clkchk_ops->get_vf_table == NULL)
-		return NULL;
-
-	return clkchk_ops->get_vf_table();
-}
-
+static struct devapc_vio_callbacks devapc_vio_handle = {
+	.id = DEVAPC_SUBSYS_CLKMGR,
+	.debug_dump = devapc_dump_regs,
+};
+#endif
+#endif
+/******************* TOPCKGEN Subsys *******************************/
 static int get_vcore_opp(void)
 {
-	if (clkchk_ops == NULL || clkchk_ops->get_vcore_opp == NULL)
+	if (!clkchk_cfg || !clkchk_cfg->get_vcore_opp)
 		return VCORE_NULL;
 
-	return clkchk_ops->get_vcore_opp();
+	return clkchk_cfg->get_vcore_opp();
 }
 
-void warn_vcore(int opp, const char *clk_name, int rate, int freq)
+static void warn_vcore(int opp, const char *clk_name, int rate, int id)
 {
-	if ((opp >= 0) && (freq > 0) && ((rate/1000) > freq)) {
-		pr_notice("%s Choose %d FAIL!!!![MAX(%d): %d]\r\n",
-				clk_name, rate/1000, opp, freq);
+	int vf_opp;
+
+	if (!clkchk_cfg || !clkchk_cfg->get_vf_opp)
+		return;
+
+	vf_opp = clkchk_cfg->get_vf_opp(id, opp);
+	if ((opp >= 0) && (id >= 0) && (vf_opp > 0) &&
+			((rate/1000) > vf_opp)) {
+		pr_notice("%s Choose %d FAIL!!!![MAX(%d/%d): %d]\r\n",
+				clk_name, rate/1000, id, opp,
+				vf_opp);
 
 		BUG_ON(1);
 	}
 }
 
-static int mtk_mux2opp(const char *mux_name, int opp)
+static int mtk_mux2id(const char **mux_name)
 {
-	struct mtk_vf *vf_table = clkchk_get_vf_table();
 	int i = 0;
 
-	if (!vf_table || opp < 0)
-		return -EINVAL;
+	if (!clkchk_cfg || !clkchk_cfg->get_vf_name
+			|| !clkchk_cfg->get_vf_num)
+		return -1;
 
-	for (; vf_table != NULL && vf_table->name != NULL; vf_table++, i++) {
-		const char *name = vf_table->name;
-
-		if (!name)
-			continue;
-
-		if (strcmp(mux_name, name) == 0)
-			return vf_table->freq_table[opp];
+	for (i = 0; clkchk_cfg->get_vf_num(); i++) {
+		if (strcmp(*mux_name, clkchk_cfg->get_vf_name(i)) == 0)
+			return i;
 	}
 
-	return -EINVAL;
+	return -2;
 }
 
 /* The clocks have a mechanism for synchronizing rate changes. */
@@ -483,15 +152,15 @@ static int mtk_clk_rate_change(struct notifier_block *nb,
 	struct clk_hw *hw = __clk_get_hw(ndata->clk);
 	const char *clk_name = __clk_get_name(hw->clk);
 	int vcore_opp = get_vcore_opp();
-
-	if (vcore_opp == VCORE_NULL)
-		return -EINVAL;
+	if (!hw) {
+		pr_notice("%s: hw is NULL", __func__);
+		return NOTIFY_BAD;
+	}
 
 	if (flags == PRE_RATE_CHANGE && clk_name) {
 		warn_vcore(vcore_opp, clk_name,
-			ndata->new_rate, mtk_mux2opp(clk_name, vcore_opp));
+			ndata->new_rate, mtk_mux2id(&clk_name));
 	}
-
 	return NOTIFY_OK;
 }
 
@@ -499,152 +168,282 @@ static struct notifier_block mtk_clk_notifier = {
 	.notifier_call = mtk_clk_rate_change,
 };
 
-int mtk_clk_check_muxes(void)
+static void mtk_clk_check_muxes(void)
 {
-	struct mtk_vf *vf_table;
 	struct clk *clk;
+	int i;
 
-	if (clkchk_ops == NULL || clkchk_ops->get_vf_table == NULL
-			|| clkchk_ops->get_vcore_opp == NULL)
-		return -EINVAL;
+	if (!clkchk_cfg || !clkchk_cfg->get_vf_name
+			|| !clkchk_cfg->get_vf_num)
+		return;
 
-	vf_table = clkchk_ops->get_vf_table();
-	if (vf_table == NULL)
-		return -EINVAL;
-
-	for (; vf_table->name != NULL; vf_table++) {
-		const char *name = vf_table->name;
+	for (i = 0; i < clkchk_cfg->get_vf_num(); i++) {
+		const char *name = clkchk_cfg->get_vf_name(i);
 
 		if (!name)
 			continue;
-		pr_notice("name: %s\n", name);
 
-		clk = __clk_chk_lookup(name);
+		pr_notice("name: %s\n", name);
+		clk = __clk_lookup(name);
 		clk_notifier_register(clk, &mtk_clk_notifier);
 	}
-
-	return 0;
 }
 
-static int clk_chk_dev_pm_suspend(struct device *dev)
+void __init clkchk_swcg_init(struct pg_check_swcg *swcg)
 {
-	struct provider_clk *pvdck = get_all_provider_clks();
+	if (!swcg)
+		return;
 
-	if (check_pll_off()) {
-		for (; pvdck->ck != NULL; pvdck++)
-			dump_enabled_clks(pvdck);
+	while (swcg->name) {
+		struct clk *c = __clk_lookup(swcg->name);
 
-		if (is_pll_chk_bug_on() || pdchk_get_bug_on_stat())
-			BUG_ON(1);
+		if (IS_ERR_OR_NULL(c))
+			pr_notice("[%17s: NULL]\n", swcg->name);
+		else
+			swcg->c = c;
+		swcg++;
+	}
+}
 
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
-		aee_kernel_warning_api(__FILE__, __LINE__,
-				DB_OPT_DEFAULT, "clk-chk",
-				"fail to disable clk/pd in suspend\n");
+static const char *ccf_state(struct clk_hw *hw)
+{
+	if (__clk_get_enable_count(hw->clk))
+		return "enabled";
+
+	if (clk_hw_is_prepared(hw))
+		return "prepared";
+
+	return "disabled";
+}
+
+static void print_enabled_clks(void)
+{
+	const char * const *cn = clkchk_cfg->all_clk_names;
+	const char * const *off_pn;
+	const char *fix_clk = "clk26m";
+    if (!clkchk_cfg)
+        return;
+
+	pr_warn("enabled clks:\n");
+	off_pn = clkchk_cfg->off_pll_names;
+
+	for (; *cn != NULL; cn++) {
+		int valid = 0;
+		struct clk *c = __clk_lookup(*cn);
+		struct clk_hw *c_hw = __clk_get_hw(c);
+		struct clk_hw *p_hw;
+		const char *c_name;
+		const char *p_name;
+		const char * const *pn;
+
+		if (IS_ERR_OR_NULL(c) || c_hw == NULL)
+			continue;
+
+		if (!__clk_get_enable_count(c))
+			continue;
+		p_hw = clk_hw_get_parent(c_hw);
+		c_name = clk_hw_get_name(c_hw);
+		p_name = p_hw ? clk_hw_get_name(p_hw) : 0;
+		while (p_name && strcmp(p_name, fix_clk)) {
+			struct clk_hw *p_hw_temp;
+
+			p_hw_temp = clk_hw_get_parent(p_hw);
+			p_name = p_hw_temp ? clk_hw_get_name(p_hw_temp) : 0;
+			if (p_name && strcmp(p_name, fix_clk))
+				p_hw = p_hw_temp;
+			else if (p_name && !strcmp(p_name, fix_clk)) {
+				c_name = clk_hw_get_name(p_hw);
+				break;
+			}
+		}
+		for (pn = off_pn; *pn && c_name; pn++)
+			if (!strncmp(c_name, *pn, 10)) {
+				valid++;
+				break;
+			}
+
+		if (!valid)
+			continue;
+
+		p_hw = clk_hw_get_parent(c_hw);
+		pr_warn("[%-17s: %8s, %3d, %3d, %10ld, %17s]\n",
+			clk_hw_get_name(c_hw),
+			ccf_state(c_hw),
+			clk_hw_is_prepared(c_hw),
+			__clk_get_enable_count(c),
+			clk_hw_get_rate(c_hw),
+			p_hw != NULL ? clk_hw_get_name(p_hw) : "- ");
+	}
+}
+void dump_enabled_clks_once(void)
+{
+	static bool first_flag = true;
+
+	if (first_flag) {
+		first_flag = false;
+		print_enabled_clks();
+	}
+}
+
+static int __clkchk_clk_init(struct clk **clks, const char * const *name, u32 len)
+{
+	struct clk **c;
+
+	if (!clkchk_cfg || !name)
+		return -EINVAL;
+
+	if (!clks[0]) {
+		struct clk **end = clks + len - 1;
+
+		for (c = clks; *name != NULL && c < end; name++, c++)
+			*c = __clk_lookup(*name);
+
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+
+
+static void __clkchk_clk_internal(struct clk **clks, unsigned int mode,
+			unsigned int type)
+{
+	struct clk **c;
+	int invalid = 0;
+
+	if (!clkchk_cfg)
+		return;
+
+	for (c = clks; *c != NULL; c++) {
+		struct clk_hw *c_hw = __clk_get_hw(*c);
+
+		if (c_hw == NULL)
+			continue;
+
+		if (!clk_hw_is_prepared(c_hw) && !clk_hw_is_enabled(c_hw))
+			continue;
+
+		pr_notice("suspend warning[0m: %s is on\n",
+				clk_hw_get_name(c_hw));
+
+		invalid++;
+	}
+
+	if (invalid == 0)
+		return;
+
+	/* invalid. output debug info */
+	if (type == PLL_TYPE)
+		print_enabled_clks();
+
+	if (mode == CLKCHK_OFF_MODE) {
+#if AEE_EXCP_CHECK_PLL_FAIL
+		if (clkchk_cfg->aee_excp_on_fail) {
+			if (type == PLL_TYPE)
+				aee_kernel_exception("clkchk",
+						"unclosed PLL: %s\n", buf);
+			if (type == MTCMOS_TYPE)
+				aee_kernel_warning("clkchk",
+					"@%s():%d, MTCMOS are not off\n",
+					__func__, __LINE__);
+		}
 #endif
+
+		if (clkchk_cfg->bug_on_fail)
+			BUG_ON(true);
+
+		if (clkchk_cfg->warn_on_fail)
+			WARN_ON(true);
 	}
+}
+
+
+
+static void check_pll_off(void)
+{
+	__clkchk_clk_internal(off_plls, CLKCHK_OFF_MODE, PLL_TYPE);
+}
+
+static void check_pll_notice(void)
+{
+	__clkchk_clk_internal(notice_plls, CLKCHK_NOTICE_MODE, PLL_TYPE);
+}
+
+static void check_mtcmos_off(void)
+{
+	__clkchk_clk_internal(off_mtcmos, CLKCHK_OFF_MODE, MTCMOS_TYPE);
+}
+
+static void check_mtcmos_notice(void)
+{
+	__clkchk_clk_internal(notice_mtcmos, CLKCHK_NOTICE_MODE, MTCMOS_TYPE);
+}
+static int clkchk_syscore_suspend(void)
+{
+	check_pll_off();
+	check_pll_notice();
+	check_mtcmos_off();
+	check_mtcmos_notice();
 
 	return 0;
 }
 
-const struct dev_pm_ops clk_chk_dev_pm_ops = {
-	.suspend_noirq = clk_chk_dev_pm_suspend,
-	.resume_noirq = NULL,
+static void clkchk_syscore_resume(void)
+{
+}
+
+static struct syscore_ops clkchk_syscore_ops = {
+	.suspend = clkchk_syscore_suspend,
+	.resume = clkchk_syscore_resume,
 };
-EXPORT_SYMBOL(clk_chk_dev_pm_ops);
 
-/*
- * for clock exception event handling
- */
-
-static void clkchk_dump_hwv_history(struct regmap *regmap, u32 id)
+int clkchk_init(struct clkchk_cfg_t *cfg)
 {
-	if (clkchk_ops == NULL || clkchk_ops->dump_hwv_history == NULL)
-		return;
+	const char * const *c;
+	bool match = false;
+	int ret1 = 0, ret2 = 0, ret3 = 0, ret4 = 0;
 
-	clkchk_ops->dump_hwv_history(regmap, id);
-}
-
-static void clkchk_get_bus_reg(void)
-{
-	if (clkchk_ops == NULL || clkchk_ops->get_bus_reg == NULL)
-		return;
-
-	clkchk_ops->get_bus_reg();
-}
-
-static void clkchk_dump_bus_reg(struct regmap *regmap, u32 ofs)
-{
-	if (clkchk_ops == NULL || clkchk_ops->dump_bus_reg == NULL)
-		return;
-
-	clkchk_ops->dump_bus_reg(regmap, ofs);
-}
-
-static void clkchk_dump_hwv_pll_reg(struct regmap *regmap, u32 shift)
-{
-	if (clkchk_ops == NULL || clkchk_ops->dump_hwv_pll_reg == NULL)
-		return;
-
-	clkchk_ops->dump_hwv_pll_reg(regmap, shift);
-}
-
-static bool clkchk_is_cg_chk_pwr_on(void)
-{
-	if (clkchk_ops == NULL || clkchk_ops->is_cg_chk_pwr_on == NULL)
-		return false;
-
-	return clkchk_ops->is_cg_chk_pwr_on();
-}
-
-static void clkchk_cg_chk(const char *name)
-{
-	struct provider_clk *pvdck;
-
-	pvdck = __clk_chk_lookup_pvdck(name);
-	if (!clkchk_pvdck_is_on(pvdck))
-		pr_notice("clk %s access without power on\n", name);
-}
-
-static int clkchk_evt_handling(struct notifier_block *nb,
-			unsigned long flags, void *data)
-{
-	struct clk_event_data *clkd = (struct clk_event_data *)data;
-
-	switch (clkd->event_type) {
-	case CLK_EVT_HWV_CG_TIMEOUT:
-		clkchk_dump_hwv_history(clkd->hwv_regmap, clkd->id);
-		clkchk_dump_bus_reg(clkd->regmap, clkd->ofs);
-		break;
-	case CLK_EVT_HWV_CG_CHK_PWR:
-		if (clkchk_is_cg_chk_pwr_on())
-			clkchk_cg_chk(clkd->name);
-		break;
-	case CLK_EVT_LONG_BUS_LATENCY:
-		clkchk_get_bus_reg();
-		break;
-	case CLK_EVT_HWV_PLL_TIMEOUT:
-		clkchk_dump_hwv_pll_reg(clkd->hwv_regmap, clkd->shift);
-		break;
-	case CLK_EVT_SUSPEND_CG_DUMP:
-		break;
-	default:
-		pr_notice("cannot get flags identify\n");
-		break;
+	if (cfg == NULL || cfg->compatible == NULL
+		|| cfg->all_clk_names == NULL || cfg->off_pll_names == NULL) {
+		pr_notice("Invalid clkchk_cfg.\n");
+		return -EINVAL;
 	}
 
-	return NOTIFY_OK;
+	clkchk_cfg = cfg;
+
+	for (c = cfg->compatible; *c != NULL; c++) {
+		if (of_machine_is_compatible(*c) != 0) {
+			match = true;
+			break;
+		}
+	}
+
+	if (!match)
+		return -ENODEV;
+
+	off_plls = kcalloc(MAX_PLLS, sizeof(struct clk *), GFP_KERNEL);
+	notice_plls = kcalloc(MAX_PLLS, sizeof(struct clk *), GFP_KERNEL);
+	off_mtcmos = kcalloc(MAX_MTCMOS, sizeof(struct clk *), GFP_KERNEL);
+	notice_mtcmos = kcalloc(MAX_MTCMOS, sizeof(struct clk *), GFP_KERNEL);
+	ret1 = __clkchk_clk_init(off_plls, clkchk_cfg->off_pll_names,
+			MAX_PLLS);
+	ret2 = __clkchk_clk_init(notice_plls, clkchk_cfg->notice_pll_names,
+			MAX_PLLS);
+	ret3 = __clkchk_clk_init(off_mtcmos, clkchk_cfg->off_mtcmos_names,
+			MAX_MTCMOS);
+	ret4 = __clkchk_clk_init(notice_mtcmos, clkchk_cfg->notice_mtcmos_names,
+			MAX_MTCMOS);
+	if (!ret1 && !ret2 && !ret3 && !ret4)
+		register_syscore_ops(&clkchk_syscore_ops);
+	else
+		pr_notice("clk register_syscore_ops fail\n");
+
+#if IS_ENABLED(CONFIG_MTK_DEVAPC) && !IS_ENABLED(CONFIG_DEVAPC_LEGACY)
+	register_devapc_vio_callback(&devapc_vio_handle);
+#endif
+
+	mtk_clk_check_muxes();
+
+	return 0;
 }
-
-int set_clkchk_notify(void)
-{
-	int r = 0;
-
-	mtk_clkchk_notifier.notifier_call = clkchk_evt_handling;
-	r = register_mtk_clk_notifier(&mtk_clkchk_notifier);
-	if (r)
-		pr_err("clk-chk notifier register err(%d)\n", r);
-
-	return r;
-}
-EXPORT_SYMBOL(set_clkchk_notify);

@@ -20,7 +20,6 @@
 
 #define EINT_NA	U16_MAX
 #define NO_EINT_SUPPORT	EINT_NA
-#define EINT_NO_GPIO   9999
 
 #define PIN_FIELD_CALC(_s_pin, _e_pin, _i_base, _s_addr, _x_addrs,      \
 		       _s_bit, _x_bits, _sz_reg, _fixed) {		\
@@ -68,7 +67,6 @@ enum {
 	PINCTRL_PIN_REG_DRV_EN,
 	PINCTRL_PIN_REG_DRV_E0,
 	PINCTRL_PIN_REG_DRV_E1,
-	PINCTRL_PIN_REG_RSEL,
 	PINCTRL_PIN_REG_MAX,
 };
 
@@ -83,7 +81,7 @@ enum {
 	DRV_GRP_MAX,
 };
 
-static const char * const mtk_default_register_base_names[] __maybe_unused = {
+static const char * const mtk_default_register_base_names[] = {
 	"base",
 };
 
@@ -202,10 +200,6 @@ struct mtk_pinctrl_group {
 
 struct mtk_pinctrl;
 
-#define FLAG_RACE_FREE_ACCESS	0x00000001
-#define FLAG_DRIVE_SET_RAW	0x00000002
-#define FLAG_GPIO_START_IDX_1   0x00000004
-
 /* struct mtk_pin_soc - the structure that holds SoC-specific data */
 struct mtk_pin_soc {
 	const struct mtk_pin_reg_calc	*reg_cal;
@@ -215,16 +209,16 @@ struct mtk_pin_soc {
 	unsigned int			ngrps;
 	const struct function_desc	*funcs;
 	unsigned int			nfuncs;
+	const struct mtk_eint_regs	*eint_regs;
+	const struct mtk_eint_hw	*eint_hw;
 
 	/* Specific parameters per SoC */
 	u8				gpio_m;
 	bool				ies_present;
-	u32				capability_flags;
-	const char * const		*base_names;
-	unsigned int			nbase_names;
-	const unsigned int		*pull_type;
+	bool                            race_free_access;
+	const char * const              *base_names;
+	unsigned int                    nbase_names;
 	const struct mtk_eh_pin_pinmux  *eh_pin_pinmux;
-	unsigned int			neh_pins;
 
 	/* Specific pinconfig operations */
 	int (*bias_disable_set)(struct mtk_pinctrl *hw,
@@ -280,10 +274,12 @@ int mtk_hw_set_value(struct mtk_pinctrl *hw, const struct mtk_pin_desc *desc,
 int mtk_hw_get_value(struct mtk_pinctrl *hw, const struct mtk_pin_desc *desc,
 		     int field, int *value);
 
-int mtk_eh_ctrl(struct mtk_pinctrl *hw, const struct mtk_pin_desc *desc,
+void mtk_eh_ctrl(struct mtk_pinctrl *hw, const struct mtk_pin_desc *desc,
 		 u16 mode);
 
 int mtk_build_eint(struct mtk_pinctrl *hw, struct platform_device *pdev);
+
+extern const struct dev_pm_ops mtk_eint_pm_ops_v2;
 
 int mtk_pinconf_bias_disable_set(struct mtk_pinctrl *hw,
 				 const struct mtk_pin_desc *desc);
@@ -305,12 +301,6 @@ int mtk_pinconf_bias_set_rev1(struct mtk_pinctrl *hw,
 int mtk_pinconf_bias_get_rev1(struct mtk_pinctrl *hw,
 			      const struct mtk_pin_desc *desc, bool pullup,
 			      int *res);
-int mtk_pinconf_bias_set_combo(struct mtk_pinctrl *hw,
-				const struct mtk_pin_desc *desc,
-				u32 pullup, u32 enable);
-int mtk_pinconf_bias_get_combo(struct mtk_pinctrl *hw,
-			      const struct mtk_pin_desc *desc,
-			      u32 *pullup, u32 *enable);
 
 int mtk_pinconf_drive_set(struct mtk_pinctrl *hw,
 			  const struct mtk_pin_desc *desc, u32 arg);
@@ -320,6 +310,11 @@ int mtk_pinconf_drive_get(struct mtk_pinctrl *hw,
 int mtk_pinconf_drive_set_rev1(struct mtk_pinctrl *hw,
 			       const struct mtk_pin_desc *desc, u32 arg);
 int mtk_pinconf_drive_get_rev1(struct mtk_pinctrl *hw,
+			       const struct mtk_pin_desc *desc, int *val);
+
+int mtk_pinconf_drive_set_raw(struct mtk_pinctrl *hw,
+			       const struct mtk_pin_desc *desc, u32 arg);
+int mtk_pinconf_drive_get_raw(struct mtk_pinctrl *hw,
 			       const struct mtk_pin_desc *desc, int *val);
 
 int mtk_pinconf_adv_pull_set(struct mtk_pinctrl *hw,
@@ -332,6 +327,14 @@ int mtk_pinconf_adv_drive_set(struct mtk_pinctrl *hw,
 			      const struct mtk_pin_desc *desc, u32 arg);
 int mtk_pinconf_adv_drive_get(struct mtk_pinctrl *hw,
 			      const struct mtk_pin_desc *desc, u32 *val);
+
+int mtk_pinconf_bias_set_combo(struct mtk_pinctrl *hw,
+				const struct mtk_pin_desc *desc,
+				u32 pullup, u32 enable);
+
+int mtk_pinconf_bias_get_combo(struct mtk_pinctrl *hw,
+			      const struct mtk_pin_desc *desc,
+			      u32 *pullup, u32 *enable);
 
 bool mtk_is_virt_gpio(struct mtk_pinctrl *hw, unsigned int gpio_n);
 #endif /* __PINCTRL_MTK_COMMON_V2_H */

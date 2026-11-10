@@ -521,6 +521,8 @@ static void set_dummy(void)
 
 	write_cmos_sensor_8(0x0340, imgsensor.frame_length >> 8);
 	write_cmos_sensor_8(0x0341, imgsensor.frame_length & 0xFF);
+	write_cmos_sensor_8(0x0342, imgsensor.line_length >> 8);
+	write_cmos_sensor_8(0x0343, imgsensor.line_length & 0xFF);
 
 	write_cmos_sensor_8(0x0104, 0x00);
 
@@ -590,10 +592,10 @@ static void write_shutter(kal_uint32 shutter)
 	kal_uint16 l_shift = 1;
 
 	spin_lock(&imgsensor_drv_lock);
-	// if (shutter > imgsensor.min_frame_length - imgsensor_info.margin)
-		// imgsensor.frame_length = shutter + imgsensor_info.margin;
-	// else
-	imgsensor.frame_length = imgsensor.min_frame_length;
+	if (shutter > imgsensor.min_frame_length - imgsensor_info.margin)
+		imgsensor.frame_length = shutter + imgsensor_info.margin;
+	else
+		imgsensor.frame_length = imgsensor.min_frame_length;
 	if (imgsensor.frame_length > imgsensor_info.max_frame_length)
 		imgsensor.frame_length = imgsensor_info.max_frame_length;
 	spin_unlock(&imgsensor_drv_lock);
@@ -629,7 +631,7 @@ static void write_shutter(kal_uint32 shutter)
 			l_shift = MAX_CIT_LSHIFT;
 		}
 		shutter = shutter >> l_shift;
-		// imgsensor.frame_length = shutter + imgsensor_info.margin;
+		imgsensor.frame_length = shutter + imgsensor_info.margin;
 		LOG_INF("enter long exposure mode, time is %d", l_shift);
 		write_cmos_sensor_8(0x3100,
 			read_cmos_sensor(0x3100) | (l_shift & 0x7));
@@ -640,6 +642,8 @@ static void write_shutter(kal_uint32 shutter)
 	} else {
 		write_cmos_sensor_8(0x0104, 0x01);
 		write_cmos_sensor_8(0x3100, read_cmos_sensor(0x3100) & 0xf8);
+		write_cmos_sensor_8(0x0340, imgsensor.frame_length >> 8);
+		write_cmos_sensor_8(0x0341, imgsensor.frame_length & 0xFF);
 		write_cmos_sensor_8(0x0104, 0x00);
 		imgsensor.current_ae_effective_frame = 2;
 		LOG_INF("set frame_length\n");
@@ -647,6 +651,7 @@ static void write_shutter(kal_uint32 shutter)
 
 	/* Update Shutter */
 	write_cmos_sensor_8(0x0104, 0x01);
+	write_cmos_sensor_8(0x0350, 0x01); /* Enable auto extend */
 	write_cmos_sensor_8(0x0202, (shutter >> 8) & 0xFF);
 	write_cmos_sensor_8(0x0203, shutter  & 0xFF);
 	write_cmos_sensor_8(0x0104, 0x00);
@@ -728,10 +733,10 @@ static void set_shutter_frame_length(kal_uint16 shutter,
 	imgsensor.frame_length = imgsensor.frame_length + dummy_line;
 	imgsensor.min_frame_length = imgsensor.frame_length;
 
-	// if (shutter > imgsensor.min_frame_length - imgsensor_info.margin)
-		// imgsensor.frame_length = shutter + imgsensor_info.margin;
-	// else
-	imgsensor.frame_length = imgsensor.min_frame_length;
+	if (shutter > imgsensor.min_frame_length - imgsensor_info.margin)
+		imgsensor.frame_length = shutter + imgsensor_info.margin;
+	else
+		imgsensor.frame_length = imgsensor.min_frame_length;
 	if (imgsensor.frame_length > imgsensor_info.max_frame_length)
 		imgsensor.frame_length = imgsensor_info.max_frame_length;
 	spin_unlock(&imgsensor_drv_lock);
@@ -784,7 +789,7 @@ static void set_shutter_frame_length(kal_uint16 shutter,
 
 static kal_uint16 gain2reg(const kal_uint16 gain)
 {
-	kal_uint16 reg_gain = 0x0;
+	 kal_uint16 reg_gain = 0x0;
 
 	reg_gain = 1024 - (1024*64)/gain;
 	return (kal_uint16) reg_gain;
@@ -853,13 +858,9 @@ static kal_uint32 streaming_control(kal_bool enable)
 {
 	LOG_INF("streaming_enable(0=Sw Standby,1=streaming): %d\n",
 		enable);
-	if (enable) {
-		if (read_cmos_sensor_8(0x0350) != 0x01) {
-			pr_info("single cam scenario enable auto-extend");
-			write_cmos_sensor_8(0x0350, 0x01);
-		}
+	if (enable)
 		write_cmos_sensor_8(0x0100, 0X01);
-	} else
+	else
 		write_cmos_sensor_8(0x0100, 0x00);
 	return ERROR_NONE;
 }
@@ -2852,8 +2853,8 @@ static kal_uint32 get_imgsensor_id(UINT32 *sensor_id)
 			*sensor_id = ((read_cmos_sensor_8(0x0016) << 8)
 					| read_cmos_sensor_8(0x0017));
 			if (*sensor_id == imgsensor_info.sensor_id) {
-				pr_info("[%s] i2c write id: 0x%x, sensor id: 0x%x\n",
-					__func__, imgsensor.i2c_write_id, *sensor_id);
+				LOG_INF("i2c write id: 0x%x, sensor id: 0x%x\n",
+					imgsensor.i2c_write_id, *sensor_id);
 				return ERROR_NONE;
 			}
 
@@ -3735,7 +3736,7 @@ static kal_int32 get_sensor_temperature(void)
 
 	temperature = read_cmos_sensor_8(0x013a);
 
-	if (temperature <= 0x60)
+	if (temperature >= 0x0 && temperature <= 0x60)
 		temperature_convert = temperature;
 	else if (temperature >= 0x61 && temperature <= 0x7F)
 		temperature_convert = 97;

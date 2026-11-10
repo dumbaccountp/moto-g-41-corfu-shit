@@ -29,6 +29,7 @@
 #include <linux/io.h>
 #include <linux/atomic.h>
 #include <linux/types.h>
+#include <mt-plat/sync_write.h>
 #include "sspm_define.h"
 #include "sspm_helper.h"
 #include "sspm_ipi_id.h"
@@ -56,7 +57,7 @@ enum ipi_debug_opt {
 	IPIMON_SHOW,
 };
 
-static ssize_t sspm_ipi_debug_show(struct device *kobj,
+static ssize_t sspm_ipi_debug_help(struct device *kobj,
 	struct device_attribute *attr, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "SSPM ipi debug command:\n"
@@ -65,7 +66,7 @@ static ssize_t sspm_ipi_debug_show(struct device *kobj,
 		"2: Dump the ipimon\n");
 }
 
-static ssize_t sspm_ipi_debug_store(struct device *kobj,
+static ssize_t sspm_ipi_debug_set(struct device *kobj,
 	struct device_attribute *attr, const char *buf, size_t n)
 {
 	unsigned int opt = 0xFFFF;
@@ -88,7 +89,7 @@ static ssize_t sspm_ipi_debug_store(struct device *kobj,
 
 	return n;
 }
-DEVICE_ATTR_RW(sspm_ipi_debug);
+DEVICE_ATTR(sspm_ipi_debug, 0644, sspm_ipi_debug_help, sspm_ipi_debug_set);
 
 static ssize_t sspm_alive_show(struct device *kobj,
 	struct device_attribute *attr, char *buf)
@@ -106,7 +107,7 @@ static ssize_t sspm_alive_show(struct device *kobj,
 	return snprintf(buf, PAGE_SIZE, "%s\n",
 		sspm_plt_ackdata ? "Alive" : "Dead");
 }
-DEVICE_ATTR_RO(sspm_alive);
+DEVICE_ATTR(sspm_alive, 0444, sspm_alive_show, NULL);
 
 int __init sspm_plt_init(void)
 {

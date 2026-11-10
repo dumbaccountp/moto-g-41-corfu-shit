@@ -10,61 +10,25 @@
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 #include <linux/arm-smccc.h> /* for Kernel Native SMC API */
-#include <linux/soc/mediatek/mtk_sip_svc.h> /* for SMC ID table */
+#include <mt-plat/mtk_secure_api.h> /* for SMC ID table */
 
 #include "mt6853-afe-common.h"
 #include "mt6853-afe-clk.h"
 
 static DEFINE_MUTEX(mutex_request_dram);
 
-enum {
-	CLK_AFE = 0,
-	CLK_TML,
-	CLK_APLL22M,
-	CLK_APLL24M,
-	CLK_APLL1_TUNER,
-	CLK_APLL2_TUNER,
-	CLK_NLE,
-	CLK_INFRA_SYS_AUDIO,
-	CLK_INFRA_AUDIO_26M,
-	CLK_MUX_AUDIO,
-	CLK_MUX_AUDIOINTBUS,
-	CLK_TOP_MAINPLL_D4_D4,
-	/* apll related mux */
-	CLK_TOP_MUX_AUD_1,
-	CLK_TOP_APLL1_CK,
-	CLK_TOP_MUX_AUD_2,
-	CLK_TOP_APLL2_CK,
-	CLK_TOP_MUX_AUD_ENG1,
-	CLK_TOP_APLL1_D4,
-	CLK_TOP_MUX_AUD_ENG2,
-	CLK_TOP_APLL2_D4,
-	CLK_TOP_MUX_AUDIO_H,
-	CLK_TOP_I2S0_M_SEL,
-	CLK_TOP_I2S1_M_SEL,
-	CLK_TOP_I2S2_M_SEL,
-	CLK_TOP_I2S3_M_SEL,
-	CLK_TOP_I2S4_M_SEL,
-	CLK_TOP_I2S5_M_SEL,
-	CLK_TOP_APLL12_DIV0,
-	CLK_TOP_APLL12_DIV1,
-	CLK_TOP_APLL12_DIV2,
-	CLK_TOP_APLL12_DIV3,
-	CLK_TOP_APLL12_DIV4,
-	CLK_TOP_APLL12_DIVB,
-	CLK_TOP_APLL12_DIV5,
-	CLK_CLK26M,
-	CLK_NUM
-};
-
 static const char *aud_clks[CLK_NUM] = {
 	[CLK_AFE] = "aud_afe_clk",
+	/*[CLK_DAC] = "aud_dac_clk",*/
+	/*[CLK_DAC_PREDIS] = "aud_dac_predis_clk",*/
+	/*[CLK_ADC] = "aud_adc_clk",*/
 	[CLK_TML] = "aud_tml_clk",
 	[CLK_APLL22M] = "aud_apll22m_clk",
 	[CLK_APLL24M] = "aud_apll24m_clk",
 	[CLK_APLL1_TUNER] = "aud_apll1_tuner_clk",
 	[CLK_APLL2_TUNER] = "aud_apll2_tuner_clk",
 	[CLK_NLE] = "aud_nle",
+	[CLK_SCP_SYS_AUD] = "scp_sys_audio",
 	[CLK_INFRA_SYS_AUDIO] = "aud_infra_clk",
 	[CLK_INFRA_AUDIO_26M] = "aud_infra_26m_clk",
 	[CLK_MUX_AUDIO] = "top_mux_audio",
@@ -243,6 +207,13 @@ int mt6853_afe_enable_clock(struct mtk_base_afe *afe)
 
 	dev_info(afe->dev, "%s()\n", __func__);
 
+	ret = clk_prepare_enable(afe_priv->clk[CLK_SCP_SYS_AUD]);
+	if (ret) {
+		dev_err(afe->dev, "%s clk_prepare_enable %s fail %d\n",
+			__func__, aud_clks[CLK_SCP_SYS_AUD], ret);
+		goto CLK_SCP_SYS_AUD_ERR;
+	}
+
 	ret = clk_prepare_enable(afe_priv->clk[CLK_INFRA_SYS_AUDIO]);
 	if (ret) {
 		dev_err(afe->dev, "%s clk_prepare_enable %s fail %d\n",
@@ -310,6 +281,8 @@ CLK_INFRA_AUDIO_26M_ERR:
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_AUDIO_26M]);
 CLK_INFRA_SYS_AUDIO_ERR:
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_SYS_AUDIO]);
+CLK_SCP_SYS_AUD_ERR:
+	clk_disable_unprepare(afe_priv->clk[CLK_SCP_SYS_AUD]);
 
 	return ret;
 }
@@ -327,6 +300,7 @@ void mt6853_afe_disable_clock(struct mtk_base_afe *afe)
 	clk_disable_unprepare(afe_priv->clk[CLK_MUX_AUDIO]);
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_AUDIO_26M]);
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_SYS_AUDIO]);
+	clk_disable_unprepare(afe_priv->clk[CLK_SCP_SYS_AUD]);
 }
 
 int mt6853_afe_dram_request(struct device *dev)
@@ -696,9 +670,9 @@ int mt6853_init_clock(struct mtk_base_afe *afe)
 	}
 
 	afe_priv->apmixed = syscon_regmap_lookup_by_phandle(afe->dev->of_node,
-							    "apmixedsys");
+							    "apmixed");
 	if (IS_ERR(afe_priv->apmixed)) {
-		dev_err(afe->dev, "%s() Cannot find apmixedsys: %ld\n",
+		dev_err(afe->dev, "%s() Cannot find apmixed controller: %ld\n",
 			__func__, PTR_ERR(afe_priv->apmixed));
 		return PTR_ERR(afe_priv->apmixed);
 	}
@@ -711,13 +685,13 @@ int mt6853_init_clock(struct mtk_base_afe *afe)
 		return PTR_ERR(afe_priv->topckgen);
 	}
 
-	afe_priv->infracfg = syscon_regmap_lookup_by_phandle(
+	afe_priv->infracfg_ao = syscon_regmap_lookup_by_phandle(
 				afe->dev->of_node,
-				"infracfg");
-	if (IS_ERR(afe_priv->infracfg)) {
-		dev_err(afe->dev, "%s() Cannot find infracfg: %ld\n",
-			__func__, PTR_ERR(afe_priv->infracfg));
-		return PTR_ERR(afe_priv->infracfg);
+				"infracfg_ao");
+	if (IS_ERR(afe_priv->infracfg_ao)) {
+		dev_err(afe->dev, "%s() Cannot find infracfg_ao: %ld\n",
+			__func__, PTR_ERR(afe_priv->infracfg_ao));
+		return PTR_ERR(afe_priv->infracfg_ao);
 	}
 
 	return 0;

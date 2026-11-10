@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016 MediaTek Inc.
- * Author: PC Chen <pc.chen@mediatek.com>
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef _VCODEC_IPI_MSG_H_
@@ -9,16 +8,6 @@
 
 #include <linux/videodev2.h>
 #include <linux/v4l2-controls.h>
-
-#define AP_IPIMSG_VDEC_SEND_BASE 0xA000
-#define VCU_IPIMSG_VDEC_ACK_BASE 0xB000
-#define VCU_IPIMSG_VDEC_SEND_BASE 0xC000
-#define AP_IPIMSG_VDEC_ACK_BASE 0xD000
-
-#define AP_IPIMSG_VENC_SEND_BASE 0x1000
-#define VCU_IPIMSG_VENC_ACK_BASE 0x2000
-#define VCU_IPIMSG_VENC_SEND_BASE 0x3000
-#define AP_IPIMSG_VENC_ACK_BASE 0x4000
 
 enum mtk_venc_hw_id {
 	MTK_VENC_CORE_0 = 0,
@@ -150,34 +139,6 @@ struct vdec_dec_info {
 	__u32 error_map;
 	__u64 timestamp;
 	__u32 queued_frame_buf_count;
-};
-
-enum vcodec_mem_type {
-	MEM_TYPE_FOR_SW = 0,                    /* /< External memory for SW */
-	MEM_TYPE_FOR_HW,                        /* /< External memory for HW  */
-	MEM_TYPE_FOR_UBE_HW,                    /* /< External memory for UBE reserved memory */
-	MEM_TYPE_FOR_SEC_SW,                    /* /< External memory for secure SW */
-	MEM_TYPE_FOR_SEC_HW,                    /* /< External memory for secure HW */
-	MEM_TYPE_FOR_SEC_UBE_HW,                    /* /< External memory for secure UBE */
-	MEM_TYPE_FOR_SHM,                       /* /< External memory for share memory */
-	MEM_TYPE_MAX = 0xFFFFFFFF               /* /< Max memory type */
-};
-
-/**
- * struct mem_obj - memory buffer allocated in kernel
- *
- * @flag:	flag of buffer
- * @iova:	iova of buffer
- * @len:	buffer length
- * @pa:	physical address
- * @va: kernel virtual address
- */
-struct vcodec_mem_obj {
-	__u32 type;
-	__u32 len;
-	__u64 iova;
-	__u64 pa;
-	__u64 va;
 };
 
 #endif

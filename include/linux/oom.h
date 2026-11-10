@@ -15,13 +15,6 @@ struct notifier_block;
 struct mem_cgroup;
 struct task_struct;
 
-enum oom_constraint {
-	CONSTRAINT_NONE,
-	CONSTRAINT_CPUSET,
-	CONSTRAINT_MEMORY_POLICY,
-	CONSTRAINT_MEMCG,
-};
-
 /*
  * Details of the page allocation that triggered the oom killer that are used to
  * determine what should be killed.
@@ -48,12 +41,7 @@ struct oom_control {
 	/* Used by oom implementation, do not set */
 	unsigned long totalpages;
 	struct task_struct *chosen;
-	long chosen_points;
-	struct task_struct *chosen_non_negative_adj;
-	long chosen_non_negative_adj_points;
-
-	/* Used to print the constraint info. */
-	enum oom_constraint constraint;
+	unsigned long chosen_points;
 };
 
 extern struct mutex oom_lock;
@@ -110,7 +98,8 @@ static inline vm_fault_t check_stable_address_space(struct mm_struct *mm)
 
 bool __oom_reap_task_mm(struct mm_struct *mm);
 
-long oom_badness(struct task_struct *p,
+extern unsigned long oom_badness(struct task_struct *p,
+		struct mem_cgroup *memcg, const nodemask_t *nodemask,
 		unsigned long totalpages);
 
 extern bool out_of_memory(struct oom_control *oc);
@@ -129,7 +118,4 @@ extern struct task_struct *find_lock_task_mm(struct task_struct *p);
 extern int sysctl_oom_dump_tasks;
 extern int sysctl_oom_kill_allocating_task;
 extern int sysctl_panic_on_oom;
-
-/* call for adding killed process to reaper. */
-extern void add_to_oom_reaper(struct task_struct *p);
 #endif /* _INCLUDE_LINUX_OOM_H */

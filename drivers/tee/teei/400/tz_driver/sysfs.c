@@ -30,7 +30,7 @@ static uint32_t imsg_log_level = IMSG_LOG_LEVEL;
 static DEFINE_MUTEX(drv_load_mutex);
 unsigned long spi_ready_flag;
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 uint32_t tzdriver_dynamical_debug_flag;
 #endif
 
@@ -60,7 +60,6 @@ uint32_t get_imsg_log_level(void)
 {
 	return imsg_log_level;
 }
-EXPORT_SYMBOL_GPL(get_imsg_log_level);
 
 static ssize_t imsg_log_level_show(struct device *cd,
 			struct device_attribute *attr, char *buf)
@@ -68,7 +67,7 @@ static ssize_t imsg_log_level_show(struct device *cd,
 	return sprintf(buf, "%u\n", get_imsg_log_level());
 }
 
-#if IS_ENABLED(CONFIG_MICROTRUST_DEBUG)
+#if defined(CONFIG_MICROTRUST_DEBUG)
 static void set_imsg_log_level(uint32_t lv)
 {
 	imsg_log_level = lv;
@@ -104,7 +103,7 @@ static ssize_t teei_log_level_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t len)
 {
-	unsigned long new = 0;
+	unsigned long new;
 	int retVal = 0;
 
 	retVal = kstrtoul(buf, 0, &new);
@@ -177,9 +176,7 @@ static void str_to_uuid(struct TEEC_UUID *uuid, const char *buf)
 
 static inline void uuid_to_str(struct TEEC_UUID *uuid, char *buf)
 {
-	int ret = 0;
-
-	ret = snprintf(buf, UUID_STRING_LENGTH,
+	snprintf(buf, UUID_STRING_LENGTH,
 			"%08x%04x%04x%02x%02x%02x%02x%02x%02x%02x%02x",
 			uuid->timeLow, uuid->timeMid,
 			uuid->timeHiAndVersion,
@@ -187,8 +184,6 @@ static inline void uuid_to_str(struct TEEC_UUID *uuid, char *buf)
 			uuid->clockSeqAndNode[2], uuid->clockSeqAndNode[3],
 			uuid->clockSeqAndNode[4], uuid->clockSeqAndNode[5],
 			uuid->clockSeqAndNode[6], uuid->clockSeqAndNode[7]);
-	if (ret <= 0)
-		IMSG_ERROR("snprintf failed ret %d\n", ret);
 }
 
 static inline void print_uuid(struct TEEC_UUID *uuid)
@@ -486,14 +481,14 @@ static ssize_t list_ut_drv_show(struct device *cd,
 
 	list_for_each_entry(entry, &ut_drv_list, list) {
 		uuid_to_str(&entry->uuid, uuid_str);
-		s += snprintf(s, UUID_STRING_LENGTH, "%s\n", uuid_str);
+		s += sprintf(s, "%s\n", uuid_str);
 	}
 
 	return (ssize_t)(s - buf);
 }
 static DEVICE_ATTR_RO(list_ut_drv);
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TEST_DRIVERS)
+#ifdef CONFIG_MICROTRUST_TEST_DRIVERS
 
 #define TEST_DRIVER_ID 0x77000012
 
@@ -566,7 +561,7 @@ static ssize_t notify_ree_dci_handler_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t len)
 {
-	uint32_t driver_id = 0;
+	uint32_t driver_id;
 
 	hex_str_to_value(buf, 8, &driver_id);
 	IMSG_DEBUG("driver_id: 0x%x\n", driver_id);
@@ -579,7 +574,7 @@ static ssize_t notify_ree_dci_handler_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(notify_ree_dci_handler);
 
-#if !IS_ENABLED(CONFIG_MICROTRUST_DYNAMIC_CORE)
+#ifndef CONFIG_MICROTRUST_DYNAMIC_CORE
 static ssize_t current_bind_cpu_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -592,7 +587,7 @@ static ssize_t current_bind_cpu_show(struct device *dev,
 static DEVICE_ATTR_RO(current_bind_cpu);
 #endif
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 static ssize_t tzdriver_dynamical_debug_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -624,15 +619,15 @@ static struct device_attribute *attr_list[] = {
 		&dev_attr_load_ut_drv,
 		&dev_attr_unload_ut_drv,
 		&dev_attr_list_ut_drv,
-#if IS_ENABLED(CONFIG_MICROTRUST_TEST_DRIVERS)
+#ifdef CONFIG_MICROTRUST_TEST_DRIVERS
 		&dev_attr_dcih_notify_test,
 		&dev_attr_dcih_wait_notify_test,
 #endif
 		&dev_attr_notify_ree_dci_handler,
-#if !IS_ENABLED(CONFIG_MICROTRUST_DYNAMIC_CORE)
+#ifndef CONFIG_MICROTRUST_DYNAMIC_CORE
 		&dev_attr_current_bind_cpu,
 #endif
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 		&dev_attr_tzdriver_dynamical_debug,
 #endif
 		&dev_attr_teei_log_level,
@@ -641,7 +636,7 @@ static struct device_attribute *attr_list[] = {
 
 void remove_sysfs(struct platform_device *pdev)
 {
-	unsigned int i = 0;
+	int i;
 
 	if (is_context_init)
 		TEEC_FinalizeContext(&ut_drv_context);
@@ -653,7 +648,7 @@ void remove_sysfs(struct platform_device *pdev)
 int init_sysfs(struct platform_device *pdev)
 {
 	int res;
-	unsigned int i = 0;
+	int i;
 
 	for (i = 0; attr_list[i]; i++) {
 		res = device_create_file(&pdev->dev, attr_list[i]);

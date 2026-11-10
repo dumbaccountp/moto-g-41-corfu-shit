@@ -82,7 +82,6 @@ enum {
 	SCP_CCCI_STATE_INVALID = 0,
 	SCP_CCCI_STATE_BOOTING = 1,
 	SCP_CCCI_STATE_RBREADY = 2,
-	SCP_CCCI_STATE_STOP = 3,
 };
 
 enum CCCI_MD_MSG {
@@ -162,11 +161,13 @@ enum ccci_ipi_op_id {
 
 #define GET_OTHER_MD_ID(a) (a == MD_SYS1 ? MD_SYS3 : MD_SYS1)
 
+#define MD_IMG_DUMP_SIZE  (1<<8)
 #define DSP_IMG_DUMP_SIZE (1<<9)
 #define CCCI_AED_DUMP_EX_MEM		(1<<0)
+#define CCCI_AED_DUMP_MD_IMG_MEM	(1<<1)
 #define CCCI_AED_DUMP_CCIF_REG		(1<<2)
 #define CCCI_AED_DUMP_EX_PKT		(1<<3)
-#define MD_EX_MPU_STR_LEN (512)
+#define MD_EX_MPU_STR_LEN (128)
 #define MD_EX_START_TIME_LEN (128)
 
 /************ structures ************/
@@ -180,11 +181,6 @@ struct ccci_ipi_msg {
 struct ccci_fsm_scp {
 	int md_id;
 	struct work_struct scp_md_state_sync_work;
-#ifdef CCCI_KMODULE_ENABLE
-	void (*md_state_sync)(int);
-#endif
-	void __iomem *ccif2_ap_base;
-	void __iomem *ccif2_md_base;
 };
 
 struct ccci_fsm_poller {
@@ -227,7 +223,6 @@ struct ccci_fsm_monitor {
 
 struct ccci_fsm_ctl {
 	int md_id;
-	unsigned int fsm_md_gen;
 	enum MD_STATE md_state;
 
 	unsigned int curr_state;
@@ -245,11 +240,7 @@ struct ccci_fsm_ctl {
 
 	unsigned long boot_count; /* for throttling feature */
 
-#ifdef CCCI_KMODULE_ENABLE
-	struct ccci_fsm_scp *scp_ctl;
-#else
 	struct ccci_fsm_scp scp_ctl;
-#endif
 	struct ccci_fsm_poller poller_ctl;
 	struct ccci_fsm_ee ee_ctl;
 	struct ccci_fsm_monitor monitor_ctl;
@@ -270,29 +261,6 @@ struct ccci_fsm_command {
 	wait_queue_head_t complete_wq;
 };
 
-#define ccci_write32(b, a, v)  \
-do { \
-	writel(v, (b) + (a)); \
-	mb(); /* make sure register access in order */ \
-} while (0)
-
-
-#define ccci_write16(b, a, v)  \
-do { \
-	writew(v, (b) + (a)); \
-	mb(); /* make sure register access in order */ \
-} while (0)
-
-
-#define ccci_write8(b, a, v)  \
-do { \
-	writeb(v, (b) + (a)); \
-	mb(); /* make sure register access in order */ \
-} while (0)
-
-#define ccci_read32(b, a)               ioread32((void __iomem *)((b)+(a)))
-#define ccci_read16(b, a)               ioread16((void __iomem *)((b)+(a)))
-#define ccci_read8(b, a)                ioread8((void __iomem *)((b)+(a)))
 
 /************ APIs ************/
 
@@ -301,11 +269,7 @@ int fsm_append_command(struct ccci_fsm_ctl *ctl,
 int fsm_append_event(struct ccci_fsm_ctl *ctl, enum CCCI_FSM_EVENT event_id,
 	unsigned char *data, unsigned int length);
 
-#ifndef CCCI_KMODULE_ENABLE
 int fsm_scp_init(struct ccci_fsm_scp *scp_ctl);
-#else
-extern void ccci_fsm_scp_register(int md_id, struct ccci_fsm_scp *scp_ctl);
-#endif
 int fsm_poller_init(struct ccci_fsm_poller *poller_ctl);
 int fsm_ee_init(struct ccci_fsm_ee *ee_ctl);
 int fsm_monitor_init(struct ccci_fsm_monitor *monitor_ctl);
@@ -333,6 +297,6 @@ extern void inject_md_status_event(int md_id, int event_type, char reason[]);
 extern void ccci_set_mem_access_protection_second_stage(int md_id);
 #endif
 extern void mdee_set_ex_start_str(struct ccci_fsm_ee *ee_ctl,
-	const unsigned int type, const char *str);
+	unsigned int type, char *str);
 #endif /* __CCCI_FSM_INTERNAL_H__ */
 

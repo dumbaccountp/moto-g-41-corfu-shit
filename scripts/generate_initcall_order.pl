@@ -8,22 +8,22 @@
 use strict;
 use warnings;
 use IO::Handle;
-use IO::Select;
-use POSIX ":sys_wait_h";
 
-my $nm = $ENV{'NM'} || die "$0: ERROR: NM not set?";
-my $objtree = $ENV{'objtree'} || '.';
+my $nm = $ENV{'LLVM_NM'} || "llvm-nm";
+my $ar = $ENV{'AR'}	 || "llvm-ar";
+my $objtree = $ENV{'objtree'} || ".";
 
+## list of all object files to process, in link order
+my @objects;
 ## currently active child processes
 my $jobs = {};		# child process pid -> file handle
 ## results from child processes
-my $results = {};	# object index -> [ { level, secname }, ... ]
+my $results = {};	# object index -> { level, function }
 
-## reads _NPROCESSORS_ONLN to determine the maximum number of processes to
-## start
+## reads _NPROCESSORS_ONLN to determine the number of processes to start
 sub get_online_processors {
 	open(my $fh, "getconf _NPROCESSORS_ONLN 2>/dev/null |")
-		or die "$0: ERROR: failed to execute getconf: $!";
+		or die "$0: failed to execute getconf: $!";
 	my $procs = <$fh>;
 	close($fh);
 
@@ -34,237 +34,217 @@ sub get_online_processors {
 	return int($procs);
 }
 
-## writes results to the parent process
-## format: <file index> <initcall level> <base initcall section name>
-sub write_results {
-	my ($index, $initcalls) = @_;
-
-	# sort by the counter value to ensure the order of initcalls within
-	# each object file is correct
-	foreach my $counter (sort { $a <=> $b } keys(%{$initcalls})) {
-		my $level = $initcalls->{$counter}->{'level'};
-
-		# section name for the initcall function
-		my $secname = $initcalls->{$counter}->{'module'} . '__' .
-			      $counter . '_' .
-			      $initcalls->{$counter}->{'line'} . '_' .
-			      $initcalls->{$counter}->{'function'};
-
-		print "$index $level $secname\n";
-	}
-}
-
-## reads a result line from a child process and adds it to the $results array
-sub read_results{
-	my ($fh) = @_;
-
-	# each child prints out a full line w/ autoflush and exits after the
-	# last line, so even if buffered I/O blocks here, it shouldn't block
-	# very long
-	my $data = <$fh>;
-
-	if (!defined($data)) {
-		return 0;
-	}
-
-	chomp($data);
-
-	my ($index, $level, $secname) = $data =~
-		/^(\d+)\ ([^\ ]+)\ (.*)$/;
-
-	if (!defined($index) ||
-		!defined($level) ||
-		!defined($secname)) {
-		die "$0: ERROR: child process returned invalid data: $data\n";
-	}
-
-	$index = int($index);
-
-	if (!exists($results->{$index})) {
-		$results->{$index} = [];
-	}
-
-	push (@{$results->{$index}}, {
-		'level'   => $level,
-		'secname' => $secname
-	});
-
-	return 1;
-}
-
-## finds initcalls from an object file or all object files in an archive, and
-## writes results back to the parent process
+## finds initcalls defined in an object file, parses level and function name,
+## and prints it out to the parent process
 sub find_initcalls {
-	my ($index, $file) = @_;
+	my ($object) = @_;
 
-	die "$0: ERROR: file $file doesn't exist?" if (! -f $file);
+	die "$0: object file $object doesn't exist?" if (! -f $object);
 
-	open(my $fh, "\"$nm\" --defined-only \"$file\" 2>/dev/null |")
-		or die "$0: ERROR: failed to execute \"$nm\": $!";
+	open(my $fh, "\"$nm\" -just-symbol-name -defined-only \"$object\" 2>/dev/null |")
+		or die "$0: failed to execute \"$nm\": $!";
 
 	my $initcalls = {};
 
 	while (<$fh>) {
 		chomp;
 
-		# check for the start of a new object file (if processing an
-		# archive)
-		my ($path)= $_ =~ /^(.+)\:$/;
+		my ($counter, $line, $symbol) = $_ =~ /^__initcall_(\d+)_(\d+)_(.*)$/;
 
-		if (defined($path)) {
-			write_results($index, $initcalls);
-			$initcalls = {};
+		if (!defined($counter) || !defined($line) || !defined($symbol)) {
 			next;
 		}
 
-		# look for an initcall
-		my ($module, $counter, $line, $symbol) = $_ =~
-			/[a-z]\s+__initcall__(\S*)__(\d+)_(\d+)_(.*)$/;
-
-		if (!defined($module)) {
-			$module = ''
-		}
-
-		if (!defined($counter) ||
-			!defined($line) ||
-			!defined($symbol)) {
-			next;
-		}
-
-		# parse initcall level
 		my ($function, $level) = $symbol =~
-			/^(.*)((early|rootfs|con|[0-9])s?)$/;
+			/^(.*)((early|rootfs|con|security|[0-9])s?)$/;
 
-		die "$0: ERROR: invalid initcall name $symbol in $file($path)"
-			if (!defined($function) || !defined($level));
+		die "$0: duplicate initcall counter value in object $object: $_"
+			if exists($initcalls->{$counter});
 
 		$initcalls->{$counter} = {
-			'module'   => $module,
-			'line'     => $line,
-			'function' => $function,
 			'level'    => $level,
+			'line'     => $line,
+			'function' => $function
 		};
 	}
 
 	close($fh);
-	write_results($index, $initcalls);
+
+	# sort initcalls in each object file numerically by the counter value
+	# to ensure they are in the order they were defined
+	foreach my $counter (sort { $a <=> $b } keys(%{$initcalls})) {
+		print $initcalls->{$counter}->{"level"} . " " .
+		      $counter . " " .
+		      $initcalls->{$counter}->{"line"} . " " .
+		      $initcalls->{$counter}->{"function"} . "\n";
+	}
 }
 
 ## waits for any child process to complete, reads the results, and adds them to
 ## the $results array for later processing
 sub wait_for_results {
-	my ($select) = @_;
+	my $pid = wait();
+	if ($pid > 0) {
+		my $fh = $jobs->{$pid};
 
-	my $pid = 0;
-	do {
-		# unblock children that may have a full write buffer
-		foreach my $fh ($select->can_read(0)) {
-			read_results($fh);
+		# the child process prints out results in the following format:
+		#  line 1:    <object file index>
+		#  line 2..n: <level> <counter> <line> <function>
+
+		my $index = <$fh>;
+		chomp($index);
+
+		if (!($index =~ /^\d+$/)) {
+			die "$0: child $pid returned an invalid index: $index";
 		}
+		$index = int($index);
 
-		# check for children that have exited, read the remaining data
-		# from them, and clean up
-		$pid = waitpid(-1, WNOHANG);
-		if ($pid > 0) {
-			if (!exists($jobs->{$pid})) {
-				next;
+		while (<$fh>) {
+			chomp;
+			my ($level, $counter, $line, $function) = $_ =~
+				/^([^\ ]+)\ (\d+)\ (\d+)\ (.*)$/;
+
+			if (!defined($level) ||
+				!defined($counter) ||
+				!defined($line) ||
+				!defined($function)) {
+				die "$0: child $pid returned invalid data";
 			}
 
-			my $fh = $jobs->{$pid};
-			$select->remove($fh);
-
-			while (read_results($fh)) {
-				# until eof
+			if (!exists($results->{$index})) {
+				$results->{$index} = [];
 			}
 
-			close($fh);
-			delete($jobs->{$pid});
+			push (@{$results->{$index}}, {
+				'level'    => $level,
+				'counter'  => $counter,
+				'line'     => $line,
+				'function' => $function
+			});
 		}
-	} while ($pid > 0);
+
+		close($fh);
+		delete($jobs->{$pid});
+	}
 }
 
-## forks a child to process each file passed in the command line and collects
-## the results
-sub process_files {
-	my $index = 0;
-	my $njobs = $ENV{'PARALLELISM'} || get_online_processors();
-	my $select = IO::Select->new();
+## launches child processes to find initcalls from the object files, waits for
+## each process to complete and collects the results
+sub process_objects {
+	my $index = 0;	# link order index of the object file
+	my $njobs = get_online_processors();
 
-	while (my $file = shift(@ARGV)) {
+	while (scalar(@objects) > 0) {
+		my $object = shift(@objects);
+
 		# fork a child process and read it's stdout
 		my $pid = open(my $fh, '-|');
 
 		if (!defined($pid)) {
-			die "$0: ERROR: failed to fork: $!";
+			die "$0: failed to fork: $!";
 		} elsif ($pid) {
 			# save the child process pid and the file handle
-			$select->add($fh);
 			$jobs->{$pid} = $fh;
 		} else {
-			# in the child process
 			STDOUT->autoflush(1);
-			find_initcalls($index, "$objtree/$file");
+			print "$index\n";
+			find_initcalls("$objtree/$object");
 			exit;
 		}
 
 		$index++;
 
-		# limit the number of children to $njobs
-		if (scalar(keys(%{$jobs})) >= $njobs) {
-			wait_for_results($select);
+		# if we reached the maximum number of processes, wait for one
+		# to complete before launching new ones
+		if (scalar(keys(%{$jobs})) >= $njobs && scalar(@objects) > 0) {
+			wait_for_results();
 		}
 	}
 
 	# wait for the remaining children to complete
 	while (scalar(keys(%{$jobs})) > 0) {
-		wait_for_results($select);
+		wait_for_results();
 	}
 }
 
-sub generate_initcall_lds() {
-	process_files();
+## gets a list of actual object files from thin archives, and adds them to
+## @objects in link order
+sub find_objects {
+	while (my $file = shift(@ARGV)) {
+		my $pid = open (my $fh, "\"$ar\" t \"$file\" 2>/dev/null |")
+			or die "$0: failed to execute $ar: $!";
 
-	my $sections = {};	# level -> [ secname, ...]
+		my @output;
 
-	# sort results to retain link order and split to sections per
-	# initcall level
-	foreach my $index (sort { $a <=> $b } keys(%{$results})) {
-		foreach my $result (@{$results->{$index}}) {
-			my $level = $result->{'level'};
+		while (<$fh>) {
+			chomp;
+			push(@output, $_);
+		}
 
-			if (!exists($sections->{$level})) {
-				$sections->{$level} = [];
-			}
+		close($fh);
 
-			push(@{$sections->{$level}}, $result->{'secname'});
+		# if $ar failed, assume we have an object file
+		if ($? != 0) {
+			push(@objects, $file);
+			next;
+		}
+
+		# if $ar succeeded, read the list of object files
+		foreach (@output) {
+			push(@objects, $_);
 		}
 	}
-
-	die "$0: ERROR: no initcalls?" if (!keys(%{$sections}));
-
-	# print out a linker script that defines the order of initcalls for
-	# each level
-	print "SECTIONS {\n";
-
-	foreach my $level (sort(keys(%{$sections}))) {
-		my $section;
-
-		if ($level eq 'con') {
-			$section = '.con_initcall.init';
-		} else {
-			$section = ".initcall${level}.init";
-		}
-
-		print "\t${section} : {\n";
-
-		foreach my $secname (@{$sections->{$level}}) {
-			print "\t\t*(${section}..${secname}) ;\n";
-		}
-
-		print "\t}\n";
-	}
-
-	print "}\n";
 }
 
-generate_initcall_lds();
+## START
+find_objects();
+process_objects();
+
+## process results and add them to $sections in the correct order
+my $sections = {};
+
+foreach my $index (sort { $a <=> $b } keys(%{$results})) {
+	foreach my $result (@{$results->{$index}}) {
+		my $level = $result->{'level'};
+
+		if (!exists($sections->{$level})) {
+			$sections->{$level} = [];
+		}
+
+		my $fsname = $result->{'counter'} . '_' .
+			     $result->{'line'}    . '_' .
+			     $result->{'function'};
+
+		push(@{$sections->{$level}}, $fsname);
+	}
+}
+
+if (!keys(%{$sections})) {
+	exit(0); # no initcalls...?
+}
+
+## print out a linker script that defines the order of initcalls for each
+## level
+print "SECTIONS {\n";
+
+foreach my $level (sort(keys(%{$sections}))) {
+	my $section;
+
+	if ($level eq 'con') {
+		$section = '.con_initcall.init';
+	} elsif ($level eq 'security') {
+		$section = '.security_initcall.init';
+	} else {
+		$section = ".initcall${level}.init";
+	}
+
+	print "\t${section} : {\n";
+
+	foreach my $fsname (@{$sections->{$level}}) {
+		print "\t\t*(${section}..${fsname}) ;\n"
+	}
+
+	print "\t}\n";
+}
+
+print "}\n";

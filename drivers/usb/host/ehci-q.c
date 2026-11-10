@@ -256,12 +256,12 @@ ehci_urb_done(struct ehci_hcd *ehci, struct urb *urb, int status)
 	}
 
 	if (unlikely(urb->unlinked)) {
-		INCR(ehci->stats.unlink);
+		COUNT(ehci->stats.unlink);
 	} else {
 		/* report non-error and short read status as zero */
 		if (status == -EINPROGRESS || status == -EREMOTEIO)
 			status = 0;
-		INCR(ehci->stats.complete);
+		COUNT(ehci->stats.complete);
 	}
 
 #ifdef EHCI_URB_TRACE
@@ -874,7 +874,7 @@ qh_make (
 	switch (urb->dev->speed) {
 	case USB_SPEED_LOW:
 		info1 |= QH_LOW_SPEED;
-		fallthrough;
+		/* FALL THROUGH */
 
 	case USB_SPEED_FULL:
 		/* EPS 0 means "full" */

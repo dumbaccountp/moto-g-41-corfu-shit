@@ -25,31 +25,13 @@ config RPMSG_MTK
 	  communicate with remote processors base on rpmsg framework. It
 	  provide channels, endpoints creation and send operations.
 
-config RPMSG_MTK_CCD
-	tristate "MediaTek CCD rpmsg driver"
-	select RPMSG
-	help
-	  Say y here to enable support communication channels to remote
-	  processors in MediaTek platforms. This uses MTK ccd driver to
-	  communicate with Camera Control Daemon base on rpmsg framework. It
-	  provide channels, endpoints creation and send operations.
-
-config RPMSG_MTK_SCP
-	tristate "MediaTek SCP"
-	depends on MTK_SCP
-	select RPMSG
-	help
-	  Say y here to enable support providing communication channels to
-	  remote processors in MediaTek platforms.
-	  This use IPI and IPC to communicate with remote processors.
-
-config RPMSG_QCOM_GLINK
+config RPMSG_QCOM_GLINK_NATIVE
 	tristate
 	select RPMSG
 
 config RPMSG_QCOM_GLINK_RPM
 	tristate "Qualcomm RPM Glink driver"
-	select RPMSG_QCOM_GLINK
+        select RPMSG_QCOM_GLINK_NATIVE
 	depends on HAS_IOMEM
 	depends on MAILBOX
 	help
@@ -59,7 +41,7 @@ config RPMSG_QCOM_GLINK_RPM
 
 config RPMSG_QCOM_GLINK_SMEM
 	tristate "Qualcomm SMEM Glink driver"
-	select RPMSG_QCOM_GLINK
+	select RPMSG_QCOM_GLINK_NATIVE
 	depends on MAILBOX
 	depends on QCOM_SMEM
 	help

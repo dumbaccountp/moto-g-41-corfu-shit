@@ -1,7 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2015-2016 MediaTek Inc.
- * Author: Yong Wu <yong.wu@mediatek.com>
+ * Copyright (c) 2020 MediaTek Inc.
  */
 #ifndef MTK_IOMMU_SMI_H
 #define MTK_IOMMU_SMI_H
@@ -9,97 +8,73 @@
 #include <linux/bitops.h>
 #include <linux/device.h>
 
-#if IS_ENABLED(CONFIG_MTK_SMI)
+#ifdef CONFIG_MTK_SMI
+
+#define MTK_LARB_NR_MAX		32
 
 #define MTK_SMI_MMU_EN(port)	BIT(port)
+
+#define RESET_CELL_NUM			(2)
+#define MAX_LARB_FOR_CLAMP		(6)
+#define MAX_COMMON_FOR_CLAMP	(3)
 
 struct mtk_smi_larb_iommu {
 	struct device *dev;
 	unsigned int   mmu;
-	unsigned char  bank[64];
 };
-/*
- * mtk_smi_larb_get: Enable the power domain and clocks for this local arbiter.
- *                   It also initialize some basic setting(like iommu).
- * mtk_smi_larb_put: Disable the power domain and clocks for this local arbiter.
- * Both should be called in non-atomic context.
- *
- * Returns 0 if successful, negative on failure.
- */
-int mtk_smi_driver_register_notifier(struct notifier_block *nb);
-int mtk_smi_driver_unregister_notifier(struct notifier_block *nb);
-int mtk_smi_larb_get(struct device *larbdev);
-void mtk_smi_larb_put(struct device *larbdev);
-void mtk_smi_common_bw_set(struct device *dev, const u32 port, const u32 val);
-void mtk_smi_larb_bw_set(struct device *dev, const u32 port, const u32 val);
-s32 mtk_smi_dbg_hang_detect(const char *user);
-void mtk_smi_add_device_link(struct device *dev, struct device *larbdev);
-void mtk_smi_init_power_off(void);
-void mtk_smi_dump_last_pd(const char *user);
-void mtk_smi_larb_clamp(struct device *larbdev, bool on);
-s32 smi_sysram_enable(struct device *larbdev, const u32 master_id,
-			const bool enable, const char *user);
-s32 mtk_smi_dbg_cg_status(void);
-void mtk_smi_check_comm_ref_cnt(struct device *dev);
-void mtk_smi_check_larb_ref_cnt(struct device *dev);
-int mtk_smi_larb_ultra_dis(struct device *larbdev, bool is_dis);
-#else
 
+struct mtk_smi_iommu {
+	unsigned int larb_nr;
+	struct mtk_smi_larb_iommu larb_imu[MTK_LARB_NR_MAX];
+};
 
-static inline int mtk_smi_driver_register_notifier(struct notifier_block *nb)
-{
-	return 0;
-}
+#endif
+#if IS_ENABLED(CONFIG_MTK_SMI_EXT)
+#include <linux/platform_device.h>
 
-static inline int mtk_smi_driver_unregister_notifier(struct notifier_block *nb)
-{
-	return 0;
-}
+struct mtk_smi_pair {
+	u32 off;
+	u32 val;
+};
 
-static inline int mtk_smi_larb_get(struct device *larbdev)
-{
-	return 0;
-}
+struct mtk_smi_dev {
+	u32 id;
+	struct device *dev;
+	void __iomem *base;
+	u32 *mmu;
 
-static inline void mtk_smi_larb_put(struct device *larbdev) { }
+	u32 nr_clks;
+	struct clk **clks;
+	atomic_t clk_cnts;
 
-static inline void
-mtk_smi_common_bw_set(struct device *dev, const u32 port, const u32 val) { }
-static inline void
-mtk_smi_larb_bw_set(struct device *dev, const u32 port, const u32 val) { }
-static inline s32 mtk_smi_dbg_hang_detect(const char *user)
-{
-	return 0;
-}
+	u32 nr_conf_pairs;
+	struct mtk_smi_pair *conf_pairs;
 
-static inline s32 mtk_smi_dbg_cg_status(void)
-{
-	return 0;
-}
-static inline  void mtk_smi_check_comm_ref_cnt(struct device *dev) {}
-static inline  void mtk_smi_check_larb_ref_cnt(struct device *dev) {}
+	u32 nr_scen_pairs;
+	struct mtk_smi_pair **scen_pairs;
 
-static inline void
-mtk_smi_add_device_link(struct device *dev, struct device *larbdev) { }
+	u32	power_reset_pa[MAX_LARB_FOR_CLAMP];
+	void __iomem *power_reset_reg[MAX_LARB_FOR_CLAMP];
+	u32	power_reset_value[MAX_LARB_FOR_CLAMP];
 
-static inline void mtk_smi_init_power_off(void) { }
+	u32	comm_reset_pa[MAX_LARB_FOR_CLAMP];
+	void __iomem *comm_reset_reg[MAX_LARB_FOR_CLAMP];
+	u32	comm_reset_value[MAX_LARB_FOR_CLAMP];
+	bool comm_reset;
 
-static inline void mtk_smi_dump_last_pd(const char *user) { }
+	bool comm_clamp_enable;
+	u32	comm_clamp_value[MAX_LARB_FOR_CLAMP];
+};
 
-static inline void mtk_smi_larb_clamp(struct device *larbdev, bool on) { }
+s32 mtk_smi_clk_enable(struct mtk_smi_dev *smi);
+void mtk_smi_clk_disable(struct mtk_smi_dev *smi);
 
-static inline
-s32 smi_sysram_enable(struct device *larbdev, const u32 master_id,
-			const bool enable, const char *user)
-{
-	return 0;
-}
+struct mtk_smi_dev *mtk_smi_dev_get(const u32 id);
+s32 mtk_smi_conf_set(const struct mtk_smi_dev *smi, const u32 scen_id);
 
-static inline
-int mtk_smi_larb_ultra_dis(struct device *larbdev, bool is_dis)
-{
-	return 0;
-}
+s32 smi_register(void);
+s32 smi_get_dev_num(void);
+s32 smi_larb_port_check(void);
 #endif
 
 #endif

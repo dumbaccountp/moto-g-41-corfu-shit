@@ -13,7 +13,7 @@
 #include <media/rc-core.h>
 
 #include <mt-plat/mtk_pwm.h>
-#include <mt-plat/mtk_pwm_hal.h>
+#include <mach/mtk_pwm_hal.h>
 
 #define DRIVER_NAME	"mtk-pwm-ir-tx"
 #define DEVICE_NAME	"MTK PWM IR Transmitter"
@@ -50,9 +50,9 @@ static int mtk_pwm_ir_tx(struct rc_dev *rcdev, unsigned int *txbuf,
 			 unsigned int count)
 {
 	struct mtk_pwm_ir *pwm_ir = rcdev->priv;
-	dma_addr_t wave_phy = 0;
+	dma_addr_t wave_phy;
 	unsigned int *wave_vir;
-	int ret, i, h_l_period;
+	int ret, i, h_l_period, cycle_unit_us;
 	int buf_size = 0;
 	int total_time = 0;
 	int len = 0;
@@ -77,24 +77,25 @@ static int mtk_pwm_ir_tx(struct rc_dev *rcdev, unsigned int *txbuf,
 		return 0;
 
 	// pwm_ir.cycle: whole cycle,  pwm_ir.duty_cycle: high period
-	h_l_period = (int)DIV_ROUND_CLOSEST_ULL(IRTX_PWM_CLOCK,
+	h_l_period = DIV_ROUND_UP(IRTX_PWM_CLOCK*pwm_ir->duty_cycle,
+			pwm_ir->carrier*pwm_ir->cycle);
+	cycle_unit_us = DIV_ROUND_UP(NSEC_PER_SEC/1000*pwm_ir->duty_cycle,
 			pwm_ir->carrier*pwm_ir->cycle);
 
 	for (i = 0; i < count; i++) {
-		buf_size +=
-		(int)(DIV_ROUND_CLOSEST_ULL(txbuf[i]*pwm_ir->carrier,
-		(u32)(NSEC_PER_SEC/1000))) * pwm_ir->cycle;
+		buf_size += ALIGN(DIV_ROUND_UP(txbuf[i], cycle_unit_us), pwm_ir->cycle);
 		total_time += txbuf[i];
 	}
 
 	buf_size = ALIGN(buf_size, BITS_PER_BYTE * sizeof(unsigned int));
 	buf_size = buf_size / BITS_PER_BYTE; /* byte size */
 
-	wave_vir = dma_alloc_coherent(&pwm_ir->pdev->dev, buf_size,
+	wave_vir = (unsigned int *) dma_alloc_coherent(&pwm_ir->pdev->dev, buf_size,
 		&wave_phy, GFP_KERNEL);
-	if (!wave_vir)
+	if (!wave_vir) {
+		pr_notice("%s() IRTX alloc memory fail\n", __func__);
 		return -ENOMEM;
-
+	}
 	memset(wave_vir, 0, buf_size);
 	/* convert the pulse/space signal to raw binary signal */
 	cur_bit = 0;
@@ -102,9 +103,7 @@ static int mtk_pwm_ir_tx(struct rc_dev *rcdev, unsigned int *txbuf,
 		unsigned int periods;
 		int j, cur_cycle = 0;
 
-		periods =
-		(int)(DIV_ROUND_CLOSEST_ULL(txbuf[i]*pwm_ir->carrier,
-		(u32)(NSEC_PER_SEC/1000))) * pwm_ir->cycle;
+		periods = ALIGN(DIV_ROUND_UP(txbuf[i], cycle_unit_us), pwm_ir->cycle);
 
 		for (j = 0; j < periods; j++) {
 			cur_cycle = (j % pwm_ir->cycle)+1;
@@ -137,7 +136,8 @@ static int mtk_pwm_ir_tx(struct rc_dev *rcdev, unsigned int *txbuf,
 
 #ifdef IRTX_DEBUG
 	dbglog = logbuf;
-	pr_info("h_l_period = %d\n", h_l_period);
+	pr_info("h_l_period = %d, cycle_unit_us = %d\n",
+		h_l_period, cycle_unit_us);
 	pr_info("irtx len = %d, buf_size = %d, total_time = %d\n",
 		len, buf_size, total_time);
 	for (i = 0; i < len; i++) {
@@ -222,7 +222,6 @@ static int mtk_pwm_ir_probe(struct platform_device *pdev)
 	struct mtk_pwm_ir *pwm_ir;
 	struct rc_dev *rcdev;
 	int rc;
-	const char *pwm_str = NULL;
 
 	pwm_ir = devm_kmalloc(&pdev->dev, sizeof(*pwm_ir), GFP_KERNEL);
 	if (!pwm_ir)
@@ -232,13 +231,8 @@ static int mtk_pwm_ir_probe(struct platform_device *pdev)
 		&pwm_ir->pwm_ch);
 	of_property_read_u32(pdev->dev.of_node, "pwm_data_invert",
 		&pwm_ir->pwm_data_invert);
-	if (of_property_read_string(pdev->dev.of_node, "pwm-supply",
-		&pwm_str)) {
-		pr_info("Could not get pwm-supply property form dts");
-		return -ENODEV;
-	}
 
-	pwm_ir->regulator = devm_regulator_get(&pdev->dev, pwm_str);
+	pwm_ir->regulator = devm_regulator_get(&pdev->dev, "vio28");
 	if (IS_ERR(pwm_ir->regulator))
 		return PTR_ERR(pwm_ir->regulator);
 

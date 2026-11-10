@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/fs/9p/vfs_inode.c
  *
@@ -6,6 +5,22 @@
  *
  *  Copyright (C) 2004 by Eric Van Hensbergen <ericvh@gmail.com>
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License version 2
+ *  as published by the Free Software Foundation.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to:
+ *  Free Software Foundation
+ *  51 Franklin Street, Fifth Floor
+ *  Boston, MA  02111-1301  USA
+ *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -143,7 +158,7 @@ static umode_t p9mode2unixmode(struct v9fs_session_info *v9ses,
 		default:
 			p9_debug(P9_DEBUG_ERROR, "Unknown special type %c %s\n",
 				 type, stat->extension);
-		}
+		};
 		*rdev = MKDEV(major, minor);
 	} else
 		res |= S_IFREG;
@@ -223,7 +238,8 @@ v9fs_blank_wstat(struct p9_wstat *wstat)
 struct inode *v9fs_alloc_inode(struct super_block *sb)
 {
 	struct v9fs_inode *v9inode;
-	v9inode = kmem_cache_alloc(v9fs_inode_cache, GFP_KERNEL);
+	v9inode = (struct v9fs_inode *)kmem_cache_alloc(v9fs_inode_cache,
+							GFP_KERNEL);
 	if (!v9inode)
 		return NULL;
 #ifdef CONFIG_9P_FSCACHE
@@ -237,13 +253,19 @@ struct inode *v9fs_alloc_inode(struct super_block *sb)
 }
 
 /**
- * v9fs_free_inode - destroy an inode
+ * v9fs_destroy_inode - destroy an inode
  *
  */
 
-void v9fs_free_inode(struct inode *inode)
+static void v9fs_i_callback(struct rcu_head *head)
 {
+	struct inode *inode = container_of(head, struct inode, i_rcu);
 	kmem_cache_free(v9fs_inode_cache, V9FS_I(inode));
+}
+
+void v9fs_destroy_inode(struct inode *inode)
+{
+	call_rcu(&inode->i_rcu, v9fs_i_callback);
 }
 
 int v9fs_init_inode(struct v9fs_session_info *v9ses,
@@ -367,6 +389,59 @@ struct inode *v9fs_get_inode(struct super_block *sb, umode_t mode, dev_t rdev)
 	return inode;
 }
 
+/*
+static struct v9fs_fid*
+v9fs_clone_walk(struct v9fs_session_info *v9ses, u32 fid, struct dentry *dentry)
+{
+	int err;
+	int nfid;
+	struct v9fs_fid *ret;
+	struct v9fs_fcall *fcall;
+
+	nfid = v9fs_get_idpool(&v9ses->fidpool);
+	if (nfid < 0) {
+		eprintk(KERN_WARNING, "no free fids available\n");
+		return ERR_PTR(-ENOSPC);
+	}
+
+	err = v9fs_t_walk(v9ses, fid, nfid, (char *) dentry->d_name.name,
+		&fcall);
+
+	if (err < 0) {
+		if (fcall && fcall->id == RWALK)
+			goto clunk_fid;
+
+		PRINT_FCALL_ERROR("walk error", fcall);
+		v9fs_put_idpool(nfid, &v9ses->fidpool);
+		goto error;
+	}
+
+	kfree(fcall);
+	fcall = NULL;
+	ret = v9fs_fid_create(v9ses, nfid);
+	if (!ret) {
+		err = -ENOMEM;
+		goto clunk_fid;
+	}
+
+	err = v9fs_fid_insert(ret, dentry);
+	if (err < 0) {
+		v9fs_fid_destroy(ret);
+		goto clunk_fid;
+	}
+
+	return ret;
+
+clunk_fid:
+	v9fs_t_clunk(v9ses, nfid);
+
+error:
+	kfree(fcall);
+	return ERR_PTR(err);
+}
+*/
+
+
 /**
  * v9fs_clear_inode - release an inode
  * @inode: inode to release
@@ -398,7 +473,7 @@ static int v9fs_test_inode(struct inode *inode, void *data)
 
 	umode = p9mode2unixmode(v9ses, st, &rdev);
 	/* don't match inode of different type */
-	if (inode_wrong_type(inode, umode))
+	if ((inode->i_mode & S_IFMT) != (umode & S_IFMT))
 		return 0;
 
 	/* compare qid details */
@@ -1036,7 +1111,7 @@ static int v9fs_vfs_setattr(struct dentry *dentry, struct iattr *iattr)
 {
 	int retval;
 	struct v9fs_session_info *v9ses;
-	struct p9_fid *fid = NULL;
+	struct p9_fid *fid;
 	struct p9_wstat wstat;
 
 	p9_debug(P9_DEBUG_VFS, "\n");
@@ -1046,12 +1121,7 @@ static int v9fs_vfs_setattr(struct dentry *dentry, struct iattr *iattr)
 
 	retval = -EPERM;
 	v9ses = v9fs_dentry2v9ses(dentry);
-	if (iattr->ia_valid & ATTR_FILE) {
-		fid = iattr->ia_file->private_data;
-		WARN_ON(!fid);
-	}
-	if (!fid)
-		fid = v9fs_fid_lookup(dentry);
+	fid = v9fs_fid_lookup(dentry);
 	if(IS_ERR(fid))
 		return PTR_ERR(fid);
 
@@ -1360,7 +1430,7 @@ int v9fs_refresh_inode(struct p9_fid *fid, struct inode *inode)
 	 * Don't update inode if the file type is different
 	 */
 	umode = p9mode2unixmode(v9ses, st, &rdev);
-	if (inode_wrong_type(inode, umode))
+	if ((inode->i_mode & S_IFMT) != (umode & S_IFMT))
 		goto out;
 
 	/*

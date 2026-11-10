@@ -16,22 +16,20 @@
 #include <linux/usb/gadget.h>
 #include <linux/usb.h>
 #include <linux/usb/otg.h>
-#include <linux/usb/role.h>
-#include <musb.h>
-#include <musb_dr.h>
+#include "musb.h"
 #include <linux/pm_wakeup.h>
 #include <linux/version.h>
 #include <linux/clk.h>
-#if IS_ENABLED(CONFIG_MTK_CHARGER)
+#if defined(CONFIG_MTK_CHARGER)
 extern enum charger_type mt_get_charger_type(void);
 #endif
 
 /* to prevent 32 bit project misuse */
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT) && (!IS_ENABLED(CONFIG_64BIT))
+#if defined(CONFIG_MTK_MUSB_DRV_36BIT) && !defined(CONFIG_64BIT)
 #error
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 #include "mtk_qmu.h"
 #endif
 
@@ -41,6 +39,7 @@ struct musb;
 struct musb_hw_ep;
 struct musb_ep;
 extern int musb_fake_CDP;
+extern int kernel_init_done;
 extern int musb_force_on;
 extern int musb_host_dynamic_fifo;
 extern int musb_host_dynamic_fifo_usage_msk;
@@ -52,26 +51,19 @@ extern long musb_host_db_delay_ns;
 extern long musb_host_db_workaround_cnt;
 extern int mtk_host_audio_free_ep_udelay;
 
+extern struct musb *mtk_musb;
 extern bool mtk_usb_power;
 extern ktime_t ktime_ready;
 extern int ep_config_from_table_for_host(struct musb *musb);
 extern int polling_vbus_value(void *data);
 
-/* get time dff from timespec64*/
-
-#define GET_TIME_DIFF_S(s, e) \
-((int)((e.tv_nsec > s.tv_nsec) ? (e.tv_sec - s.tv_sec) : (e.tv_sec - s.tv_sec - 1)))
-
-#define GET_TIME_DIFF_NS(s, e) \
-((int)((e.tv_nsec > s.tv_nsec) ? (e.tv_nsec - s.tv_nsec) : (1000000000 + e.tv_nsec - s.tv_nsec)))
-
-#if IS_ENABLED(CONFIG_USBIF_COMPLIANCE)
+#if defined(CONFIG_USBIF_COMPLIANCE)
 extern bool polling_vbus;
 extern struct task_struct *vbus_polling_tsk;
 extern void musb_set_host_request_flag(struct musb *musb, unsigned int value);
 extern void pmic_bvalid_det_int_en(int i);
 #define CONFIG_USBIF_COMPLIANCE_PMIC
-#if IS_ENABLED(CONFIG_USBIF_COMPLIANCE_PMIC)
+#if defined(CONFIG_USBIF_COMPLIANCE_PMIC)
 extern int PMIC_IMM_GetOneChannelValue(int dwChannel, int deCount, int trimd);
 #define MT6328_AUX_VCDT_AP 2	/* include/mach/upmu_sw.h */
 #define AUX_VCDT_AP MT6328_AUX_VCDT_AP	/* include/mach/upmu_sw.h */
@@ -106,13 +98,17 @@ extern void musb_bug(void);
 #include <linux/usb/hcd.h>
 #include "musb_host.h"
 
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+#include <linux/usb/class-dual-role.h>
+#endif
+
 /* NOTE:  otg and peripheral-only state machines start at B_IDLE.
  * OTG or host-only go to A_IDLE when ID is sensed.
  */
 #define is_peripheral_active(m)		(!(m)->is_host)
 #define is_host_active(m)		((m)->is_host)
 
-#if IS_ENABLED(CONFIG_PROC_FS)
+#ifdef CONFIG_PROC_FS
 #include <linux/fs.h>
 #define MUSB_CONFIG_PROC_FS
 #endif
@@ -135,7 +131,7 @@ extern void musb_host_rx(struct musb *musb, u8 epnum);
 
 /****************************** CONSTANTS ********************************/
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_CARPLAY_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_CARPLAY_SUPPORT
 extern bool apple;
 extern void musb_id_pin_work_device(void);
 extern void musb_id_pin_work_host(struct work_struct *data);
@@ -182,7 +178,12 @@ enum musb_g_ep0_state {
 /* gadget rest in BUS_RESET, so need to decrease min 1 second to 600ms*/
 #define OTG_TIME_A_WAIT_BCON	600	/* min 1 second */
 #define OTG_TIME_A_AIDL_BDIS	200	/* min 200 msec */
+#if defined(CONFIG_USBIF_COMPLIANCE)
+#define OTG_TIME_B_ASE0_BRST	155	/* min 3.125 ms */
+#else
 #define OTG_TIME_B_ASE0_BRST	100	/* min 3.125 ms */
+#endif
+
 
 
 /*************************** REGISTER ACCESS ********************************/
@@ -244,7 +245,6 @@ struct musb_platform_ops {
 	void (*disable_clk)(struct musb *musb);
 	void (*prepare_clk)(struct musb *musb);
 	void (*unprepare_clk)(struct musb *musb);
-	void (*enable_wakeup)(struct musb *musb, bool enable);
 };
 
 /*
@@ -334,7 +334,7 @@ struct musb {
 	struct work_struct otg_notifier_work;
 	u16 hwvers;
 	struct delayed_work id_pin_work;
-#if IS_ENABLED(CONFIG_MTK_MUSB_CARPLAY_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_CARPLAY_SUPPORT
 	struct delayed_work carplay_work;
 #endif
 	struct musb_fifo_cfg *fifo_cfg;
@@ -368,6 +368,9 @@ struct musb {
 
 	struct timer_list otg_timer;
 	struct timer_list idle_timer;
+#if defined(CONFIG_USBIF_COMPLIANCE)
+	struct timer_list otg_vbus_polling_timer;
+#endif
 	struct notifier_block nb;
 
 	struct dma_controller *dma_controller;
@@ -381,13 +384,12 @@ struct musb {
 	u16 int_rx;
 	u16 int_tx;
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	u32 int_queue;
 #endif
 
 	struct usb_phy *xceiv;
-	struct phy *phy;
-
+	unsigned int efuse_val;
 	u8 xceiv_event;
 
 	int nIrq;
@@ -403,6 +405,7 @@ struct musb {
 	u8 nr_endpoints;
 
 	int (*board_set_power)(int state);
+	void (*usb_rev6_setting)(int value);
 
 	u8 min_power;		/* vbus for periph, in mA/2 */
 
@@ -474,28 +477,23 @@ struct musb {
 	struct proc_dir_entry *proc_entry;
 #endif
 	int xceiv_old_state;
-#if IS_ENABLED(CONFIG_DEBUG_FS)
+#ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs_root;
 #endif
 	bool power;
 	unsigned is_ready:1;
 	bool usb_if;
 	u16 fifo_addr;
+#if defined(CONFIG_USBIF_COMPLIANCE)
+	bool srp_drvvbus;
+	enum usb_otg_event otg_event;
+#endif
 	struct workqueue_struct *st_wq;
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+	struct dual_role_phy_instance *dr_usb;
+#endif /* CONFIG_DUAL_ROLE_USB_INTF */
 	struct power_supply *usb_psy;
 	struct notifier_block psy_nb;
-
-#if IS_ENABLED(CONFIG_USB_ROLE_SWITCH)
-	struct otg_switch_mtk *otg_sx;
-#endif
-	struct mt_usb_glue *glue;
-
-	/* host suspend */
-	bool host_suspend;
-	bool usb_connected;
-
-	unsigned is_gadget_ready:1;
-	unsigned async_callbacks:1;
 };
 
 static inline struct musb *gadget_to_musb(struct usb_gadget *g)
@@ -640,18 +638,6 @@ static inline void musb_platform_unprepare_clk(struct musb *musb)
 		musb->ops->unprepare_clk(musb);
 }
 
-static inline void musb_platform_enable_wakeup(struct musb *musb)
-{
-	if (musb->ops->enable_wakeup)
-		musb->ops->enable_wakeup(musb, true);
-}
-
-static inline void musb_platform_disable_wakeup(struct musb *musb)
-{
-	if (musb->ops->enable_wakeup)
-		musb->ops->enable_wakeup(musb, false);
-}
-
 /* #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0) */
 static inline const char *otg_state_string(enum usb_otg_state state)
 {
@@ -662,13 +648,10 @@ enum {
 	USB_DPIDLE_ALLOWED = 0,
 	USB_DPIDLE_FORBIDDEN,
 	USB_DPIDLE_SRAM,
-	USB_DPIDLE_TIMER,
-	USB_DPIDLE_SUSPEND,
-	USB_DPIDLE_RESUME
+	USB_DPIDLE_TIMER
 };
 extern void usb_hal_dpidle_request(int mode);
 extern void register_usb_hal_dpidle_request(void (*function)(int));
-extern void usb_hal_disconnect_check(void);
 extern void register_usb_hal_disconnect_check(void (*function)(void));
 extern void wake_up_bat(void);
 extern void wait_tx_done(u8 epnum, unsigned int timeout_ns);

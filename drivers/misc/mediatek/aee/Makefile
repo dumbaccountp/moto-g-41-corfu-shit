@@ -10,7 +10,15 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
-subdir-ccflags-y += -I$(srctree)/drivers/gpu/drm/mediatek/mediatek_v2/
+ifeq ($(CONFIG_MTK_PLATFORM), "mt6761")
+MTK_PLATFORM := mt6765
+else ifneq ($(CONFIG_MTK_PLATFORM), "")
+MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
+else
+MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_DISP_PLATFORM))
+endif
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/aee/mrdump
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/aee/aed
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/aee
@@ -22,6 +30,11 @@ ifdef CONFIG_MTK_ION
 subdir-ccflags-y += -I$(srctree)/drivers/staging/android/ion
 endif
 
+ifdef CONFIG_DRM_MEDIATEK
+subdir-ccflags-y += -I$(srctree)/drivers/gpu/drm/mediatek/
+endif
+
 obj-$(CONFIG_MTK_AEE_FEATURE)	+= aed/
 obj-$(CONFIG_MTK_AEE_FEATURE)	+= mrdump/
-obj-$(CONFIG_MTK_AEE_HANGDET)   += hangdet/
+obj-$(CONFIG_MTK_AEE_HANGDET)	+= hangdet/
+

@@ -18,49 +18,88 @@ define fixup-kernel-cmd-file
 if [ -e $(1) ]; then cp $(1) $(1).bak; sed -e 's/\\\\\\\\/\\\\/g' < $(1).bak > $(1); rm -f $(1).bak; fi
 endef
 
+ifneq ($(strip $(TARGET_NO_KERNEL)),true)
   KERNEL_DIR := $(KERNEL_ENV_PATH)
   mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
   current_dir := $(notdir $(patsubst %/,%,$(dir $(mkfile_path))))
 
+  kernel_build_config_suffix := .mtk
+  ifeq ($(KERNEL_TARGET_ARCH),arm64)
+    kernel_build_config_suffix := $(kernel_build_config_suffix).aarch64
+    ifeq ($(strip $(TARGET_KERNEL_USE_CLANG)),true)
+    else
+      kernel_build_config_suffix := $(kernel_build_config_suffix).gcc
+    endif
+  else
+    kernel_build_config_suffix := $(kernel_build_config_suffix).arm
+    ifeq ($(strip $(TARGET_KERNEL_USE_CLANG)),true)
+    else
+      $(error TARGET_KERNEL_USE_CLANG is not set)
+    endif
+  endif
+  ifeq ($(PLATFORM_VERSION),Tiramisu)
+    kernel_build_config_suffix := $(kernel_build_config_suffix).tiramisu
+  endif
+  include $(current_dir)/build.config$(kernel_build_config_suffix)
+
+  ARGS := CROSS_COMPILE=$(CROSS_COMPILE)
+  ifneq ($(LLVM),)
+    ARGS += LLVM=1
+    ifneq ($(filter-out false,$(USE_CCACHE)),)
+      CCACHE_EXEC ?= /usr/bin/ccache
+      CCACHE_EXEC := $(abspath $(wildcard $(CCACHE_EXEC)))
+    else
+      CCACHE_EXEC :=
+    endif
+    ifneq ($(CCACHE_EXEC),)
+      ARGS += CCACHE_CPP2=yes CC='$(CCACHE_EXEC) clang'
+    else
+      ARGS += CC=clang
+    endif
+    ifneq ($(LLVM_IAS),)
+      ARGS += LLVM_IAS=$(LLVM_IAS)
+    endif
+    ifeq ($(HOSTCC),)
+      ifneq ($(CC),)
+        ARGS += HOSTCC=$(CC)
+      endif
+    else
+      ARGS += HOSTCC=$(HOSTCC)
+    endif
+    ifneq ($(LD),)
+      ARGS += LD=$(LD) HOSTLD=$(LD)
+      ifneq ($(suffix $(LD)),)
+        ARGS += HOSTLDFLAGS=-fuse-ld=$(subst .,,$(suffix $(LD)))
+      endif
+    endif
+    ifneq ($(LD_LIBRARY_PATH),)
+      ARGS += LD_LIBRARY_PATH=$(KERNEL_ROOT_DIR)/$(LD_LIBRARY_PATH)
+    endif
+  endif
+
+  TARGET_KERNEL_CROSS_COMPILE := $(KERNEL_ROOT_DIR)/$(LINUX_GCC_CROSS_COMPILE_PREBUILTS_BIN)/$(CROSS_COMPILE)
+
   ifeq ($(wildcard $(TARGET_PREBUILT_KERNEL)),)
-    KERNEL_OUT ?= $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/$(LINUX_KERNEL_VERSION)
-    REL_KERNEL_OUT := $(shell ./$(current_dir)/scripts/get_rel_path.sh $(patsubst %/,%,$(dir $(KERNEL_OUT))) $(KERNEL_ROOT_DIR)/kernel)
+    KERNEL_OUT ?= $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ
     KERNEL_ROOT_OUT := $(if $(filter /% ~%,$(KERNEL_OUT)),,$(KERNEL_ROOT_DIR)/)$(KERNEL_OUT)
-    ifeq (yes,$(strip $(BUILD_KERNEL)))
     ifeq ($(KERNEL_TARGET_ARCH), arm64)
-      ifeq ($(MTK_APPENDED_DTB_SUPPORT), yes)
-        KERNEL_ZIMAGE_OUT := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/Image.gz-dtb
-      else
         KERNEL_ZIMAGE_OUT := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/Image.gz
-      endif
+        KERNEL_DTB_TARGET := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/dts/mediatek/$(TARGET_BOARD_PLATFORM).dtb
     else
-      ifeq ($(MTK_APPENDED_DTB_SUPPORT), yes)
-        KERNEL_ZIMAGE_OUT := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/zImage-dtb
-      else
         KERNEL_ZIMAGE_OUT := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/zImage
-      endif
+        KERNEL_DTB_TARGET := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/dts/$(TARGET_BOARD_PLATFORM).dtb
     endif
-    endif#BUILD_KERNEL
 
+    INSTALLED_MTK_DTB_TARGET := $(BOARD_PREBUILT_DTBIMAGE_DIR)/mtk_dtb
     BUILT_KERNEL_TARGET := $(KERNEL_ZIMAGE_OUT).bin
-    ifneq ($(strip $(TARGET_NO_KERNEL)),true)
     INSTALLED_KERNEL_TARGET := $(PRODUCT_OUT)/kernel
-    endif
     TARGET_KERNEL_CONFIG := $(KERNEL_OUT)/.config
-    GEN_KERNEL_BUILD_CONFIG := $(patsubst %/,%,$(dir $(KERNEL_OUT)))/build.config
-    REL_GEN_KERNEL_BUILD_CONFIG := $(REL_KERNEL_OUT)/$(notdir $(GEN_KERNEL_BUILD_CONFIG))
-    GEN_MTK_SETUP_ENV_SH := $(patsubst %/,%,$(dir $(KERNEL_OUT)))/mtk_setup_env.sh
     KERNEL_CONFIG_FILE := $(KERNEL_DIR)/arch/$(KERNEL_TARGET_ARCH)/configs/$(word 1,$(KERNEL_DEFCONFIG))
-
-    IMAGE_GZ_PATH := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/Image.gz
-    ifeq ($(MTK_APPEND_DTB),)
-        MTK_APPEND_DTB_PATH :=
-    else
-        MTK_APPEND_DTB_PATH := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/dts/mediatek/$(MTK_APPEND_DTB)
-    endif
-    MTK_IMAGE_GZ_DTB_PATH := $(KERNEL_OUT)/arch/$(KERNEL_TARGET_ARCH)/boot/Image.gz-dtb
-
+    KERNEL_MAKE_OPTION := O=$(KERNEL_ROOT_OUT) ARCH=$(KERNEL_TARGET_ARCH) $(ARGS) ROOTDIR=$(KERNEL_ROOT_DIR)
+    KERNEL_MAKE_PATH_OPTION := /usr/bin:/bin
+    KERNEL_MAKE_OPTION += PATH=$(KERNEL_ROOT_DIR)/$(CLANG_PREBUILT_BIN):$(KERNEL_ROOT_DIR)/$(LINUX_GCC_CROSS_COMPILE_PREBUILTS_BIN):$(KERNEL_MAKE_PATH_OPTION):$$PATH
   else
     BUILT_KERNEL_TARGET := $(TARGET_PREBUILT_KERNEL)
   endif #TARGET_PREBUILT_KERNEL is empty
-
+    KERNEL_MAKE_OPTION += PROJECT_DTB_NAMES='$(PROJECT_DTB_NAMES)'
+endif #TARGET_NO_KERNEL

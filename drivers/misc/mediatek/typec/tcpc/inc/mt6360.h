@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef __LINUX_MT6360_H
@@ -174,7 +174,7 @@ enum mt6360_id_rupsel {
 #define MT6360_AUTOIDLE_TOUT			0x07
 
 /* timeout = (tout*2+1) * 6.4ms */
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 #define MT6360_REG_MODE_CTRL2_SET(ship_dis, auto_idle, tout) \
 	((ship_dis << 5) | (auto_idle << 3) | (tout & MT6360_AUTOIDLE_TOUT) | \
 	 MT6360_WAKEUP_EN | MT6360_ENEXTMSG)

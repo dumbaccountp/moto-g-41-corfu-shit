@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2020 MediaTek Inc.
  */
+
 #ifndef __APUSYS_DAPC_CFG_H__
 #define __APUSYS_DAPC_CFG_H__
 
@@ -79,6 +80,7 @@ extern struct dapc_config dapc_cfg_mt6885;
 extern struct dapc_config dapc_cfg_mt6873;
 extern struct dapc_config dapc_cfg_mt6853;
 extern struct dapc_config dapc_cfg_mt6893;
+extern struct dapc_config dapc_cfg_mt6877;
 
 #define for_each_dapc_slv(cfg, i) \
 	for (i = 0; i < cfg->slv_cnt && cfg->slv[i].sys_idx >= 0; i++)

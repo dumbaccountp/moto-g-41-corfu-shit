@@ -241,7 +241,7 @@ Guest mitigation mechanisms
    For further information about confining guests to a single or to a group
    of cores consult the cpusets documentation:
 
-   https://www.kernel.org/doc/Documentation/admin-guide/cgroup-v1/cpusets.rst
+   https://www.kernel.org/doc/Documentation/cgroup-v1/cpusets.txt
 
 .. _interrupt_isolation:
 
@@ -268,7 +268,7 @@ Guest mitigation mechanisms
    /proc/irq/$NR/smp_affinity[_list] files. Limited documentation is
    available at:
 
-   https://www.kernel.org/doc/Documentation/core-api/irq/irq-affinity.rst
+   https://www.kernel.org/doc/Documentation/IRQ-affinity.txt
 
 .. _smt_control:
 

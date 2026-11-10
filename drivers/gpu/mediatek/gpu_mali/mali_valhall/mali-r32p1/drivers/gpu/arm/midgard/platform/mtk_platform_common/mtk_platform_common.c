@@ -1,28 +1,30 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2019 MediaTek Inc.
+ * Copyright (C) 2021 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
  */
 
 #include <mali_kbase.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <platform/mtk_platform_common.h>
-#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 #include "mtk_gpu_dvfs.h"
 #endif
 #include <mtk_gpufreq.h>
-#if IS_ENABLED(CONFIG_MTK_GPU_SWPM_SUPPORT)
-#include <mtk_gpu_power_sspm_ipi.h>
-#endif
 #include <ged_dvfs.h>
 #if IS_ENABLED(CONFIG_PROC_FS)
 #include <linux/proc_fs.h>
-#if IS_ENABLED(CONFIG_MALI_MTK_MEM_TRACK)
+#if IS_ENABLED(CONFIG_MTK_GPU_MEM_TRACK)
 #include <device/mali_kbase_device.h>
 #endif
-#endif
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ)
-#include "mtk_gpu_devfreq_governor.h"
 #endif
 
 static bool mfg_powered;
@@ -56,34 +58,17 @@ void mtk_common_pm_mfg_idle(void)
 	mutex_unlock(&mfg_pm_lock);
 }
 
-int mtk_common_gpufreq_bringup(void)
-{
-	static int bringup = -1;
-
-	if (bringup == -1) {
-#if defined(CONFIG_MTK_GPUFREQ_V2)
-		bringup = gpufreq_bringup();
-#else
-		bringup = mt_gpufreq_bringup();
-#endif
-	}
-
-	return bringup;
-}
-
 int mtk_common_gpufreq_commit(int opp_idx)
 {
 	int ret = -1;
 
 	mutex_lock(&mfg_pm_lock);
 	if (opp_idx >= 0 && mtk_common_pm_is_mfg_active()) {
-#if defined(CONFIG_MTK_GPUFREQ_V2)
-		ret = mtk_common_gpufreq_bringup() ?
-			-1 : gpufreq_commit(TARGET_DEFAULT, opp_idx);
-#else
-		ret = mtk_common_gpufreq_bringup() ?
-			-1 : mt_gpufreq_target(opp_idx, KIR_POLICY);
-#endif /* CONFIG_MTK_GPUFREQ_V2 */
+    #if defined(CONFIG_MACH_MT6768) || defined(CONFIG_MACH_MT6785)
+		ret = mt_gpufreq_target(opp_idx, false);
+	#else
+		ret = mt_gpufreq_target(opp_idx, KIR_POLICY);
+	#endif
 	}
 	mutex_unlock(&mfg_pm_lock);
 
@@ -92,7 +77,7 @@ int mtk_common_gpufreq_commit(int opp_idx)
 
 int mtk_common_ged_dvfs_get_last_commit_idx(void)
 {
-#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 	return (int)ged_dvfs_get_last_commit_idx();
 #else
 	return -1;
@@ -102,18 +87,10 @@ int mtk_common_ged_dvfs_get_last_commit_idx(void)
 #if IS_ENABLED(CONFIG_PROC_FS)
 static int mtk_common_gpu_utilization_show(struct seq_file *m, void *v)
 {
-#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 	unsigned int util_active, util_3d, util_ta, util_compute, cur_opp_idx;
 
-	mtk_common_update_gpu_utilization();
-
-#if defined(CONFIG_MTK_GPUFREQ_V2)
-	cur_opp_idx = mtk_common_gpufreq_bringup() ?
-		0 : gpufreq_get_cur_oppidx(TARGET_DEFAULT);
-#else
-	cur_opp_idx = mtk_common_gpufreq_bringup() ?
-		0 : mt_gpufreq_get_cur_freq_index();
-#endif /* CONFIG_MTK_GPUFREQ_V2 */
+	cur_opp_idx = mt_gpufreq_get_cur_freq_index();
 
 	util_active = mtk_common_get_util_active();
 	util_3d = mtk_common_get_util_3d();
@@ -128,11 +105,11 @@ static int mtk_common_gpu_utilization_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-DEFINE_PROC_SHOW_ATTRIBUTE(mtk_common_gpu_utilization);
+DEFINE_SHOW_ATTRIBUTE(mtk_common_gpu_utilization);
 
 static int mtk_common_gpu_memory_show(struct seq_file *m, void *v)
 {
-#if IS_ENABLED(CONFIG_MALI_MTK_MEM_TRACK)
+#if IS_ENABLED(CONFIG_MTK_GPU_MEM_TRACK)
 	struct list_head *entry;
 	const struct list_head *kbdev_list;
 
@@ -166,7 +143,7 @@ static int mtk_common_gpu_memory_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-DEFINE_PROC_SHOW_ATTRIBUTE(mtk_common_gpu_memory);
+DEFINE_SHOW_ATTRIBUTE(mtk_common_gpu_memory);
 
 void mtk_common_procfs_init(void)
 {
@@ -175,8 +152,8 @@ void mtk_common_procfs_init(void)
   		pr_info("cannot create /proc/%s\n", "mtk_mali");
   		return;
   	}
-	proc_create("utilization", 0444, mtk_mali_root, &mtk_common_gpu_utilization_proc_ops);
-	proc_create("gpu_memory", 0444, mtk_mali_root, &mtk_common_gpu_memory_proc_ops);
+	proc_create("utilization", 0444, mtk_mali_root, &mtk_common_gpu_utilization_fops);
+	proc_create("gpu_memory", 0444, mtk_mali_root, &mtk_common_gpu_memory_fops);
 }
 
 void mtk_common_procfs_exit(void)
@@ -207,8 +184,8 @@ int mtk_common_device_init(struct kbase_device *kbdev)
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
-#if IS_ENABLED(CONFIG_MALI_MTK_DVFS_LOADING_MODE)
+#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
+#if IS_ENABLED(GED_ENABLE_DVFS_LOADING_MODE)
 	ged_dvfs_cal_gpu_utilization_ex_fp = mtk_common_cal_gpu_utilization_ex;
 #else
 	ged_dvfs_cal_gpu_utilization_fp = mtk_common_cal_gpu_utilization;
@@ -216,13 +193,7 @@ int mtk_common_device_init(struct kbase_device *kbdev)
 	ged_dvfs_gpu_freq_commit_fp = mtk_common_ged_dvfs_commit;
 #endif
 
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ)
-	mtk_common_devfreq_init();
-#endif
-#if IS_ENABLED(CONFIG_MTK_GPU_SWPM_SUPPORT)
-	MTKGPUPower_model_init();
-#endif
-
+	mtk_mfg_counter_init();
 
 	return 0;
 }
@@ -240,8 +211,8 @@ void mtk_common_device_term(struct kbase_device *kbdev)
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
-#if IS_ENABLED(CONFIG_MALI_MTK_DVFS_LOADING_MODE)
+#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
+#if IS_ENABLED(GED_ENABLE_DVFS_LOADING_MODE)
 	ged_dvfs_cal_gpu_utilization_ex_fp = NULL;
 #else
 	ged_dvfs_cal_gpu_utilization_fp = NULL;
@@ -249,11 +220,35 @@ void mtk_common_device_term(struct kbase_device *kbdev)
 	ged_dvfs_gpu_freq_commit_fp = NULL;
 #endif
 
-#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ)
-	mtk_common_devfreq_term();
-#endif
-#if IS_ENABLED(CONFIG_MTK_GPU_SWPM_SUPPORT)
-	MTKGPUPower_model_destroy();
-#endif
-
+	mtk_mfg_counter_destroy();
 }
+
+#ifdef SHADER_PWR_CTL_WA
+void mtk_set_mt_gpufreq_clock_parking_lock(unsigned long *pFlags)
+{
+	mt_gpufreq_clock_parking_lock(pFlags);
+}
+
+void mtk_set_mt_gpufreq_clock_parking_unlock(unsigned long *pFlags)
+{
+	mt_gpufreq_clock_parking_unlock(pFlags);
+}
+
+int mtk_set_mt_gpufreq_clock_parking(int clksrc)
+{
+	/*
+	 * This function will be called under the Interrupt-Handler,
+	 * so can't implement any mutex-lock behaviors
+	 * (that will result the sleep/schedule operations).
+	 */
+
+	int ret = 0;
+
+	if (mtk_common_pm_is_mfg_active())
+		ret = mt_gpufreq_clock_parking(clksrc);
+	else
+		pr_info("MALI: set clock parking at power off\n");
+
+	return ret;
+}
+#endif

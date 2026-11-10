@@ -5,6 +5,7 @@
 
 #include "dpmaif_drv.h"
 #include "ccci_hif_dpmaif.h"
+#include "ccci_config.h"
 
 #define TAG "dpmaif"
 /* =======================================================
@@ -13,6 +14,7 @@
  *
  * =======================================================
  */
+ #if defined(_E1_SB_SW_WORKAROUND_) || defined(MT6297)
 
 static void drv_dpmaif_dl_pit_only_update_enable_bit_done(unsigned char q_num)
 {
@@ -31,8 +33,8 @@ static void drv_dpmaif_dl_pit_only_update_enable_bit_done(unsigned char q_num)
 		if (++count >= 1600000) {
 			CCCI_ERROR_LOG(0, TAG,
 				"DPMAIF_PD_DL_PIT_INIT ready failed\n");
-			dpmaif_ctrl->ops->dump_status(DPMAIF_HIF_ID,
-				DUMP_FLAG_REG, NULL, -1);
+			dpmaif_ctrl->ops->dump_status(
+				DPMAIF_HIF_ID, DUMP_FLAG_REG, NULL, -1);
 			count = 0;
 			return;
 		}
@@ -43,8 +45,8 @@ static void drv_dpmaif_dl_pit_only_update_enable_bit_done(unsigned char q_num)
 		if (++count >= 1600000) {
 			CCCI_ERROR_LOG(0, TAG,
 				"DPMAIF_PD_DL_PIT_INIT not ready failed\n");
-			dpmaif_ctrl->ops->dump_status(DPMAIF_HIF_ID,
-				DUMP_FLAG_REG, NULL, -1);
+			dpmaif_ctrl->ops->dump_status(
+				DPMAIF_HIF_ID, DUMP_FLAG_REG, NULL, -1);
 			count = 0;
 			break;
 		}
@@ -70,8 +72,8 @@ static void drv_dpmaif_check_dl_fifo_idle(void)
 		if (++count >= 1600000) {
 			CCCI_ERROR_LOG(0, TAG,
 				"DPMAIF_AO_DL_PIT_STA3 failed\n");
-			dpmaif_ctrl->ops->dump_status(DPMAIF_HIF_ID,
-				DUMP_FLAG_REG, NULL, -1);
+			dpmaif_ctrl->ops->dump_status(
+				DPMAIF_HIF_ID, DUMP_FLAG_REG, NULL, -1);
 			count = 0;
 			return;
 		}
@@ -88,6 +90,7 @@ static void drv_dpmaif_check_dl_fifo_idle(void)
 		}
 	}
 }
+#endif
 
 #if defined(_E1_SB_SW_WORKAROUND_)
 static unsigned int dpmaif_rx_chk_pit_type(unsigned int chk_aidx)
@@ -212,8 +215,8 @@ static int drv_dpmaif_dl_set_idle(bool set_en)
 			if (++count1 >= 1600000) {
 				CCCI_ERROR_LOG(0, TAG,
 					"DPMAIF_AO_DL_PIT_STA3 failed\n");
-				dpmaif_ctrl->ops->dump_status(DPMAIF_HIF_ID,
-					DUMP_FLAG_REG, NULL, -1);
+				dpmaif_ctrl->ops->dump_status(
+					DPMAIF_HIF_ID, DUMP_FLAG_REG, NULL, -1);
 				count1 = 0;
 				ret = HW_REG_CHK_FAIL;
 				break;
@@ -263,6 +266,18 @@ int drv_dpmaif_dl_add_frg_bat_cnt(unsigned char q_num,
 		}
 	}
 
+	#ifndef MT6297
+	while ((DPMA_READ_PD_DL(DPMAIF_PD_DL_BAT_ADD) &
+		DPMAIF_DL_ADD_NOT_READY) == DPMAIF_DL_ADD_NOT_READY) {
+		if (++count >= 1600000) {
+			CCCI_ERROR_LOG(0, TAG,
+				"frg update failed, 0x%x\n", DPMA_READ_PD_DL(
+				DPMAIF_PD_DL_DBG_STA1));
+			break;
+		}
+	}
+	#endif
+
 	return 0;
 }
 #endif
@@ -307,6 +322,17 @@ int drv_dpmaif_dl_add_bat_cnt(unsigned char q_num,
 		}
 	}
 
+	#ifndef MT6297
+	while ((DPMA_READ_PD_DL(DPMAIF_PD_DL_BAT_ADD) &
+		DPMAIF_DL_ADD_NOT_READY) == DPMAIF_DL_ADD_NOT_READY) {
+		if (++count >= 1600000) {
+			CCCI_ERROR_LOG(0, TAG,
+				"bat update failed, 0x%x\n", DPMA_READ_PD_DL(
+				DPMAIF_PD_DL_DBG_STA1));
+			break;
+		}
+	}
+	#endif
 #if defined(_E1_SB_SW_WORKAROUND_)
 	drv_dpmaif_dl_set_idle(false);
 #endif
@@ -674,6 +700,15 @@ unsigned int drv_dpmaif_ul_get_rwidx(unsigned char q_num)
 	return ridx;
 }
 
+unsigned int drv_dpmaif_ul_get_hw_widx_01(void)
+{
+	unsigned int widx;
+
+	widx = DPMA_READ_PD_UL(DPMAIF_PD_UL_CH_WIDX01);
+
+	return widx;
+}
+
 int drv_dpmaif_ul_add_wcnt(unsigned char q_num, unsigned short drb_wcnt)
 {
 	unsigned int ul_update;
@@ -692,8 +727,8 @@ int drv_dpmaif_ul_add_wcnt(unsigned char q_num, unsigned short drb_wcnt)
 		if (++count >= 1600000) {
 			CCCI_ERROR_LOG(0, TAG, "drb_add rdy poll fail: 0x%x\n",
 				DPMA_READ_PD_UL(DPMAIF_PD_UL_DBG_STA2));
-			dpmaif_ctrl->ops->dump_status(DPMAIF_HIF_ID,
-				DUMP_FLAG_REG, NULL, -1);
+			dpmaif_ctrl->ops->dump_status(
+				DPMAIF_HIF_ID, DUMP_FLAG_REG, NULL, -1);
 			return HW_REG_CHK_FAIL;
 		}
 	}
@@ -735,7 +770,6 @@ int drv_dpmaif_dl_bat_init_done(unsigned char q_num, bool frg_en)
 {
 	unsigned int dl_bat_init = 0;
 	int count = 0;
-
 	if (frg_en == true)
 		dl_bat_init |= DPMAIF_DL_BAT_FRG_INIT;
 	/* update  all bat settings. */
@@ -1267,13 +1301,6 @@ void drv_dpmaif_md_hw_bus_remap(void)
 	CCCI_BOOTUP_LOG(0, TAG, "[remap]-1D-0x%08x\r\n", value);
 	DPMA_WRITE_AO_MD_DL(NRL2_DPMAIF_MISC_AO_REMAP_BANK1_MAPD, value);
 
-	/*
-	 * DPMA_WRITE_AO_MD_DL(NRL2_DPMAIF_MISC_AO_REMAP_BANK4_MAPA, 0xe300e1);
-	 * DPMA_WRITE_AO_MD_DL(NRL2_DPMAIF_MISC_AO_REMAP_BANK4_MAPB, 0xe700e5);
-	 * DPMA_WRITE_AO_MD_DL(NRL2_DPMAIF_MISC_AO_REMAP_BANK4_MAPC, 0xeB00e9);
-	 * DPMA_WRITE_AO_MD_DL(NRL2_DPMAIF_MISC_AO_REMAP_BANK4_MAPD, 0xeF00eD);
-	 */
-
 	/*Enable DPMAIF HW remap*/
 	value = DPMA_READ_AO_MD_DL(NRL2_DPMAIF_MISC_AO_CFG1);
 	value |= DPMAIF_MD_AO_REMAP_ENABLE;
@@ -1442,17 +1469,12 @@ unsigned int drv_dpmaif_ul_idle_check(void)
 		DPMAIF_PD_UL_DBG_STA2)>>DPMAIF_UL_STS_CUR_SHIFT) &
 			DPMAIF_UL_IDLE_STS_MSK);
 
-#ifdef MT6297
 	if (idle_sts == DPMAIF_UL_IDLE_STS)
-		ret = 0;
-	else
-		ret = 1;
-#else
-	if (idle_sts == DPMAIF_UL_IDLE_STS)
+		/*k4.14 ret = 0;need review*/
 		ret = 1;
 	else
 		ret = 0;
-#endif
+
 	return ret;
 }
 

@@ -1,22 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Goodix Touchscreen Driver
- * Core layer of touchdriver architecture.
- *
- * Copyright (C) 2015 - 2016 Goodix, Inc.
- * Authors:  Yulong Cai <caiyulong@goodix.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be a reference
- * to you, when you are integrating the GOODiX's CTP IC into your system,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 #ifndef _GOODIX_TS_CORE_H_
 #define _GOODIX_TS_CORE_H_
 
@@ -41,10 +26,12 @@
 #include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 #endif
-
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-#include "mtk_panel_ext.h"
-#include "mtk_disp_notify.h"
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+#endif
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
 #endif
 
 /* macros definition */
@@ -76,10 +63,10 @@
 #define PINCTRL_STATE_INT_SUSPEND   "ts_int_suspend"
 #define PINCTRL_STATE_RST_SUSPEND   "ts_reset_suspend"
 
-#define GOODIX_TOUCH_EVENT	    0x80
-#define GOODIX_REQUEST_EVENT    0x40
-#define GOODIX_GESTURE_EVENT    0x20
-#define GOODIX_HOTKNOT_EVENT    0x10
+#define GOODIX_TOUCH_EVENT	0x80
+#define GOODIX_REQUEST_EVENT	0x40
+#define GOODIX_GESTURE_EVENT	0x20
+#define GOODIX_HOTKNOT_EVENT	0x10
 
 /* For MTK Internal Touch Begin */
 
@@ -162,7 +149,6 @@ struct goodix_ts_board_data {
 	/*add by lishuai*/
 	unsigned int x2x;
 	unsigned int y2y;
-	unsigned int fake_status;
 	bool pen_enable;
 	unsigned int tp_key_num;
 	/*add end*/
@@ -456,8 +442,10 @@ struct goodix_ts_core {
 	struct notifier_block ts_notifier;
 	struct goodix_ts_esd ts_esd;
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	struct notifier_block disp_notifier;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	struct early_suspend early_suspend;
 #endif
 };
 
@@ -745,24 +733,18 @@ int goodix_ts_register_notifier(struct notifier_block *nb);
 int goodix_generic_noti_callback(struct notifier_block *self,
 				unsigned long action, void *data);
 
-int goodix_ts_disp_notifier_callback(struct notifier_block *nb,
-		unsigned long value, void *v);
+int goodix_ts_fb_notifier_callback(struct notifier_block *self,
+			unsigned long event, void *data);
 int goodix_ts_irq_enable(struct goodix_ts_core *core_data,
 			bool enable);
 extern void goodix_msg_printf(const char *fmt, ...);
 extern int i2c_touch_resume(void);
 extern int i2c_touch_suspend(void);
 extern int goodix_start_cfg_bin(struct goodix_ts_core *ts_core);
-#if (IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI) && IS_ENABLED(CONFIG_TOUCHSCREEN_MTK_TUI_COMMON_API))
-extern void register_tpd_tui_request(int (*enter_func)(void), int (*exit_func)(void));
-extern int gt9886_tpd_enter_tui(void);
-extern int gt9886_tpd_exit_tui(void);
-#endif
 int gt9886_touch_filter_register(void);
 int goodix_ts_core_init(void);
-int goodix_fwu_module_init(void *data);
 
-#if IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI)
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 extern atomic_t gt9886_tui_flag;
 extern struct goodix_ts_core *resume_core_data;
 #endif

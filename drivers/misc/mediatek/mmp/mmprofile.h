@@ -1,16 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
+ * Author: Joey Pan <joey.pan@mediatek.com>
  */
-
 
 #ifndef __MMPROFILE_H__
 #define __MMPROFILE_H__
+
 #include "mmprofile_static_event.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #define MMPROFILE_EVENT_NAME_MAX_LEN 31
 
@@ -93,7 +91,7 @@ struct mmp_metadata_bitmap_t {
 	void *p_data;                /* image buffer address */
 };
 
-#if IS_ENABLED(CONFIG_MMPROFILE)
+#ifdef CONFIG_MMPROFILE
 mmp_event mmprofile_register_event(mmp_event parent, const char *name);
 mmp_event mmprofile_find_event(mmp_event parent, const char *name);
 void mmprofile_enable_event(mmp_event event, long enable);
@@ -123,7 +121,6 @@ unsigned int mmprofile_get_dump_size(void);
 void mmprofile_get_dump_buffer(unsigned int start, unsigned long *p_addr,
 	unsigned int *p_size);
 #else
-
 /*
  * if in kernel config CONFIG_MMPROFILE is not set,
  * and the kernel makefile had define
@@ -221,7 +218,5 @@ static inline void mmprofile_enable(int enable)
 }
 #endif
 
-#ifdef __cplusplus
-}
-#endif
+
 #endif

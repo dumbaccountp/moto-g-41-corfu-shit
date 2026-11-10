@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * cs42l42.h -- CS42L42 ALSA SoC audio driver header
  *
@@ -7,6 +6,11 @@
  * Author: James Schulman <james.schulman@cirrus.com>
  * Author: Brian Austin <brian.austin@cirrus.com>
  * Author: Michael White <michael.white@cirrus.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
  */
 
 #ifndef __CS42L42_H__
@@ -77,7 +81,7 @@
 #define CS42L42_HP_PDN_SHIFT		3
 #define CS42L42_HP_PDN_MASK		(1 << CS42L42_HP_PDN_SHIFT)
 #define CS42L42_ADC_PDN_SHIFT		2
-#define CS42L42_ADC_PDN_MASK		(1 << CS42L42_ADC_PDN_SHIFT)
+#define CS42L42_ADC_PDN_MASK		(1 << CS42L42_HP_PDN_SHIFT)
 #define CS42L42_PDN_ALL_SHIFT		0
 #define CS42L42_PDN_ALL_MASK		(1 << CS42L42_PDN_ALL_SHIFT)
 

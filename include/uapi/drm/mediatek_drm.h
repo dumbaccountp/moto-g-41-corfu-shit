@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
- */
+*/
+
 
 #ifndef _UAPI_MEDIATEK_DRM_H
 #define _UAPI_MEDIATEK_DRM_H
@@ -16,6 +17,7 @@
 #define MTK_DRM_PROP_OVERLAP_LAYER_NUM  "OVERLAP_LAYER_NUM"
 #define MTK_DRM_PROP_NEXT_BUFF_IDX  "NEXT_BUFF_IDX"
 #define MTK_DRM_PROP_PRESENT_FENCE  "PRESENT_FENCE"
+#define MTK_DRM_PROP_OVL_DSI_SEQ  "OVL_DSI_SEQ"
 
 struct mml_frame_info;
 
@@ -29,9 +31,9 @@ struct mml_frame_info;
  *	- this handle will be set by gem module of kernel side.
  */
 struct drm_mtk_gem_create {
-	__u64 size;
-	__u32 flags;
-	__u32 handle;
+	uint64_t size;
+	uint32_t flags;
+	uint32_t handle;
 };
 
 /**
@@ -43,9 +45,9 @@ struct drm_mtk_gem_create {
  *     - this value should be set by user.
  */
 struct drm_mtk_gem_map_off {
-	__u32 handle;
-	__u32 pad;
-	__u64 offset;
+	uint32_t handle;
+	uint32_t pad;
+	uint64_t offset;
 };
 
 /**
@@ -62,20 +64,20 @@ struct drm_mtk_gem_map_off {
  * @interface_fence_fd:
  */
 struct drm_mtk_gem_submit {
-	__u32 type;
+	uint32_t type;
 	/* session */
-	__u32 session_id;
+	uint32_t session_id;
 	/* layer */
-	__u32 layer_id;
-	__u32 layer_en;
+	uint32_t layer_id;
+	uint32_t layer_en;
 	/* buffer */
-	__u32 fb_id;
+	uint32_t fb_id;
 	/* output */
-	__u32 index;
-	__s32 fence_fd;
-	__u32 interface_index;
-	__s32 interface_fence_fd;
-	__s32 ion_fd;
+	uint32_t index;
+	int32_t fence_fd;
+	uint32_t interface_index;
+	int32_t interface_fence_fd;
+	int32_t ion_fd;
 };
 
 /**
@@ -85,8 +87,8 @@ struct drm_mtk_gem_submit {
  * @gem_hnd: handle of gem
  */
 struct drm_mtk_sec_gem_hnd {
-	__u32 sec_hnd;
-	__u32 gem_hnd;
+	uint32_t sec_hnd;
+	uint32_t gem_hnd;
 };
 
 /**
@@ -98,15 +100,23 @@ struct drm_mtk_sec_gem_hnd {
  * @session_id:
  */
 struct drm_mtk_session {
-	__u32 type;
+	uint32_t type;
 	/* device */
-	__u32 device_id;
+	uint32_t device_id;
 	/* mode */
-	__u32 mode;
+	uint32_t mode;
 	/* output */
-	__u32 session_id;
+	uint32_t session_id;
 };
 
+/**
+ * A structure for session create.
+ *
+ * @level_id: id
+ * @level_fps: fps
+ * @max_fps: max fps
+ * @min_fps: min fps
+ */
 struct msync_level_table {
 	unsigned int level_id;
 	unsigned int level_fps;
@@ -114,6 +124,14 @@ struct msync_level_table {
 	unsigned int min_fps;
 };
 
+/**
+ * A structure for session create.
+ *
+ * @msync_max_fps: max fps
+ * @msync_min_fps: min fps
+ * @msync_level_num: level number
+ * @level_tb: A pointer of level table
+ */
 struct msync_parameter_table {
 	unsigned int msync_max_fps;
 	unsigned int msync_min_fps;
@@ -364,8 +382,6 @@ struct DISP_READ_REG {
 enum disp_ccorr_id_t {
 	DISP_CCORR0 = 0,
 	DISP_CCORR1,
-	DISP_CCORR2,
-	DISP_CCORR3,
 	DISP_CCORR_TOTAL
 };
 
@@ -375,7 +391,6 @@ struct DISP_CCORR_COEF_T {
 };
 
 #define DISP_GAMMA_LUT_SIZE 512
-#define DISP_GAMMA_12BIT_LUT_SIZE 1024
 
 enum disp_gamma_id_t {
 	DISP_GAMMA0 = 0,
@@ -387,12 +402,6 @@ enum disp_gamma_id_t {
 struct DISP_GAMMA_LUT_T {
 	enum disp_gamma_id_t hw_id;
 	unsigned int lut[DISP_GAMMA_LUT_SIZE];
-};
-
-struct DISP_GAMMA_12BIT_LUT_T {
-	enum disp_gamma_id_t hw_id;
-	unsigned int lut_0[DISP_GAMMA_12BIT_LUT_SIZE];
-	unsigned int lut_1[DISP_GAMMA_12BIT_LUT_SIZE];
 };
 
 struct DISP_PQ_PARAM {
@@ -408,10 +417,6 @@ struct DISP_PQ_PARAM {
 };
 #define DISP_PQ_PARAM_T struct DISP_PQ_PARAM
 
-struct DISP_DITHER_PARAM {
-	bool relay;
-	uint32_t mode;
-};
 
 #define DRM_MTK_GEM_CREATE		0x00
 #define DRM_MTK_GEM_MAP_OFFSET		0x01
@@ -433,9 +438,8 @@ struct DISP_DITHER_PARAM {
 #define DRM_MTK_FACTORY_LCM_AUTO_TEST    0x11
 
 /* PQ */
-#define DRM_MTK_SET_12BIT_GAMMALUT	0x1D
 #define DRM_MTK_PQ_PERSIST_PROPERTY	0x1F
-#define DRM_MTK_SET_CCORR		0x20
+#define DRM_MTK_SET_CCORR			0x20
 #define DRM_MTK_CCORR_EVENTCTL   0x21
 #define DRM_MTK_CCORR_GET_IRQ    0x22
 #define DRM_MTK_SET_GAMMALUT    0x23
@@ -465,34 +469,7 @@ struct DISP_DITHER_PARAM {
 #define DRM_MTK_HDMI_AUDIO_CONFIG	0x3C
 #define DRM_MTK_HDMI_GET_CAPABILITY	0x3D
 
-/* C3D */
-#define DRM_MTK_C3D_GET_BIN_NUM     0x40
-#define DRM_MTK_C3D_GET_IRQ         0x41
-#define DRM_MTK_C3D_EVENTCTL        0x42
-#define DRM_MTK_C3D_SET_LUT         0x44
-#define DRM_MTK_SET_BYPASS_C3D      0x45
-/* CHIST */
-#define DRM_MTK_GET_CHIST           0x46
-#define DRM_MTK_GET_CHIST_CAPS      0x47
-#define DRM_MTK_SET_CHIST_CONFIG    0x48
-
-#define DRM_MTK_SET_DITHER_PARAM 0x43
-#define DRM_MTK_BYPASS_DISP_GAMMA 0x49
-
-/* DISP TDSHP */
-#define DRM_MTK_SET_DISP_TDSHP_REG 0x50
-#define DRM_MTK_DISP_TDSHP_GET_SIZE 0x51
-
-#define DRM_MTK_GET_PQ_CAPS 0x54
-#define DRM_MTK_SET_PQ_CAPS 0x55
-
-/* C3D */
-#define DISP_C3D_1DLUT_SIZE 32
-
-struct DISP_C3D_LUT {
-	unsigned int lut1d[DISP_C3D_1DLUT_SIZE];
-	unsigned long long lut3d;
-};
+#define DRM_MTK_DEBUG_LOG			0x3E
 
 enum MTKFB_DISPIF_TYPE {
 	DISPIF_TYPE_DBI = 0,
@@ -509,6 +486,7 @@ enum MTKFB_DISPIF_TYPE {
 	DISPLAYPORT,
 	SLIMPORT
 };
+
 
 enum MTKFB_DISPIF_MODE {
 	DISPIF_MODE_VIDEO = 0,
@@ -567,22 +545,22 @@ enum MTK_LAYERING_CAPS {
 };
 
 struct drm_mtk_layer_config {
-	__u32 ovl_id;
-	__u32 src_fmt;
+	uint32_t ovl_id;
+	uint32_t src_fmt;
 	int dataspace;
-	__u32 dst_offset_x, dst_offset_y;
-	__u32 dst_width, dst_height;
+	uint32_t dst_offset_x, dst_offset_y;
+	uint32_t dst_width, dst_height;
 	int ext_sel_layer;
-	__u32 src_offset_x, src_offset_y;
-	__u32 src_width, src_height;
-	__u32 layer_caps;
-	__u32 clip; /* drv internal use */
+	uint32_t src_offset_x, src_offset_y;
+	uint32_t src_width, src_height;
+	uint32_t layer_caps;
+	uint32_t clip; /* drv internal use */
 	__u8 compress;
 	__u8 secure;
 };
 
 struct drm_mtk_layering_info {
-	struct drm_mtk_layer_config *input_config[3];
+	struct drm_mtk_layer_config __user *input_config[3];
 	int disp_mode[3];
 	/* index of crtc display mode including resolution, fps... */
 	int disp_mode_idx[3];
@@ -592,8 +570,8 @@ struct drm_mtk_layering_info {
 	int hrt_num;
 	/* res_idx: SF/HWC selects which resolution to use */
 	int res_idx;
-	__u32 hrt_weight;
-	__u32 hrt_idx;
+	uint32_t hrt_weight;
+	uint32_t hrt_idx;
 	struct mml_frame_info *mml_cfg[3];
 };
 
@@ -606,12 +584,12 @@ struct drm_mtk_layering_info {
  */
 struct drm_mtk_fence {
 	/* input */
-	__u32 crtc_id; /**< Id */
+	uint32_t crtc_id; /**< Id */
 
 	/* output */
-	__s32 fence_fd;
+	int32_t fence_fd;
 	/* device */
-	__u32 fence_idx;
+	uint32_t fence_idx;
 };
 
 enum DRM_REPAINT_TYPE {
@@ -636,8 +614,6 @@ enum MTK_DRM_DISP_FEATURE {
 	/*Msync*/
 	DRM_DISP_FEATURE_MSYNC2_0 = 0x00000200,
 	DRM_DISP_FEATURE_MML_PRIMARY = 0x00000400,
-	DRM_DISP_FEATURE_VIRUTAL_DISPLAY = 0x00000800,
-	DRM_DISP_FEATURE_IOMMU = 0x00001000,
 };
 
 enum mtk_mmsys_id {
@@ -645,7 +621,6 @@ enum mtk_mmsys_id {
 	MMSYS_MT2712 = 0x2712,
 	MMSYS_MT8173 = 0x8173,
 	MMSYS_MT6779 = 0x6779,
-	MMSYS_MT6789 = 0x6789,
 	MMSYS_MT6885 = 0x6885,
 	MMSYS_MT6983 = 0x6983,
 	MMSYS_MT6873 = 0x6873,
@@ -653,43 +628,9 @@ enum mtk_mmsys_id {
 	MMSYS_MT6833 = 0x6833,
 	MMSYS_MT6877 = 0x6877,
 	MMSYS_MT6879 = 0x6879,
+	MMSYS_MT6781 = 0x6781,
 	MMSYS_MT6895 = 0x6895,
-	MMSYS_MT6855 = 0x6855,
 	MMSYS_MAX,
-};
-
-#define MTK_DRM_COLOR_FORMAT_A_BIT (1 << MTK_DRM_COLOR_FORMAT_A)
-#define MTK_DRM_COLOR_FORMAT_R_BIT (1 << MTK_DRM_COLOR_FORMAT_R)
-#define MTK_DRM_COLOR_FORMAT_G_BIT (1 << MTK_DRM_COLOR_FORMAT_G)
-#define MTK_DRM_COLOR_FORMAT_B_BIT (1 << MTK_DRM_COLOR_FORMAT_B)
-#define MTK_DRM_COLOR_FORMAT_Y_BIT (1 << MTK_DRM_COLOR_FORMAT_Y)
-#define MTK_DRM_COLOR_FORMAT_U_BIT (1 << MTK_DRM_COLOR_FORMAT_U)
-#define MTK_DRM_COLOR_FORMAT_V_BIT (1 << MTK_DRM_COLOR_FORMAT_V)
-#define MTK_DRM_COLOR_FORMAT_S_BIT (1 << MTK_DRM_COLOR_FORMAT_S)
-#define MTK_DRM_COLOR_FORMAT_H_BIT (1 << MTK_DRM_COLOR_FORMAT_H)
-#define MTK_DRM_COLOR_FORMAT_M_BIT (1 << MTK_DRM_COLOR_FORMAT_M)
-
-
-#define MTK_DRM_DISP_CHIST_CHANNEL_COUNT 7
-
-enum MTK_DRM_CHIST_COLOR_FORMT {
-	MTK_DRM_COLOR_FORMAT_A,
-	MTK_DRM_COLOR_FORMAT_R,
-	MTK_DRM_COLOR_FORMAT_G,
-	MTK_DRM_COLOR_FORMAT_B,
-	MTK_DRM_COLOR_FORMAT_Y,
-	MTK_DRM_COLOR_FORMAT_U,
-	MTK_DRM_COLOR_FORMAT_V,
-	MTK_DRM_COLOR_FORMAT_S,
-	MTK_DRM_COLOR_FORMAT_H,
-	MTK_DRM_COLOR_FORMAT_M,
-	MTK_DRM_COLOR_FORMAT_MAX
-};
-
-enum MTK_DRM_CHIST_CALLER {
-	MTK_DRM_CHIST_CALLER_PQ,
-	MTK_DRM_CHIST_CALLER_HWC,
-	MTK_DRM_CHIST_CALLER_UNKONW
 };
 
 struct mtk_drm_disp_caps_info {
@@ -703,11 +644,6 @@ struct mtk_drm_disp_caps_info {
 	unsigned int max_luminance;
 	unsigned int average_luminance;
 	unsigned int min_luminance;
-
-	/* for color histogram */
-	unsigned int color_format;
-	unsigned int max_bin;
-	unsigned int max_channel;
 
 	/* Msync2.0 */
 	unsigned int msync_level_num;
@@ -759,217 +695,6 @@ struct DRM_DISP_WRITE_REG {
 	unsigned int mask;
 };
 
-struct DISP_TDSHP_REG {
-	uint32_t tdshp_softcoring_gain;
-	uint32_t tdshp_gain_high;
-	uint32_t tdshp_gain_mid;
-	uint32_t tdshp_ink_sel;
-	uint32_t tdshp_bypass_high;
-	uint32_t tdshp_bypass_mid;
-	uint32_t tdshp_en;
-	uint32_t tdshp_limit_ratio;
-	uint32_t tdshp_gain;
-	uint32_t tdshp_coring_zero;
-	uint32_t tdshp_coring_thr;
-	uint32_t tdshp_coring_value;
-	uint32_t tdshp_bound;
-	uint32_t tdshp_limit;
-	uint32_t tdshp_sat_proc;
-	uint32_t tdshp_ac_lpf_coe;
-	uint32_t tdshp_clip_thr;
-	uint32_t tdshp_clip_ratio;
-	uint32_t tdshp_clip_en;
-	uint32_t tdshp_ylev_p048;
-	uint32_t tdshp_ylev_p032;
-	uint32_t tdshp_ylev_p016;
-	uint32_t tdshp_ylev_p000;
-	uint32_t tdshp_ylev_p112;
-	uint32_t tdshp_ylev_p096;
-	uint32_t tdshp_ylev_p080;
-	uint32_t tdshp_ylev_p064;
-	uint32_t tdshp_ylev_p176;
-	uint32_t tdshp_ylev_p160;
-	uint32_t tdshp_ylev_p144;
-	uint32_t tdshp_ylev_p128;
-	uint32_t tdshp_ylev_p240;
-	uint32_t tdshp_ylev_p224;
-	uint32_t tdshp_ylev_p208;
-	uint32_t tdshp_ylev_p192;
-	uint32_t tdshp_ylev_en;
-	uint32_t tdshp_ylev_alpha;
-	uint32_t tdshp_ylev_256;
-	uint32_t pbc1_radius_r;
-	uint32_t pbc1_theta_r;
-	uint32_t pbc1_rslope_1;
-	uint32_t pbc1_gain;
-	uint32_t pbc1_lpf_en;
-	uint32_t pbc1_en;
-	uint32_t pbc1_lpf_gain;
-	uint32_t pbc1_tslope;
-	uint32_t pbc1_radius_c;
-	uint32_t pbc1_theta_c;
-	uint32_t pbc1_edge_slope;
-	uint32_t pbc1_edge_thr;
-	uint32_t pbc1_edge_en;
-	uint32_t pbc1_conf_gain;
-	uint32_t pbc1_rslope;
-	uint32_t pbc2_radius_r;
-	uint32_t pbc2_theta_r;
-	uint32_t pbc2_rslope_1;
-	uint32_t pbc2_gain;
-	uint32_t pbc2_lpf_en;
-	uint32_t pbc2_en;
-	uint32_t pbc2_lpf_gain;
-	uint32_t pbc2_tslope;
-	uint32_t pbc2_radius_c;
-	uint32_t pbc2_theta_c;
-	uint32_t pbc2_edge_slope;
-	uint32_t pbc2_edge_thr;
-	uint32_t pbc2_edge_en;
-	uint32_t pbc2_conf_gain;
-	uint32_t pbc2_rslope;
-	uint32_t pbc3_radius_r;
-	uint32_t pbc3_theta_r;
-	uint32_t pbc3_rslope_1;
-	uint32_t pbc3_gain;
-	uint32_t pbc3_lpf_en;
-	uint32_t pbc3_en;
-	uint32_t pbc3_lpf_gain;
-	uint32_t pbc3_tslope;
-	uint32_t pbc3_radius_c;
-	uint32_t pbc3_theta_c;
-	uint32_t pbc3_edge_slope;
-	uint32_t pbc3_edge_thr;
-	uint32_t pbc3_edge_en;
-	uint32_t pbc3_conf_gain;
-	uint32_t pbc3_rslope;
-	uint32_t tdshp_mid_softlimit_ratio;
-	uint32_t tdshp_mid_coring_zero;
-	uint32_t tdshp_mid_coring_thr;
-	uint32_t tdshp_mid_softcoring_gain;
-	uint32_t tdshp_mid_coring_value;
-	uint32_t tdshp_mid_bound;
-	uint32_t tdshp_mid_limit;
-	uint32_t tdshp_high_softlimit_ratio;
-	uint32_t tdshp_high_coring_zero;
-	uint32_t tdshp_high_coring_thr;
-	uint32_t tdshp_high_softcoring_gain;
-	uint32_t tdshp_high_coring_value;
-	uint32_t tdshp_high_bound;
-	uint32_t tdshp_high_limit;
-	uint32_t edf_clip_ratio_inc;
-	uint32_t edf_edge_gain;
-	uint32_t edf_detail_gain;
-	uint32_t edf_flat_gain;
-	uint32_t edf_gain_en;
-	uint32_t edf_edge_th;
-	uint32_t edf_detail_fall_th;
-	uint32_t edf_detail_rise_th;
-	uint32_t edf_flat_th;
-	uint32_t edf_edge_slope;
-	uint32_t edf_detail_fall_slope;
-	uint32_t edf_detail_rise_slope;
-	uint32_t edf_flat_slope;
-	uint32_t edf_edge_mono_slope;
-	uint32_t edf_edge_mono_th;
-	uint32_t edf_edge_mag_slope;
-	uint32_t edf_edge_mag_th;
-	uint32_t edf_edge_trend_flat_mag;
-	uint32_t edf_edge_trend_slope;
-	uint32_t edf_edge_trend_th;
-	uint32_t edf_bld_wgt_mag;
-	uint32_t edf_bld_wgt_mono;
-	uint32_t edf_bld_wgt_trend;
-	uint32_t tdshp_cboost_lmt_u;
-	uint32_t tdshp_cboost_lmt_l;
-	uint32_t tdshp_cboost_en;
-	uint32_t tdshp_cboost_gain;
-	uint32_t tdshp_cboost_yconst;
-	uint32_t tdshp_cboost_yoffset_sel;
-	uint32_t tdshp_cboost_yoffset;
-	uint32_t tdshp_post_ylev_p048;
-	uint32_t tdshp_post_ylev_p032;
-	uint32_t tdshp_post_ylev_p016;
-	uint32_t tdshp_post_ylev_p000;
-	uint32_t tdshp_post_ylev_p112;
-	uint32_t tdshp_post_ylev_p096;
-	uint32_t tdshp_post_ylev_p080;
-	uint32_t tdshp_post_ylev_p064;
-	uint32_t tdshp_post_ylev_p176;
-	uint32_t tdshp_post_ylev_p160;
-	uint32_t tdshp_post_ylev_p144;
-	uint32_t tdshp_post_ylev_p128;
-	uint32_t tdshp_post_ylev_p240;
-	uint32_t tdshp_post_ylev_p224;
-	uint32_t tdshp_post_ylev_p208;
-	uint32_t tdshp_post_ylev_p192;
-	uint32_t tdshp_post_ylev_en;
-	uint32_t tdshp_post_ylev_alpha;
-	uint32_t tdshp_post_ylev_256;
-};
-
-struct DISP_TDSHP_DISPLAY_SIZE {
-	int width;
-	int height;
-	int lcm_width;
-	int lcm_height;
-};
-
-struct drm_mtk_channel_hist {
-	unsigned int channel_id;
-	enum MTK_DRM_CHIST_COLOR_FORMT color_format;
-	unsigned int hist[256];
-	unsigned int bin_count;
-};
-
-struct drm_mtk_chist_info {
-	unsigned int present_fence;
-	unsigned int device_id;
-	enum MTK_DRM_CHIST_CALLER caller;
-	unsigned int get_channel_count;
-	struct drm_mtk_channel_hist channel_hist[MTK_DRM_DISP_CHIST_CHANNEL_COUNT];
-};
-
-struct drm_mtk_channel_config {
-	bool enabled;
-	enum MTK_DRM_CHIST_COLOR_FORMT color_format;
-	unsigned int bin_count;
-	unsigned int channel_id;
-	unsigned int blk_width;
-	unsigned int blk_height;
-	unsigned int roi_start_x;
-	unsigned int roi_start_y;
-	unsigned int roi_end_x;
-	unsigned int roi_end_y;
-};
-
-struct drm_mtk_chist_caps {
-	unsigned int device_id;
-	unsigned int support_color;
-	unsigned int lcm_width;
-	unsigned int lcm_height;
-	struct drm_mtk_channel_config chist_config[MTK_DRM_DISP_CHIST_CHANNEL_COUNT];
-};
-
-struct drm_mtk_chist_config {
-	unsigned int device_id;
-	unsigned int lcm_color_mode;
-	unsigned int config_channel_count;
-	enum MTK_DRM_CHIST_CALLER caller;
-	struct drm_mtk_channel_config chist_config[MTK_DRM_DISP_CHIST_CHANNEL_COUNT];
-};
-
-
-struct drm_mtk_ccorr_caps {
-	unsigned int ccorr_bit;
-	unsigned int ccorr_number;
-	unsigned int ccorr_linear;//1st byte:high 4 bit:CCORR1,low 4 bit:CCORR0
-};
-
-struct mtk_drm_pq_caps_info {
-	struct drm_mtk_ccorr_caps ccorr_caps;
-};
-
 #define DRM_IOCTL_MTK_GEM_CREATE	DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_GEM_CREATE, struct drm_mtk_gem_create)
 
@@ -994,17 +719,11 @@ struct mtk_drm_pq_caps_info {
 #define DRM_IOCTL_MTK_CRTC_GETSFFENCE	DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_CRTC_GETSFFENCE, struct drm_mtk_fence)
 
-#define DRM_IOCTL_MTK_MML_GEM_SUBMIT	DRM_IOWR(DRM_COMMAND_BASE + \
-		DRM_MTK_MML_GEM_SUBMIT, struct mml_submit)
-
 #define DRM_IOCTL_MTK_SET_MSYNC_PARAMS    DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_SET_MSYNC_PARAMS, struct msync_parameter_table)
 
 #define DRM_IOCTL_MTK_GET_MSYNC_PARAMS    DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_GET_MSYNC_PARAMS, struct msync_parameter_table)
-
-#define DRM_IOCTL_MTK_FACTORY_LCM_AUTO_TEST	DRM_IOWR(DRM_COMMAND_BASE + \
-		DRM_MTK_FACTORY_LCM_AUTO_TEST, int)
 
 #define DRM_IOCTL_MTK_WAIT_REPAINT	DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_WAIT_REPAINT, unsigned int)
@@ -1038,9 +757,6 @@ struct mtk_drm_pq_caps_info {
 
 #define DRM_IOCTL_MTK_SET_GAMMALUT     DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_SET_GAMMALUT, struct DISP_GAMMA_LUT_T)
-
-#define DRM_IOCTL_MTK_SET_12BIT_GAMMALUT     DRM_IOWR(DRM_COMMAND_BASE + \
-		DRM_MTK_SET_12BIT_GAMMALUT, struct DISP_GAMMA_12BIT_LUT_T)
 
 #define DRM_IOCTL_MTK_SET_PQPARAM     DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_SET_PQPARAM, struct DISP_PQ_PARAM)
@@ -1082,46 +798,9 @@ struct mtk_drm_pq_caps_info {
 			DRM_MTK_SUPPORT_COLOR_TRANSFORM, \
 			struct DISP_COLOR_TRANSFORM)
 
-// for Display TDSHP
-#define DRM_IOCTL_MTK_SET_DISP_TDSHP_REG      DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_SET_DISP_TDSHP_REG, struct DISP_TDSHP_REG)
+#define DRM_IOCTL_MTK_DEBUG_LOG     DRM_IOWR(DRM_COMMAND_BASE + \
+			DRM_MTK_DEBUG_LOG, int)
 
-#define DRM_IOCTL_MTK_DISP_TDSHP_GET_SIZE      DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_DISP_TDSHP_GET_SIZE, struct DISP_TDSHP_DISPLAY_SIZE)
-
-#define DRM_IOCTL_MTK_C3D_GET_BIN_NUM       DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_C3D_GET_BIN_NUM, unsigned int)
-
-#define DRM_IOCTL_MTK_C3D_GET_IRQ       DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_C3D_GET_IRQ, unsigned int)
-
-#define DRM_IOCTL_MTK_C3D_EVENTCTL       DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_C3D_EVENTCTL, unsigned int)
-
-#define DRM_IOCTL_MTK_C3D_SET_LUT   DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_C3D_SET_LUT, struct DISP_C3D_LUT)
-
-#define DRM_IOCTL_MTK_SET_BYPASS_C3D   DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_SET_BYPASS_C3D, unsigned int)
-
-#define DRM_IOCTL_MTK_GET_CHIST     DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_GET_CHIST, struct drm_mtk_chist_info)
-
-#define DRM_IOCTL_MTK_GET_CHIST_CAPS     DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_GET_CHIST_CAPS, struct drm_mtk_chist_caps)
-
-#define DRM_IOCTL_MTK_SET_CHIST_CONFIG     DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_SET_CHIST_CONFIG, struct drm_mtk_chist_config)
-
-#define DRM_IOCTL_MTK_SET_DITHER_PARAM    DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_SET_DITHER_PARAM, struct DISP_DITHER_PARAM)
-#define DRM_IOCTL_MTK_BYPASS_DISP_GAMMA    DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_BYPASS_DISP_GAMMA, unsigned int)
-
-#define DRM_IOCTL_MTK_GET_PQ_CAPS DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_GET_PQ_CAPS, struct mtk_drm_pq_caps_info)
-#define DRM_IOCTL_MTK_SET_PQ_CAPS    DRM_IOWR(DRM_COMMAND_BASE + \
-			DRM_MTK_SET_PQ_CAPS, struct mtk_drm_pq_caps_info)
 
 /* AAL IOCTL */
 #define AAL_HIST_BIN            33	/* [0..32] */
@@ -1175,12 +854,6 @@ struct DISP_AAL_INITREG {
 	int last_tile_y_flag;
 };
 
-enum rgbSeq {
-	gain_r,
-	gain_g,
-	gain_b,
-};
-
 struct DISP_AAL_PARAM {
 	int DREGainFltStatus[AAL_DRE_POINT_NUM];
 	int cabc_fltgain_force;	/* 10-bit ; [0,1023] */
@@ -1189,7 +862,7 @@ struct DISP_AAL_PARAM {
 	int silky_bright_flag;
 	int allowPartial;
 	int refreshLatency;	/* DISP_AAL_REFRESH_LATENCY */
-	unsigned int silky_bright_gain[3];    /* 13-bit ; [1,8192] */
+	unsigned int silky_bright_gain[3];	/* 13-bit ; [1,8192] */
 	unsigned long long dre30_gain;
 };
 
@@ -1221,9 +894,6 @@ struct DISP_AAL_HIST {
 	unsigned int aal1_yHist[AAL_HIST_BIN];
 	unsigned int MaxHis_denominator_pipe0[AAL_DRE_BLK_NUM];
 	unsigned int MaxHis_denominator_pipe1[AAL_DRE_BLK_NUM];
-	int srcWidth;
-	int srcHeight;
-	int pipeLineNum;
 };
 
 #define DRM_IOCTL_MTK_AAL_INIT_REG	DRM_IOWR(DRM_COMMAND_BASE + \
@@ -1257,25 +927,4 @@ struct DISP_AAL_HIST {
 
 #define MTK_DRM_ADVANCE
 #define MTK_DRM_FORMAT_DIM		fourcc_code('D', ' ', '0', '0')
-
-/* panel feature */
-typedef enum {
-    PARAM_HBM = 0,
-    PARAM_CABC,
-    PARAM_ACL,
-    PARAM_DC,
-    POWER_MODE_MAX_NUM,
-    PARAM_COLOR = POWER_MODE_MAX_NUM,
-    PARAM_MAX_NUM
-} paramId_t;
-
-struct panel_param_info {
-	paramId_t param_idx;
-	uint32_t value;
-};
-
-#define DRM_SET_PANEL_FEATURE	(DRM_COMMAND_END -1)
-#define DRM_IOCTL_SET_PANEL_FEATURE          DRM_IOWR(DRM_SET_PANEL_FEATURE, struct panel_param_info)
-#define DRM_GET_PANEL_FEATURE	(DRM_COMMAND_END-2)
-#define DRM_IOCTL_GET_PANEL_FEATURE          DRM_IOWR(DRM_GET_PANEL_FEATURE, struct panel_param_info)
 #endif /* _UAPI_MEDIATEK_DRM_H */

@@ -12,6 +12,7 @@
 #include <linux/usb/ch9.h>
 #include <linux/sysfs.h>
 #include <linux/kthread.h>
+#include <linux/file.h>
 #include <linux/byteorder/generic.h>
 
 #include "usbip_common.h"
@@ -257,12 +258,7 @@ static struct bin_attribute *dev_bin_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group vudc_attr_group = {
+const struct attribute_group vudc_attr_group = {
 	.attrs = dev_attrs,
 	.bin_attrs = dev_bin_attrs,
-};
-
-const struct attribute_group *vudc_groups[] = {
-	&vudc_attr_group,
-	NULL,
 };

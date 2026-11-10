@@ -2,7 +2,6 @@
 /*
  * Copyright (C) 2016 MediaTek Inc.
  */
-
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/fs.h>
@@ -110,21 +109,18 @@ static int port_char_init(struct port_t *port)
 	return ret;
 }
 
-#if IS_ENABLED(CONFIG_MTK_ECCCI_C2K_USB)
-static usb_upstream_buffer_cb_t usb_upstream_cb;
-void ccci_c2k_set_usb_callback(usb_upstream_buffer_cb_t callback)
-{
-	usb_upstream_cb = callback;
-}
-EXPORT_SYMBOL(ccci_c2k_set_usb_callback);
-
+#ifdef CONFIG_MTK_ECCCI_C2K
 static int c2k_req_push_to_usb(struct port_t *port, struct sk_buff *skb)
 {
 	int md_id = port->md_id;
 	struct ccci_header *ccci_h = NULL;
 	int read_len, read_count, ret = 0;
 	int c2k_ch_id;
+#if (MD_GENERATION <= 6292)
+	int ppp_rx_ch = CCCI_C2K_PPP_DATA;
+#else
 	int ppp_rx_ch = CCCI_C2K_PPP_RX;
+#endif
 
 	if (port->rx_ch == ppp_rx_ch)
 		c2k_ch_id = DATA_PPP_CH_C2K-1;
@@ -144,14 +140,9 @@ static int c2k_req_push_to_usb(struct port_t *port, struct sk_buff *skb)
 	skb_pull(skb, sizeof(struct ccci_header));
 
 retry_push:
-	/* push to usb: USB_RAWBULK_READY: requires C2K USB driver */
-	if (!usb_upstream_cb) {
-		CCCI_ERROR_LOG(md_id, CHAR,
-				"usb upstream callback is not set\n");
-		return -EINVAL;
-	}
-	read_count = usb_upstream_cb(c2k_ch_id, skb->data, read_len);
-  
+	/* push to usb */
+	read_count = rawbulk_push_upstream_buffer(c2k_ch_id,
+		skb->data, read_len);
 	CCCI_DEBUG_LOG(md_id, CHAR,
 		"data push to usb bypass (ch%d)(%d)\n",
 		port->rx_ch, read_count);
@@ -194,12 +185,13 @@ static int port_char_recv_skb(struct port_t *port, struct sk_buff *skb)
 		AP_IPC_LWAPROXY + CCCI_IPC_MINOR_BASE)))
 		return -CCCI_ERR_DROP_PACKET;
 
-#if IS_ENABLED(CONFIG_MTK_ECCCI_C2K_USB)
+#ifdef CONFIG_MTK_ECCCI_C2K
 	if (port->interception) {
 		c2k_req_push_to_usb(port, skb);
 		return 0;
 	}
 #endif
+
 	CCCI_DEBUG_LOG(md_id, CHAR, "recv on %s, len=%d\n",
 		port->name, port->rx_skb_list.qlen);
 	return port_recv_skb(port, skb);
@@ -218,7 +210,7 @@ void port_char_dump_info(struct port_t *port, unsigned int flag)
 			"CHR:(%d):%dR(%d,%d,%d):%dT(%d)\n",
 			port->flags, port->rx_ch,
 			port->rx_skb_list.qlen,
-			atomic_read(&port->rx_pkg_cnt), port->rx_drop_cnt,
+			port->rx_pkg_cnt, port->rx_drop_cnt,
 			port->tx_ch, port->tx_pkg_cnt);
 }
 struct port_ops char_port_ops = {

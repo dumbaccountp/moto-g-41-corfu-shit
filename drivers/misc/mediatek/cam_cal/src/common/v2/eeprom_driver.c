@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
@@ -30,8 +30,6 @@
 #define DEV_CLASS_NAME_FMT "camera_eepromdrv%u"
 #define EEPROM_DEVICE_NNUMBER 255
 
-#include "cam_cal_config.h"
-
 static struct EEPROM_DRV ginst_drv[MAX_EEPROM_NUMBER];
 
 static struct stCAM_CAL_LIST_STRUCT *get_list(struct CAM_CAL_SENSOR_INFO *sinfo)
@@ -59,12 +57,12 @@ static unsigned int read_region(struct EEPROM_DRV_FD_DATA *pdata,
 		? plist->maxEepromSize : DEFAULT_MAX_EEPROM_SIZE_8K;
 
 	if (offset + size > size_limit) {
-		error_log("Not support address >= 0x%x!!\n", size_limit);
+		pr_debug("Error! not support address >= 0x%x!!\n", size_limit);
 		return 0;
 	}
 
 	if (plist && plist->readCamCalData) {
-		must_log("i2c addr 0x%x\n", plist->slaveID);
+		pr_debug("i2c addr 0x%x\n", plist->slaveID);
 		mutex_lock(&pdata->pdrv->eeprom_mutex);
 		dts_addr = pdata->pdrv->pi2c_client->addr;
 		pdata->pdrv->pi2c_client->addr = (plist->slaveID >> 1);
@@ -73,7 +71,7 @@ static unsigned int read_region(struct EEPROM_DRV_FD_DATA *pdata,
 		pdata->pdrv->pi2c_client->addr = dts_addr;
 		mutex_unlock(&pdata->pdrv->eeprom_mutex);
 	} else {
-		must_log("no customized\n");
+		pr_debug("no customized\n");
 		mutex_lock(&pdata->pdrv->eeprom_mutex);
 		ret = Common_read_region(pdata->pdrv->pi2c_client,
 					 offset, buf, size);
@@ -94,12 +92,12 @@ static unsigned int write_region(struct EEPROM_DRV_FD_DATA *pdata,
 		? plist->maxEepromSize : DEFAULT_MAX_EEPROM_SIZE_8K;
 
 	if (offset + size > size_limit) {
-		error_log("Not support address >= 0x%x!!\n", size_limit);
+		pr_debug("Error! not support address >= 0x%x!!\n", size_limit);
 		return 0;
 	}
 
 	if (plist && plist->writeCamCalData) {
-		must_log("i2c addr 0x%x\n", plist->slaveID);
+		pr_debug("i2c addr 0x%x\n", plist->slaveID);
 		mutex_lock(&pdata->pdrv->eeprom_mutex);
 		dts_addr = pdata->pdrv->pi2c_client->addr;
 		pdata->pdrv->pi2c_client->addr = (plist->slaveID >> 1);
@@ -108,7 +106,7 @@ static unsigned int write_region(struct EEPROM_DRV_FD_DATA *pdata,
 		pdata->pdrv->pi2c_client->addr = dts_addr;
 		mutex_unlock(&pdata->pdrv->eeprom_mutex);
 	} else {
-		must_log("no customized\n");
+		pr_debug("no customized\n");
 		mutex_lock(&pdata->pdrv->eeprom_mutex);
 		ret = Common_write_region(pdata->pdrv->pi2c_client,
 					 offset, buf, size);
@@ -123,7 +121,7 @@ static int eeprom_open(struct inode *a_inode, struct file *a_file)
 	struct EEPROM_DRV_FD_DATA *pdata;
 	struct EEPROM_DRV *pdrv;
 
-	// must_log("open\n");
+	pr_debug("open\n");
 
 	pdata = kmalloc(sizeof(struct EEPROM_DRV_FD_DATA), GFP_KERNEL);
 	if (pdata == NULL)
@@ -144,7 +142,7 @@ static int eeprom_release(struct inode *a_inode, struct file *a_file)
 	struct EEPROM_DRV_FD_DATA *pdata =
 		(struct EEPROM_DRV_FD_DATA *) a_file->private_data;
 
-	// must_log("release\n");
+	pr_debug("release\n");
 
 	kfree(pdata);
 
@@ -158,7 +156,7 @@ static ssize_t eeprom_read(struct file *a_file, char __user *user_buffer,
 		(struct EEPROM_DRV_FD_DATA *) a_file->private_data;
 	u8 *kbuf = kmalloc(size, GFP_KERNEL);
 
-	must_log("read %lu %llu\n", size, *offset);
+	pr_debug("read %lu %llu\n", size, *offset);
 
 	if (kbuf == NULL)
 		return -ENOMEM;
@@ -181,7 +179,7 @@ static ssize_t eeprom_write(struct file *a_file, const char __user *user_buffer,
 		(struct EEPROM_DRV_FD_DATA *) a_file->private_data;
 	u8 *kbuf = kmalloc(size, GFP_KERNEL);
 
-	must_log("write %lu %llu\n", size, *offset);
+	pr_debug("write %lu %llu\n", size, *offset);
 
 	if (kbuf == NULL)
 		return -ENOMEM;
@@ -227,15 +225,16 @@ static loff_t eeprom_seek(struct file *a_file, loff_t offset, int whence)
 static long eeprom_ioctl(struct file *a_file, unsigned int a_cmd,
 			 unsigned long a_param)
 {
-	unsigned int ret;
 	void *pBuff = NULL;
 	struct EEPROM_DRV_FD_DATA *pdata =
 		(struct EEPROM_DRV_FD_DATA *) a_file->private_data;
 
+	pr_debug("ioctl\n");
+
 	if (_IOC_DIR(a_cmd) == _IOC_NONE)
 		return -EFAULT;
 
-	pBuff = kzalloc(_IOC_SIZE(a_cmd), GFP_KERNEL);
+	pBuff = kmalloc(_IOC_SIZE(a_cmd), GFP_KERNEL);
 	if (pBuff == NULL)
 		return -ENOMEM;
 	memset(pBuff, 0, _IOC_SIZE(a_cmd));
@@ -246,7 +245,7 @@ static long eeprom_ioctl(struct file *a_file, unsigned int a_cmd,
 			   _IOC_SIZE(a_cmd))) {
 
 		kfree(pBuff);
-		must_log("ioctl copy from user failed\n");
+		pr_debug("ioctl copy from user failed\n");
 		return -EFAULT;
 	}
 
@@ -254,45 +253,12 @@ static long eeprom_ioctl(struct file *a_file, unsigned int a_cmd,
 	case CAM_CALIOC_S_SENSOR_INFO:
 		pdata->sensor_info.sensor_id =
 			((struct CAM_CAL_SENSOR_INFO *)pBuff)->sensor_id;
-		must_log("sensor id = 0x%x\n",
+		pr_debug("sensor id = 0x%x\n",
 		       pdata->sensor_info.sensor_id);
 		break;
-	case CAM_CALIOC_G_GKI_QUERY:
-		/* debug_log("QUERY\n"); */
-		break;
-	case CAM_CALIOC_G_GKI_READ:
-		ret = get_cal_data(pdata, (unsigned int *)pBuff);
-		if (ret == CAM_CAL_ERR_NO_ERR) {
-			if (copy_to_user((u8 __user *) a_param, (u8 *) pBuff, _IOC_SIZE(a_cmd))) {
-				kfree(pBuff);
-				return CAM_CAL_ERR_NO_DEVICE;
-			}
-		}
-		kfree(pBuff);
-		return ret;
-	case CAM_CALIOC_G_GKI_NEED_POWER_ON:
-		ret = get_is_need_power_on(pdata, (unsigned int *)pBuff);
-		if (ret == CAM_CAL_ERR_NO_ERR) {
-			if (copy_to_user((u8 __user *) a_param, (u8 *) pBuff, _IOC_SIZE(a_cmd))) {
-				kfree(pBuff);
-				return CAM_CAL_ERR_NO_DEVICE;
-			}
-		}
-		kfree(pBuff);
-		return ret;
-	case CAM_CALIOC_G_GKI_READ_FACTORY:
-		ret = mot_get_cal_factory_data(pdata, (unsigned int *)pBuff);
-		if (ret == CAM_CAL_ERR_NO_ERR) {
-			if (copy_to_user((u8 __user *) a_param, (u8 *) pBuff, _IOC_SIZE(a_cmd))) {
-				kfree(pBuff);
-				return CAM_CAL_ERR_NO_DEVICE;
-			}
-		}
-		kfree(pBuff);
-		return ret;
 	default:
 		kfree(pBuff);
-		must_log("No such command %d\n", a_cmd);
+		pr_debug("No such command %d\n", a_cmd);
 		return -EPERM;
 	}
 
@@ -304,7 +270,7 @@ static long eeprom_ioctl(struct file *a_file, unsigned int a_cmd,
 static long eeprom_compat_ioctl(struct file *a_file, unsigned int a_cmd,
 				unsigned long a_param)
 {
-	must_log("compat ioctl\n");
+	pr_debug("compat ioctl\n");
 
 	return 0;
 }
@@ -331,7 +297,7 @@ static inline int retrieve_index(struct i2c_client *client,
 
 	if (strncmp(node_name, DEV_NODE_NAME_PREFIX, prefix_len) == 0 &&
 	    kstrtouint(node_name + prefix_len, 10, index) == 0) {
-		must_log("index = %u\n", *index);
+		pr_debug("index = %u\n", *index);
 		return 0;
 	}
 
@@ -430,7 +396,7 @@ static int eeprom_probe(struct i2c_client *client,
 {
 	unsigned int index = 0;
 
-	must_log("probe start name: %s\n", client->dev.of_node->name);
+	pr_debug("probe start name: %s\n", client->dev.of_node->name);
 
 	if (retrieve_index(client, &index) < 0)
 		return -EINVAL;
@@ -442,7 +408,7 @@ static int eeprom_remove(struct i2c_client *client)
 {
 	unsigned int index = 0;
 
-	must_log("remove name: %s\n", client->dev.of_node->name);
+	pr_debug("remove name: %s\n", client->dev.of_node->name);
 
 	if (retrieve_index(client, &index) < 0)
 		return -EINVAL;

@@ -1,6 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2019 MediaTek Inc.
+ * Copyright (C) 2015 MediaTek Inc.
  */
 
 #ifndef __MDEE_DUMPER_V5_H__
@@ -13,8 +13,13 @@
 #define AED_STR_LEN		(2048)/* 0x800 */
 #define EE_BUF_LEN		(256)/* 0x100 */
 
+#if (MD_GENERATION >= 6297)
 #define MD_CORE_TOTAL_NUM   (12)
-
+#elif (MD_GENERATION >= 6293)
+#define MD_CORE_TOTAL_NUM   (8)
+#else
+#define MD_CORE_TOTAL_NUM   (9)
+#endif
 #define MIPS_VPE_NUM	(12)
 #define MD_CORE_NAME_LEN    (11)
 /* +1 for end '\0', +5 for 16, +16 for str TDD FDD */

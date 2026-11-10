@@ -159,7 +159,7 @@ static u64 get_ts_max_nsecs(u32 mult, u32 shift, u64 mask)
 	return max_nsecs;
 }
 
-unsigned int mcupm_timesync_init(void)
+unsigned int __init mcupm_timesync_init(void)
 {
 	u64 wrap;
 

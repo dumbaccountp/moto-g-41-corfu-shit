@@ -92,6 +92,7 @@ struct ccb_ctrl_info {
 
 extern unsigned int ccb_configs_len;
 extern struct ccci_ccb_config ccb_configs[];
+extern void mtk_ccci_ccb_info_peek(void);
 
 
 /* ======================================================================= */
@@ -480,12 +481,17 @@ enum CCCI_CH {
 	CCCI_UDC_RX			= 177,
 	CCCI_UDC_TX			= 178,
 
+	CCCI_MIPI_CHANNEL_RX	= 179,
+	CCCI_MIPI_CHANNEL_TX	= 180,
+
 	CCCI_TCHE_RX			= 181,
 	CCCI_TCHE_TX			= 182,
 	CCCI_DISP_RX			= 183,
 	CCCI_DISP_TX			= 184,
-        CCCI_CIQ_RX                     = 185,
-        CCCI_CIQ_TX                     = 186,
+
+	CCCI_CIQ_RX                     = 185,
+	CCCI_CIQ_TX                     = 186,
+
 	CCCI_WIFI_RX			= 187,
 	CCCI_WIFI_TX			= 188,
 	CCCI_VTS_RX			= 189,
@@ -500,27 +506,6 @@ enum CCCI_CH {
 	CCCI_TIME_TX			= 203,
 	CCCI_GARB_RX			= 204,
 	CCCI_GARB_TX			= 205,
-
-	CCCI_MIPC0_CHANNEL_RX		= 214,
-	CCCI_MIPC0_CHANNEL_TX		= 215,
-	CCCI_MIPC1_CHANNEL_RX		= 216,
-	CCCI_MIPC1_CHANNEL_TX		= 217,
-	CCCI_MIPC2_CHANNEL_RX		= 218,
-	CCCI_MIPC2_CHANNEL_TX		= 219,
-	CCCI_MIPC3_CHANNEL_RX		= 220,
-	CCCI_MIPC3_CHANNEL_TX		= 221,
-	CCCI_MIPC4_CHANNEL_RX		= 222,
-	CCCI_MIPC4_CHANNEL_TX		= 223,
-	CCCI_MIPC5_CHANNEL_RX		= 224,
-	CCCI_MIPC5_CHANNEL_TX		= 225,
-	CCCI_MIPC6_CHANNEL_RX		= 226,
-	CCCI_MIPC6_CHANNEL_TX		= 227,
-	CCCI_MIPC7_CHANNEL_RX		= 228,
-	CCCI_MIPC7_CHANNEL_TX		= 229,
-	CCCI_MIPC8_CHANNEL_RX		= 230,
-	CCCI_MIPC8_CHANNEL_TX		= 231,
-	CCCI_MIPC9_CHANNEL_RX		= 232,
-	CCCI_MIPC9_CHANNEL_TX		= 233,
 
 	CCCI_EPDG1_RX			= 236,
 	CCCI_EPDG1_TX			= 237,

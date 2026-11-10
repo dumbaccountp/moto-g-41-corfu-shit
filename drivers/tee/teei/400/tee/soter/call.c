@@ -21,7 +21,7 @@
 #include "soter_smc.h"
 #include <teei_cancel_cmd.h>
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 unsigned long ree_dynamical_debug;
 struct timeval start_val;
 struct timeval end_val;
@@ -205,7 +205,7 @@ int isee_to_msg_param(struct optee_msg_param *msg_params, size_t num_params,
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 static int unhexify(char *obuf, __u8 *ibuf, int len)
 {
 	char *p = NULL;
@@ -272,7 +272,7 @@ int soter_open_session(struct tee_context *ctx,
 	if (msg_arg->ret == TEEC_SUCCESS) {
 		/* A new session has been created, add it to the list. */
 		sess->session_id = msg_arg->session;
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 		memset(sess->uuid, 0, TEEI_UUID_MAX_LEN);
 		unhexify(sess->uuid, arg->uuid, sizeof(arg->uuid));
 #endif
@@ -303,8 +303,8 @@ int soter_close_session(struct tee_context *ctx, u32 session)
 {
 	struct soter_context_data *ctxdata = ctx->data;
 	struct tee_shm *shm;
-	struct optee_msg_arg *msg_arg = NULL;
-	phys_addr_t msg_parg = 0;
+	struct optee_msg_arg *msg_arg;
+	phys_addr_t msg_parg;
 	struct soter_session *sess;
 
 	/* Check that the session is valid and remove it from the list */
@@ -336,11 +336,11 @@ int soter_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 {
 	struct soter_context_data *ctxdata = ctx->data;
 	struct tee_shm *shm;
-	struct optee_msg_arg *msg_arg = NULL;
-	phys_addr_t msg_parg = 0;
+	struct optee_msg_arg *msg_arg;
+	phys_addr_t msg_parg;
 	struct soter_session *sess;
 	int rc;
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 	long time_used;
 #endif
 
@@ -363,7 +363,7 @@ int soter_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 	if (rc)
 		goto out;
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 	if (tzdriver_dynamical_debug_flag == 1) {
 		IMSG_PRINTK("TEEI: %s START (TA: %s).\n",
 							__func__, sess->uuid);
@@ -384,7 +384,7 @@ int soter_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 		msg_arg->ret_origin = TEEC_ORIGIN_COMMS;
 	}
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG)
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
 	if (tzdriver_dynamical_debug_flag == 1) {
 		do_gettimeofday(&end_val);
 		time_used = (end_val.tv_sec - start_val.tv_sec) * 1000000

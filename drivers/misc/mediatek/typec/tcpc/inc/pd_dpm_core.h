@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef PD_DPM_CORE_H
@@ -23,7 +23,7 @@ void pd_dpm_dynamic_disable_vconn(struct pd_port *pd_port);
 
 /* ---- SNK ---- */
 
-#if CONFIG_USB_PD_REV30_PPS_SINK
+#ifdef CONFIG_USB_PD_REV30_PPS_SINK
 void pd_dpm_start_pps_request_thread(struct pd_port *pd_port, bool en);
 #endif	/* CONFIG_USB_PD_REV30_PPS_SINK */
 
@@ -56,7 +56,7 @@ void pd_dpm_ufp_request_exit_mode(struct pd_port *pd_port);
 
 /* ---- UFP : DP Only ---- */
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 int pd_dpm_ufp_request_dp_status(struct pd_port *pd_port);
 int pd_dpm_ufp_request_dp_config(struct pd_port *pd_port);
 void pd_dpm_ufp_send_dp_attention(struct pd_port *pd_port);
@@ -73,7 +73,7 @@ void pd_dpm_dfp_inform_attention(struct pd_port *pd_port);
 
 /* ---- DFP : DP Only  ---- */
 
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 void pd_dpm_dfp_send_dp_status_update(struct pd_port *pd_port);
 void pd_dpm_dfp_inform_dp_status_update(struct pd_port *pd_port, bool ack);
 
@@ -83,7 +83,7 @@ void pd_dpm_dfp_inform_dp_configuration(struct pd_port *pd_port, bool ack);
 
 /* ---- SVDM/UVDM  ---- */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 
 void pd_dpm_ufp_recv_uvdm(struct pd_port *pd_port);
 void pd_dpm_dfp_send_uvdm(struct pd_port *pd_port);
@@ -120,73 +120,73 @@ void pd_dpm_vcs_enable_vconn(struct pd_port *pd_port, uint8_t role);
  * PE : PD3.0
  */
 
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
 int pd_dpm_send_source_cap_ext(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL */
 
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
 void pd_dpm_inform_source_cap_ext(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE */
 
-#if CONFIG_USB_PD_REV30_BAT_CAP_LOCAL
+#ifdef CONFIG_USB_PD_REV30_BAT_CAP_LOCAL
 int pd_dpm_send_battery_cap(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_BAT_CAP_LOCAL */
 
-#if CONFIG_USB_PD_REV30_BAT_CAP_REMOTE
+#ifdef CONFIG_USB_PD_REV30_BAT_CAP_REMOTE
 void pd_dpm_inform_battery_cap(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_BAT_CAP_REMOTE */
 
-#if CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL
 int pd_dpm_send_battery_status(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL */
 
-#if CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE
 void pd_dpm_inform_battery_status(struct pd_port *pd_port);
-#endif	/* #if CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE */
+#endif	/* #ifdef CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE */
 
-#if CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL
+#ifdef CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL
 int pd_dpm_send_mfrs_info(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL */
 
-#if CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE
+#ifdef CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE
 void pd_dpm_inform_mfrs_info(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE */
 
-#if CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL
 int pd_dpm_send_country_codes(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL */
 
-#if CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE
 void pd_dpm_inform_country_codes(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE */
 
-#if CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL
 int pd_dpm_send_country_info(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL */
 
-#if CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE
 void pd_dpm_inform_country_info(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE */
 
-#if CONFIG_USB_PD_REV30_ALERT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_ALERT_LOCAL
 int pd_dpm_send_alert(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_ALERT_LOCAL */
 
-#if CONFIG_USB_PD_REV30_ALERT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_ALERT_REMOTE
 void pd_dpm_inform_alert(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_ALERT_REMOTE */
 
-#if CONFIG_USB_PD_REV30_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_STATUS_LOCAL
 int pd_dpm_send_status(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_STATUS_LOCAL */
 
-#if CONFIG_USB_PD_REV30_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_STATUS_REMOTE
 void pd_dpm_inform_status(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_STATUS_REMOTE */
 
-#if CONFIG_USB_PD_REV30_PPS_SINK
+#ifdef CONFIG_USB_PD_REV30_PPS_SINK
 void pd_dpm_inform_pps_status(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_PPS_SINK */
 
@@ -200,17 +200,6 @@ int pd_dpm_notify_pe_startup(struct pd_port *pd_port);
 int pd_dpm_notify_pe_hardreset(struct pd_port *pd_port);
 
 /* TCPCI - VBUS Control */
-
-#ifdef CONFIG_SUPPORT_MMI_ADAPTER
-extern bool mmi_dfp_u_notify_discover_svid(
-	struct pd_port *pd_port, struct svdm_svid_data *svid_data, bool ack);
-extern bool mmi_dfp_notify_uvdm(struct pd_port *pd_port,
-		struct svdm_svid_data *svid_data, bool ack);
-extern int mmi_notify_pe_ready(struct pd_port *pd_port,
-		struct svdm_svid_data *svid_data);
-extern bool mmi_dfp_notify_pe_startup(
-	struct pd_port *pd_port, struct svdm_svid_data *svid_data);
-#endif /* CONFIG_SUPPORT_MMI_ADAPTER */
 
 static inline int pd_dpm_check_vbus_valid(struct pd_port *pd_port)
 {
@@ -235,8 +224,8 @@ static inline int pd_dpm_source_vbus(struct pd_port *pd_port, bool en)
 
 /* Mode Operations */
 
-#if CONFIG_USB_PD_ALT_MODE
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 
 extern bool dp_dfp_u_notify_discover_id(struct pd_port *pd_port,
 	struct svdm_svid_data *svid_data, bool ack);
@@ -264,7 +253,7 @@ extern void dp_ufp_u_request_enter_mode(
 extern void dp_ufp_u_request_exit_mode(
 	struct pd_port *pd_port, struct svdm_svid_data *svid_data, uint8_t ops);
 
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 extern bool dp_dfp_u_notify_pe_startup(
 	struct pd_port *pd_port, struct svdm_svid_data *svid_data);
 
@@ -279,7 +268,7 @@ extern bool dp_parse_svid_data(
 	struct pd_port *pd_port, struct svdm_svid_data *svid_data);
 #endif	/* CONFIG_USB_PD_ALT_MODE */
 
-#if CONFIG_USB_PD_RICHTEK_UVDM
+#ifdef CONFIG_USB_PD_RICHTEK_UVDM
 extern bool richtek_dfp_notify_pe_startup(
 	struct pd_port *pd_port, struct svdm_svid_data *svid_data);
 
@@ -293,7 +282,7 @@ extern bool richtek_ufp_notify_uvdm(struct pd_port *pd_port,
 #endif	/* CONFIG_USB_PD_RICHTEK_UVDM */
 
 
-#if CONFIG_USB_PD_ALT_MODE_RTDC
+#ifdef CONFIG_USB_PD_ALT_MODE_RTDC
 extern bool dc_dfp_notify_discover_id(struct pd_port *pd_port,
 		struct svdm_svid_data *svid_data, bool ack);
 

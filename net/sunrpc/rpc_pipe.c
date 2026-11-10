@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * net/sunrpc/rpc_pipe.c
  *
@@ -14,7 +13,6 @@
 #include <linux/string.h>
 #include <linux/pagemap.h>
 #include <linux/mount.h>
-#include <linux/fs_context.h>
 #include <linux/namei.h>
 #include <linux/fsnotify.h>
 #include <linux/kernel.h>
@@ -51,7 +49,7 @@ static BLOCKING_NOTIFIER_HEAD(rpc_pipefs_notifier_list);
 
 int rpc_pipefs_notifier_register(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_register(&rpc_pipefs_notifier_list, nb);
+	return blocking_notifier_chain_cond_register(&rpc_pipefs_notifier_list, nb);
 }
 EXPORT_SYMBOL_GPL(rpc_pipefs_notifier_register);
 
@@ -204,9 +202,16 @@ rpc_alloc_inode(struct super_block *sb)
 }
 
 static void
-rpc_free_inode(struct inode *inode)
+rpc_i_callback(struct rcu_head *head)
 {
+	struct inode *inode = container_of(head, struct inode, i_rcu);
 	kmem_cache_free(rpc_inode_cachep, RPC_I(inode));
+}
+
+static void
+rpc_destroy_inode(struct inode *inode)
+{
+	call_rcu(&inode->i_rcu, rpc_i_callback);
 }
 
 static int
@@ -478,7 +483,6 @@ rpc_get_inode(struct super_block *sb, umode_t mode)
 		inode->i_fop = &simple_dir_operations;
 		inode->i_op = &simple_dir_inode_operations;
 		inc_nlink(inode);
-		break;
 	default:
 		break;
 	}
@@ -600,9 +604,7 @@ static int __rpc_rmdir(struct inode *dir, struct dentry *dentry)
 
 	dget(dentry);
 	ret = simple_rmdir(dir, dentry);
-	d_drop(dentry);
-	if (!ret)
-		fsnotify_rmdir(dir, dentry);
+	d_delete(dentry);
 	dput(dentry);
 	return ret;
 }
@@ -613,9 +615,7 @@ static int __rpc_unlink(struct inode *dir, struct dentry *dentry)
 
 	dget(dentry);
 	ret = simple_unlink(dir, dentry);
-	d_drop(dentry);
-	if (!ret)
-		fsnotify_unlink(dir, dentry);
+	d_delete(dentry);
 	dput(dentry);
 	return ret;
 }
@@ -1123,7 +1123,7 @@ void rpc_remove_cache_dir(struct dentry *dentry)
  */
 static const struct super_operations s_ops = {
 	.alloc_inode	= rpc_alloc_inode,
-	.free_inode	= rpc_free_inode,
+	.destroy_inode	= rpc_destroy_inode,
 	.statfs		= simple_statfs,
 };
 
@@ -1266,7 +1266,7 @@ static const struct rpc_pipe_ops gssd_dummy_pipe_ops = {
  * that this file will be there and have a certain format.
  */
 static int
-rpc_dummy_info_show(struct seq_file *m, void *v)
+rpc_show_dummy_info(struct seq_file *m, void *v)
 {
 	seq_printf(m, "RPC server: %s\n", utsname()->nodename);
 	seq_printf(m, "service: foo (1) version 0\n");
@@ -1275,12 +1275,25 @@ rpc_dummy_info_show(struct seq_file *m, void *v)
 	seq_printf(m, "port: 0\n");
 	return 0;
 }
-DEFINE_SHOW_ATTRIBUTE(rpc_dummy_info);
+
+static int
+rpc_dummy_info_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, rpc_show_dummy_info, NULL);
+}
+
+static const struct file_operations rpc_dummy_info_operations = {
+	.owner		= THIS_MODULE,
+	.open		= rpc_dummy_info_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
 
 static const struct rpc_filelist gssd_dummy_info_file[] = {
 	[0] = {
 		.name = "info",
-		.i_fop = &rpc_dummy_info_fops,
+		.i_fop = &rpc_dummy_info_operations,
 		.mode = S_IFREG | 0400,
 	},
 };
@@ -1355,11 +1368,11 @@ rpc_gssd_dummy_depopulate(struct dentry *pipe_dentry)
 }
 
 static int
-rpc_fill_super(struct super_block *sb, struct fs_context *fc)
+rpc_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct inode *inode;
 	struct dentry *root, *gssd_dentry;
-	struct net *net = sb->s_fs_info;
+	struct net *net = get_net(sb->s_fs_info);
 	struct sunrpc_net *sn = net_generic(net, sunrpc_net_id);
 	int err;
 
@@ -1416,28 +1429,12 @@ gssd_running(struct net *net)
 }
 EXPORT_SYMBOL_GPL(gssd_running);
 
-static int rpc_fs_get_tree(struct fs_context *fc)
+static struct dentry *
+rpc_mount(struct file_system_type *fs_type,
+		int flags, const char *dev_name, void *data)
 {
-	return get_tree_keyed(fc, rpc_fill_super, get_net(fc->net_ns));
-}
-
-static void rpc_fs_free_fc(struct fs_context *fc)
-{
-	if (fc->s_fs_info)
-		put_net(fc->s_fs_info);
-}
-
-static const struct fs_context_operations rpc_fs_context_ops = {
-	.free		= rpc_fs_free_fc,
-	.get_tree	= rpc_fs_get_tree,
-};
-
-static int rpc_init_fs_context(struct fs_context *fc)
-{
-	put_user_ns(fc->user_ns);
-	fc->user_ns = get_user_ns(fc->net_ns->user_ns);
-	fc->ops = &rpc_fs_context_ops;
-	return 0;
+	struct net *net = current->nsproxy->net_ns;
+	return mount_ns(fs_type, flags, data, net, net->user_ns, rpc_fill_super);
 }
 
 static void rpc_kill_sb(struct super_block *sb)
@@ -1465,7 +1462,7 @@ out:
 static struct file_system_type rpc_pipe_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "rpc_pipefs",
-	.init_fs_context = rpc_init_fs_context,
+	.mount		= rpc_mount,
 	.kill_sb	= rpc_kill_sb,
 };
 MODULE_ALIAS_FS("rpc_pipefs");
@@ -1511,6 +1508,6 @@ err_notifier:
 void unregister_rpc_pipefs(void)
 {
 	rpc_clients_notifier_unregister();
-	unregister_filesystem(&rpc_pipe_fs_type);
 	kmem_cache_destroy(rpc_inode_cachep);
+	unregister_filesystem(&rpc_pipe_fs_type);
 }

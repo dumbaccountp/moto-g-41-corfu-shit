@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
- */
+*/
 
 #ifndef __CMDQ_SEC_IWC_COMMON_H__
 #define __CMDQ_SEC_IWC_COMMON_H__
@@ -282,7 +282,6 @@ enum cmdq_sec_meta_type {
 	CMDQ_METAEX_FD,
 	CMDQ_METAEX_CQ,
 	CMDQ_METAEX_VENC,
-	CMDQ_METAEX_TZMP,
 };
 
 struct iwc_cq_meta {

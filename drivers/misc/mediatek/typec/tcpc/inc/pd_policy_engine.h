@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef PD_POLICY_ENGINE_H_
@@ -17,11 +17,6 @@ enum pd_pe_state_machine {
 	PE_STATE_MACHINE_PR_SWAP,
 	PE_STATE_MACHINE_VCONN_SWAP,
 };
-
-#define PE_STATE_DISCARD_AND_UNEXPECTED(pd_port) {\
-	pd_port->pe_data.pe_state_flags = \
-	PE_STATE_FLAG_HRESET_IF_SR_TIMEOUT |\
-	PE_STATE_FLAG_IGNORE_UNKNOWN_EVENT; }
 
 /* ---- Policy Engine Runtime Flags ---- */
 
@@ -139,7 +134,7 @@ static inline bool pd_check_pe_during_hard_reset(struct pd_port *pd_port)
 enum pd_pe_state {
 	PE_STATE_START_ID = -1,
 /******************* Source *******************/
-#if CONFIG_USB_PD_PE_SOURCE
+#ifdef CONFIG_USB_PD_PE_SOURCE
 	PE_SRC_STARTUP,
 	PE_SRC_DISCOVERY,
 	PE_SRC_SEND_CAPABILITIES,
@@ -158,8 +153,8 @@ enum pd_pe_state {
 	PE_SRC_SOFT_RESET,
 
 /* Source Startup Discover Cable */
-#if CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
-#if CONFIG_PD_SRC_RESET_CABLE
+#ifdef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
+#ifdef CONFIG_PD_SRC_RESET_CABLE
 	PE_SRC_CBL_SEND_SOFT_RESET,
 #endif	/* CONFIG_PD_SRC_RESET_CABLE */
 	PE_SRC_VDM_IDENTITY_REQUEST,
@@ -168,33 +163,33 @@ enum pd_pe_state {
 #endif	/* PD_CAP_PE_SRC_STARTUP_DISCOVER_ID */
 
 /* Source for PD30 */
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 	PE_SRC_SEND_NOT_SUPPORTED,
 	PE_SRC_NOT_SUPPORTED_RECEIVED,
 	PE_SRC_CHUNK_RECEIVED,
-#if CONFIG_USB_PD_REV30_ALERT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_ALERT_LOCAL
 	PE_SRC_SEND_SOURCE_ALERT,
 #endif	/* CONFIG_USB_PD_REV30_ALERT_REMOTE */
-#if CONFIG_USB_PD_REV30_ALERT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_ALERT_REMOTE
 	PE_SRC_SINK_ALERT_RECEIVED,
 #endif	/* CONFIG_USB_PD_REV30_ALERT_REMOTE */
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
 	PE_SRC_GIVE_SOURCE_CAP_EXT,
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL */
-#if CONFIG_USB_PD_REV30_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_STATUS_LOCAL
 	PE_SRC_GIVE_SOURCE_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_STATUS_LOCAL */
-#if CONFIG_USB_PD_REV30_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_STATUS_REMOTE
 	PE_SRC_GET_SINK_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_STATUS_REMOTE */
-#if CONFIG_USB_PD_REV30_PPS_SOURCE
+#ifdef CONFIG_USB_PD_REV30_PPS_SOURCE
 	PE_SRC_GIVE_PPS_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_PPS_SOURCE */
 #endif	/* CONFIG_USB_PD_REV30 */
 #endif	/* CONFIG_USB_PD_PE_SOURCE */
 
 /******************* Sink *******************/
-#if CONFIG_USB_PD_PE_SINK
+#ifdef CONFIG_USB_PD_PE_SINK
 /* Sink Init */
 	PE_SNK_STARTUP,
 	PE_SNK_DISCOVERY,
@@ -212,33 +207,33 @@ enum pd_pe_state {
 	PE_SNK_SOFT_RESET,
 
 /* Sink for PD30 */
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 	PE_SNK_SEND_NOT_SUPPORTED,
 	PE_SNK_NOT_SUPPORTED_RECEIVED,
 	PE_SNK_CHUNK_RECEIVED,
-#if CONFIG_USB_PD_REV30_ALERT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_ALERT_REMOTE
 	PE_SNK_SOURCE_ALERT_RECEIVED,
 #endif	/* CONFIG_USB_PD_REV30_ALERT_REMOTE */
-#if CONFIG_USB_PD_REV30_ALERT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_ALERT_LOCAL
 	PE_SNK_SEND_SINK_ALERT,
 #endif	/* CONFIG_USB_PD_REV30_ALERT_LOCAL */
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
 	PE_SNK_GET_SOURCE_CAP_EXT,
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE */
-#if CONFIG_USB_PD_REV30_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_STATUS_REMOTE
 	PE_SNK_GET_SOURCE_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_STATUS_REMOTE */
-#if CONFIG_USB_PD_REV30_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_STATUS_LOCAL
 	PE_SNK_GIVE_SINK_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_STATUS_LOCAL */
-#if CONFIG_USB_PD_REV30_PPS_SINK
+#ifdef CONFIG_USB_PD_REV30_PPS_SINK
 	PE_SNK_GET_PPS_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_PPS_SINK */
 #endif	/* CONFIG_USB_PD_REV30 */
 #endif	/* CONFIG_USB_PD_PE_SINK */
 
 /******************* DR_SWAP *******************/
-#if CONFIG_USB_PD_DR_SWAP
+#ifdef CONFIG_USB_PD_DR_SWAP
 /* DR_SWAP_DFP */
 	PE_DRS_DFP_UFP_EVALUATE_DR_SWAP,
 	PE_DRS_DFP_UFP_ACCEPT_DR_SWAP,
@@ -254,7 +249,7 @@ enum pd_pe_state {
 #endif	/* CONFIG_USB_PD_DR_SWAP */
 
 /******************* PR_SWAP *******************/
-#if CONFIG_USB_PD_PR_SWAP
+#ifdef CONFIG_USB_PD_PR_SWAP
 /* PR_SWAP_SRC */
 	PE_PRS_SRC_SNK_EVALUATE_PR_SWAP,
 	PE_PRS_SRC_SNK_ACCEPT_PR_SWAP,
@@ -280,18 +275,18 @@ enum pd_pe_state {
 	PE_DR_SNK_GIVE_SOURCE_CAP,
 
 /* get same role cap for PD30 */
-#if CONFIG_USB_PD_REV30
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
+#ifdef CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
 	PE_DR_SNK_GIVE_SOURCE_CAP_EXT,
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL */
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
 	PE_DR_SRC_GET_SOURCE_CAP_EXT,
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE */
 #endif	/* CONFIG_USB_PD_REV30 */
 #endif	/* CONFIG_USB_PD_PR_SWAP */
 
 /******************* VCONN_SWAP *******************/
-#if CONFIG_USB_PD_VCONN_SWAP
+#ifdef CONFIG_USB_PD_VCONN_SWAP
 	PE_VCS_SEND_SWAP,
 	PE_VCS_EVALUATE_SWAP,
 	PE_VCS_ACCEPT_SWAP,
@@ -310,7 +305,7 @@ enum pd_pe_state {
 	PE_UFP_VDM_MODE_EXIT,
 	PE_UFP_VDM_ATTENTION_REQUEST,
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 	PE_UFP_VDM_DP_STATUS_UPDATE,
 	PE_UFP_VDM_DP_CONFIGURE,
 #endif/* CONFIG_USB_PD_ALT_MODE */
@@ -336,12 +331,12 @@ enum pd_pe_state {
 	PE_DFP_VDM_MODE_EXIT_ACKED,
 	PE_DFP_VDM_ATTENTION_REQUEST,
 
-#if CONFIG_PD_DFP_RESET_CABLE
+#ifdef CONFIG_PD_DFP_RESET_CABLE
 	PE_DFP_CBL_SEND_SOFT_RESET,
 	PE_DFP_CBL_SEND_CABLE_RESET,
 #endif	/* CONFIG_PD_DFP_RESET_CABLE */
 
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 	PE_DFP_VDM_DP_STATUS_UPDATE_REQUEST,
 	PE_DFP_VDM_DP_STATUS_UPDATE_ACKED,
 	PE_DFP_VDM_DP_STATUS_UPDATE_NAKED,
@@ -353,7 +348,7 @@ enum pd_pe_state {
 
 /******************* UVDM & SVDM *******************/
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 	PE_UFP_UVDM_RECV,
 	PE_DFP_UVDM_SEND,
 	PE_DFP_UVDM_ACKED,
@@ -363,64 +358,56 @@ enum pd_pe_state {
 	PE_UFP_VDM_SEND_NAK,
 
 /******************* PD30 Common *******************/
-#if CONFIG_USB_PD_REV30
-#if CONFIG_USB_PD_REV30_BAT_CAP_REMOTE
+#ifdef CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30_BAT_CAP_REMOTE
 	PE_GET_BATTERY_CAP,
 #endif	/* CONFIG_USB_PD_REV30_BAT_CAP_REMOTE */
-#if CONFIG_USB_PD_REV30_BAT_CAP_LOCAL
+#ifdef CONFIG_USB_PD_REV30_BAT_CAP_LOCAL
 	PE_GIVE_BATTERY_CAP,
 #endif	/* CONFIG_USB_PD_REV30_BAT_CAP_LOCAL */
-#if CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE
 	PE_GET_BATTERY_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE */
-#if CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL
 	PE_GIVE_BATTERY_STATUS,
 #endif	/* CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL */
-#if CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE
+#ifdef CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE
 	PE_GET_MANUFACTURER_INFO,
 #endif	/* CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE */
-#if CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL
+#ifdef CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL
 	PE_GIVE_MANUFACTURER_INFO,
 #endif	/* CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL */
-#if CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE
 	PE_GET_COUNTRY_CODES,
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE */
-#if CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL
 	PE_GIVE_COUNTRY_CODES,
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL */
-#if CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE
 	PE_GET_COUNTRY_INFO,
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE */
-#if CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL
 	PE_GIVE_COUNTRY_INFO,
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL */
 	PE_VDM_NOT_SUPPORTED,
 #endif /* CONFIG_USB_PD_REV30 */
 
 /******************* Others *******************/
-#if CONFIG_USB_PD_CUSTOM_DBGACC
+#ifdef CONFIG_USB_PD_CUSTOM_DBGACC
 	PE_DBG_READY,
 #endif/* CONFIG_USB_PD_CUSTOM_DBGACC */
 
-#if CONFIG_USB_PD_RECV_HRESET_COUNTER
+#ifdef CONFIG_USB_PD_RECV_HRESET_COUNTER
 	PE_OVER_RECV_HRESET_LIMIT,
 #endif/* CONFIG_USB_PD_RECV_HRESET_COUNTER */
 
 	PE_REJECT,
 	PE_ERROR_RECOVERY,
-#if CONFIG_USB_PD_ERROR_RECOVERY_ONCE
+#ifdef CONFIG_USB_PD_ERROR_RECOVERY_ONCE
 	PE_ERROR_RECOVERY_ONCE,
 #endif	/* CONFIG_USB_PD_ERROR_RECOVERY_ONCE */
 	PE_BIST_TEST_DATA,
 	PE_BIST_CARRIER_MODE_2,
-
-#if CONFIG_USB_PD_DISCARD_AND_UNEXPECT_MSG
-	PE_UNEXPECTED_TX_WAIT,
-	PE_SEND_SOFT_RESET_TX_WAIT,
-	PE_RECV_SOFT_RESET_TX_WAIT,
-	PE_SEND_SOFT_RESET_STANDBY,
-#endif	/* CONFIG_USB_PD_DISCARD_AND_UNEXPECT_MSG */
-
 /* Wait tx finished */
 	PE_IDLE1,
 	PE_IDLE2,
@@ -453,7 +440,7 @@ static inline void pe_send_swap_request_entry(
 }
 
 /******************* Source *******************/
-#if CONFIG_USB_PD_PE_SOURCE
+#ifdef CONFIG_USB_PD_PE_SOURCE
 void pe_src_startup_entry(
 	struct pd_port *pd_port);
 void pe_src_discovery_entry(
@@ -494,8 +481,8 @@ void pe_src_soft_reset_entry(
 	struct pd_port *pd_port);
 
 /* Source Startup Discover Cable */
-#if CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
-#if CONFIG_PD_SRC_RESET_CABLE
+#ifdef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
+#ifdef CONFIG_PD_SRC_RESET_CABLE
 void pe_src_cbl_send_soft_reset_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_PD_SRC_RESET_CABLE */
@@ -508,36 +495,36 @@ void pe_src_vdm_identity_naked_entry(
 #endif	/* PD_CAP_PE_SRC_STARTUP_DISCOVER_ID */
 
 /* Source for PD30 */
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 void pe_src_send_not_supported_entry(
 	struct pd_port *pd_port);
 void pe_src_not_supported_received_entry(
 	struct pd_port *pd_port);
 void pe_src_chunk_received_entry(
 	struct pd_port *pd_port);
-#if CONFIG_USB_PD_REV30_ALERT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_ALERT_LOCAL
 void pe_src_send_source_alert_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_ALERT_REMOTE */
-#if CONFIG_USB_PD_REV30_ALERT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_ALERT_REMOTE
 void pe_src_sink_alert_received_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_ALERT_REMOTE */
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
 void pe_src_give_source_cap_ext_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL */
-#if CONFIG_USB_PD_REV30_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_STATUS_LOCAL
 void pe_src_give_source_status_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_STATUS_LOCAL */
-#if CONFIG_USB_PD_REV30_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_STATUS_REMOTE
 void pe_src_get_sink_status_entry(
 	struct pd_port *pd_port);
 void pe_src_get_sink_status_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_STATUS_REMOTE */
-#if CONFIG_USB_PD_REV30_PPS_SOURCE
+#ifdef CONFIG_USB_PD_REV30_PPS_SOURCE
 void pe_src_give_pps_status_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_PPS_SOURCE */
@@ -545,7 +532,7 @@ void pe_src_give_pps_status_entry(
 #endif	/* CONFIG_USB_PD_PE_SOURCE */
 
 /******************* Sink *******************/
-#if CONFIG_USB_PD_PE_SINK
+#ifdef CONFIG_USB_PD_PE_SINK
 /* Sink Init */
 void pe_snk_startup_entry(
 	struct pd_port *pd_port);
@@ -580,38 +567,38 @@ void pe_snk_soft_reset_entry(
 	struct pd_port *pd_port);
 
 /* Sink for PD30 */
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 void pe_snk_send_not_supported_entry(
 	struct pd_port *pd_port);
 void pe_snk_not_supported_received_entry(
 	struct pd_port *pd_port);
 void pe_snk_chunk_received_entry(
 	struct pd_port *pd_port);
-#if CONFIG_USB_PD_REV30_ALERT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_ALERT_REMOTE
 void pe_snk_source_alert_received_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_ALERT_REMOTE */
-#if CONFIG_USB_PD_REV30_ALERT_LOCAL
+#ifdef CONFIG_USB_PD_REV30_ALERT_LOCAL
 void pe_snk_send_sink_alert_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_ALERT_LOCAL */
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
 void pe_snk_get_source_cap_ext_entry(
 	struct pd_port *pd_port);
 void pe_snk_get_source_cap_ext_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE */
-#if CONFIG_USB_PD_REV30_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_STATUS_REMOTE
 void pe_snk_get_source_status_entry(
 	struct pd_port *pd_port);
 void pe_snk_get_source_status_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_STATUS_REMOTE */
-#if CONFIG_USB_PD_REV30_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_STATUS_LOCAL
 void pe_snk_give_sink_status_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_STATUS_LOCAL */
-#if CONFIG_USB_PD_REV30_PPS_SINK
+#ifdef CONFIG_USB_PD_REV30_PPS_SINK
 void pe_snk_get_pps_status_entry(
 	struct pd_port *pd_port);
 void pe_snk_get_pps_status_exit(
@@ -621,7 +608,7 @@ void pe_snk_get_pps_status_exit(
 #endif	/* CONFIG_USB_PD_PE_SINK */
 
 /******************* DR_SWAP *******************/
-#if CONFIG_USB_PD_DR_SWAP
+#ifdef CONFIG_USB_PD_DR_SWAP
 /* DR_SWAP_DFP */
 void pe_drs_dfp_ufp_evaluate_dr_swap_entry(
 	struct pd_port *pd_port);
@@ -647,7 +634,7 @@ void pe_drs_ufp_dfp_reject_dr_swap_entry(
 #endif	/* CONFIG_USB_PD_DR_SWAP */
 
 /******************* PR_SWAP *******************/
-#if CONFIG_USB_PD_PR_SWAP
+#ifdef CONFIG_USB_PD_PR_SWAP
 /* PR_SWAP_SRC */
 void pe_prs_src_snk_evaluate_pr_swap_entry(
 	struct pd_port *pd_port);
@@ -701,12 +688,12 @@ void pe_dr_snk_give_source_cap_entry(
 	struct pd_port *pd_port);
 
 /* get same role cap for PD30 */
-#if CONFIG_USB_PD_REV30
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
+#ifdef CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL
 void pe_dr_snk_give_source_cap_ext_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_SRC_CAP_EXT_LOCAL */
-#if CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
+#ifdef CONFIG_USB_PD_REV30_SRC_CAP_EXT_REMOTE
 void pe_dr_src_get_source_cap_ext_entry(
 	struct pd_port *pd_port);
 void pe_dr_src_get_source_cap_ext_exit(
@@ -716,7 +703,7 @@ void pe_dr_src_get_source_cap_ext_exit(
 #endif	/* CONFIG_USB_PD_PR_SWAP */
 
 /******************* VCONN_SWAP *******************/
-#if CONFIG_USB_PD_VCONN_SWAP
+#ifdef CONFIG_USB_PD_VCONN_SWAP
 void pe_vcs_send_swap_entry(
 	struct pd_port *pd_port);
 void pe_vcs_evaluate_swap_entry(
@@ -772,7 +759,7 @@ void pe_ufp_vdm_mode_exit_nak_entry(
 void pe_ufp_vdm_attention_request_entry(
 	struct pd_port *pd_port);
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 void pe_ufp_vdm_dp_status_update_entry(
 	struct pd_port *pd_port);
 void pe_ufp_vdm_dp_configure_entry(
@@ -817,13 +804,13 @@ void pe_dfp_vdm_mode_exit_acked_entry(
 void pe_dfp_vdm_attention_request_entry(
 	struct pd_port *pd_port);
 
-#if CONFIG_PD_DFP_RESET_CABLE
+#ifdef CONFIG_PD_DFP_RESET_CABLE
 void pe_dfp_cbl_send_soft_reset_entry(
 	struct pd_port *pd_port);
 void pe_dfp_cbl_send_cable_reset_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_PD_DFP_RESET_CABLE */
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 void pe_dfp_vdm_dp_status_update_request_entry(
 	struct pd_port *pd_port);
 void pe_dfp_vdm_dp_status_update_acked_entry(
@@ -839,7 +826,7 @@ void pe_dfp_vdm_dp_configuration_naked_entry(
 	struct pd_port *pd_port);
 #endif/* CONFIG_USB_PD_ALT_MODE_DFP */
 /******************* UVDM & SVDM *******************/
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 void pe_ufp_uvdm_recv_entry(
 	struct pd_port *pd_port);
 void pe_dfp_uvdm_send_entry(
@@ -853,54 +840,54 @@ void pe_ufp_vdm_send_nak_entry(
 	struct pd_port *pd_port);
 
 /******************* PD30 Common *******************/
-#if CONFIG_USB_PD_REV30
-#if CONFIG_USB_PD_REV30_BAT_CAP_REMOTE
+#ifdef CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30_BAT_CAP_REMOTE
 void pe_get_battery_cap_entry(
 	struct pd_port *pd_port);
 void pe_get_battery_cap_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_BAT_CAP_REMOTE */
-#if CONFIG_USB_PD_REV30_BAT_CAP_LOCAL
+#ifdef CONFIG_USB_PD_REV30_BAT_CAP_LOCAL
 void pe_give_battery_cap_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_BAT_CAP_LOCAL */
-#if CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE
+#ifdef CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE
 void pe_get_battery_status_entry(
 	struct pd_port *pd_port);
 void pe_get_battery_status_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_BAT_STATUS_REMOTE */
-#if CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL
+#ifdef CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL
 void pe_give_battery_status_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_BAT_STATUS_LOCAL */
-#if CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE
+#ifdef CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE
 void pe_get_manufacturer_info_entry(
 	struct pd_port *pd_port);
 void pe_get_manufacturer_info_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_MFRS_INFO_REMOTE */
-#if CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL
+#ifdef CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL
 void pe_give_manufacturer_info_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_MFRS_INFO_LOCAL */
-#if CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE
 void pe_get_country_codes_entry(
 	struct pd_port *pd_port);
 void pe_get_country_codes_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_CODE_REMOTE */
-#if CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL
 void pe_give_country_codes_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_CODE_LOCAL */
-#if CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE
 void pe_get_country_info_entry(
 	struct pd_port *pd_port);
 void pe_get_country_info_exit(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_INFO_REMOTE */
-#if CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL
+#ifdef CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL
 void pe_give_country_info_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_REV30_COUNTRY_INFO_LOCAL */
@@ -908,12 +895,12 @@ void pe_vdm_not_supported_entry(
 	struct pd_port *pd_port);
 #endif /* CONFIG_USB_PD_REV30 */
 /******************* Others *******************/
-#if CONFIG_USB_PD_CUSTOM_DBGACC
+#ifdef CONFIG_USB_PD_CUSTOM_DBGACC
 void pe_dbg_ready_entry(
 	struct pd_port *pd_port);
 #endif/* CONFIG_USB_PD_CUSTOM_DBGACC */
 
-#if CONFIG_USB_PD_RECV_HRESET_COUNTER
+#ifdef CONFIG_USB_PD_RECV_HRESET_COUNTER
 void pe_over_recv_hreset_limit_entry(
 	struct pd_port *pd_port);
 #endif/* CONFIG_USB_PD_RECV_HRESET_COUNTER */
@@ -921,7 +908,7 @@ void pe_reject_entry(
 	struct pd_port *pd_port);
 void pe_error_recovery_entry(
 	struct pd_port *pd_port);
-#if CONFIG_USB_PD_ERROR_RECOVERY_ONCE
+#ifdef CONFIG_USB_PD_ERROR_RECOVERY_ONCE
 void pe_error_recovery_once_entry(
 	struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_ERROR_RECOVERY_ONCE */
@@ -933,17 +920,6 @@ void pe_bist_carrier_mode_2_entry(
 	struct pd_port *pd_port);
 void pe_bist_carrier_mode_2_exit(
 	struct pd_port *pd_port);
-#if CONFIG_USB_PD_DISCARD_AND_UNEXPECT_MSG
-void pe_unexpected_tx_wait_entry(
-	struct pd_port *pd_port);
-void pe_send_soft_reset_tx_wait_entry(
-	struct pd_port *pd_port);
-void pe_recv_soft_reset_tx_wait_entry(
-	struct pd_port *pd_port);
-void pe_send_soft_reset_standby_entry(
-	struct pd_port *pd_port);
-#endif	/* CONFIG_USB_PD_DISCARD_AND_UNEXPECT_MSG */
-
 /* Wait tx finished */
 void pe_idle1_entry(
 	struct pd_port *pd_port);

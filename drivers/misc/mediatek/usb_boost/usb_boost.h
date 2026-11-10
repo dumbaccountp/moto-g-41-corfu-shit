@@ -1,8 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (C) 2020 MediaTek Inc.
  */
-
 #ifndef _MTK_USB_BOOST_H
 #define _MTK_USB_BOOST_H
 
@@ -28,14 +27,9 @@ struct act_arg_obj {
 void usb_boost_set_para_and_arg(int id, int *para, int para_range,
 	struct act_arg_obj *act_arg);
 
-void usb_boost_by_id(int id);
+/* void usb_boost_by_id(int id); */
 void usb_boost(void);
 int usb_boost_init(void);
-void usb_audio_boost(bool enable);
-int audio_core_hold(void);
-int audio_core_release(void);
-int audio_freq_hold(void);
-int audio_freq_release(void);
 
 void register_usb_boost_act(int type_id, int action_id,
 	int (*func)(struct act_arg_obj *arg));

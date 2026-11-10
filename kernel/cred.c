@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /* Task credentials management - see Documentation/security/credentials.rst
  *
  * Copyright (C) 2008 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public Licence
+ * as published by the Free Software Foundation; either version
+ * 2 of the Licence, or (at your option) any later version.
  */
 #include <linux/export.h>
 #include <linux/cred.h>
@@ -15,9 +19,6 @@
 #include <linux/security.h>
 #include <linux/binfmts.h>
 #include <linux/cn_proc.h>
-#include <linux/uidgid.h>
-
-#include <trace/hooks/creds.h>
 
 #if 0
 #define kdebug(FMT, ...)						\
@@ -175,12 +176,6 @@ void exit_creds(struct task_struct *tsk)
 	validate_creds(cred);
 	alter_cred_subscribers(cred, -1);
 	put_cred(cred);
-
-#ifdef CONFIG_KEYS_REQUEST_CACHE
-	key_put(tsk->cached_requested_key);
-	tsk->cached_requested_key = NULL;
-#endif
-	trace_android_vh_exit_creds(tsk, cred);
 }
 
 /**
@@ -202,12 +197,11 @@ const struct cred *get_task_cred(struct task_struct *task)
 	do {
 		cred = __task_cred((task));
 		BUG_ON(!cred);
-	} while (!get_cred_rcu(cred));
+	} while (!atomic_inc_not_zero(&((struct cred *)cred)->usage));
 
 	rcu_read_unlock();
 	return cred;
 }
-EXPORT_SYMBOL(get_task_cred);
 
 /*
  * Allocate blank credentials, such that the credentials can be filled in at a
@@ -318,9 +312,6 @@ struct cred *prepare_exec_creds(void)
 	new->process_keyring = NULL;
 #endif
 
-	new->suid = new->fsuid = new->euid;
-	new->sgid = new->fsgid = new->egid;
-
 	return new;
 }
 
@@ -337,10 +328,6 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
 {
 	struct cred *new;
 	int ret;
-
-#ifdef CONFIG_KEYS_REQUEST_CACHE
-	p->cached_requested_key = NULL;
-#endif
 
 	if (
 #ifdef CONFIG_KEYS
@@ -479,9 +466,9 @@ int commit_creds(struct cred *new)
 
 	/* alter the thread keyring */
 	if (!uid_eq(new->fsuid, old->fsuid))
-		key_fsuid_changed(new);
+		key_fsuid_changed(task);
 	if (!gid_eq(new->fsgid, old->fsgid))
-		key_fsgid_changed(new);
+		key_fsgid_changed(task);
 
 	/* do it
 	 * RLIMIT_NPROC limits on user->processes have already been checked
@@ -492,7 +479,6 @@ int commit_creds(struct cred *new)
 		atomic_inc(&new->user->processes);
 	rcu_assign_pointer(task->real_cred, new);
 	rcu_assign_pointer(task->cred, new);
-	trace_android_vh_commit_creds(task, new);
 	if (new->user != old->user)
 		atomic_dec(&old->user->processes);
 	alter_cred_subscribers(old, -2);
@@ -570,7 +556,6 @@ const struct cred *override_creds(const struct cred *new)
 	get_new_cred((struct cred *)new);
 	alter_cred_subscribers(new, 1);
 	rcu_assign_pointer(current->cred, new);
-	trace_android_vh_override_creds(current, new);
 	alter_cred_subscribers(old, -1);
 
 	kdebug("override_creds() = %p{%d,%d}", old,
@@ -599,65 +584,10 @@ void revert_creds(const struct cred *old)
 	validate_creds(override);
 	alter_cred_subscribers(old, 1);
 	rcu_assign_pointer(current->cred, old);
-	trace_android_vh_revert_creds(current, old);
 	alter_cred_subscribers(override, -1);
 	put_cred(override);
 }
 EXPORT_SYMBOL(revert_creds);
-
-/**
- * cred_fscmp - Compare two credentials with respect to filesystem access.
- * @a: The first credential
- * @b: The second credential
- *
- * cred_cmp() will return zero if both credentials have the same
- * fsuid, fsgid, and supplementary groups.  That is, if they will both
- * provide the same access to files based on mode/uid/gid.
- * If the credentials are different, then either -1 or 1 will
- * be returned depending on whether @a comes before or after @b
- * respectively in an arbitrary, but stable, ordering of credentials.
- *
- * Return: -1, 0, or 1 depending on comparison
- */
-int cred_fscmp(const struct cred *a, const struct cred *b)
-{
-	struct group_info *ga, *gb;
-	int g;
-
-	if (a == b)
-		return 0;
-	if (uid_lt(a->fsuid, b->fsuid))
-		return -1;
-	if (uid_gt(a->fsuid, b->fsuid))
-		return 1;
-
-	if (gid_lt(a->fsgid, b->fsgid))
-		return -1;
-	if (gid_gt(a->fsgid, b->fsgid))
-		return 1;
-
-	ga = a->group_info;
-	gb = b->group_info;
-	if (ga == gb)
-		return 0;
-	if (ga == NULL)
-		return -1;
-	if (gb == NULL)
-		return 1;
-	if (ga->ngroups < gb->ngroups)
-		return -1;
-	if (ga->ngroups > gb->ngroups)
-		return 1;
-
-	for (g = 0; g < ga->ngroups; g++) {
-		if (gid_lt(ga->gid[g], gb->gid[g]))
-			return -1;
-		if (gid_gt(ga->gid[g], gb->gid[g]))
-			return 1;
-	}
-	return 0;
-}
-EXPORT_SYMBOL(cred_fscmp);
 
 /*
  * initialise the credentials stuff
@@ -684,6 +614,8 @@ void __init cred_init(void)
  * The caller may change these controls afterwards if desired.
  *
  * Returns the new credentials or NULL if out of memory.
+ *
+ * Does not take, and does not return holding current->cred_replace_mutex.
  */
 struct cred *prepare_kernel_cred(struct task_struct *daemon)
 {
@@ -798,6 +730,19 @@ bool creds_are_invalid(const struct cred *cred)
 {
 	if (cred->magic != CRED_MAGIC)
 		return true;
+#ifdef CONFIG_SECURITY_SELINUX
+	/*
+	 * cred->security == NULL if security_cred_alloc_blank() or
+	 * security_prepare_creds() returned an error.
+	 */
+	if (selinux_is_enabled() && cred->security) {
+		if ((unsigned long) cred->security < PAGE_SIZE)
+			return true;
+		if ((*(u32 *)cred->security & 0xffffff00) ==
+		    (POISON_FREE << 24 | POISON_FREE << 16 | POISON_FREE << 8))
+			return true;
+	}
+#endif
 	return false;
 }
 EXPORT_SYMBOL(creds_are_invalid);

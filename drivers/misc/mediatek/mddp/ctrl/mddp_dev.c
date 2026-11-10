@@ -57,7 +57,7 @@ struct mddp_dev_rb_head_t {
 			_buf[_len-1] = '\0'; \
 	} while (0)
 
-#define MDDP_DSTATE_IS_VALID_ID(_id) (_id < MDDP_DSTATE_ID_NUM)
+#define MDDP_DSTATE_IS_VALID_ID(_id) (_id >= 0 && _id < MDDP_DSTATE_ID_NUM)
 #define MDDP_DSTATE_IS_ACTIVATED() (mddp_dstate_activated_s)
 
 //------------------------------------------------------------------------------
@@ -627,7 +627,7 @@ void mddp_enqueue_dstate(enum mddp_dstate_id_e id, ...)
 	struct mddp_dev_rb_t       *entry;
 	struct mddp_dstate_t       *dstat;
 	struct rtc_time             rt;
-	struct timespec64           ts;
+	struct timespec             ts;
 	char                        curr_time_str[MDDP_CURR_TIME_STR_SZ];
 	va_list                     ap;
 	int                         ip;
@@ -649,8 +649,8 @@ void mddp_enqueue_dstate(enum mddp_dstate_id_e id, ...)
 	}
 
 	// Generate current time string.
-	ktime_get_real_ts64(&ts);
-	rtc_time64_to_tm(ts.tv_sec, &rt);
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, &rt);
 	snprintf(curr_time_str, MDDP_CURR_TIME_STR_SZ,
 			"%d%02d%02d %02d:%02d:%02d.%09ld UTC",
 			rt.tm_year + 1900, rt.tm_mon + 1, rt.tm_mday,
@@ -810,7 +810,6 @@ static long mddp_dev_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	uint32_t                                buf_len = MDDP_MAX_GET_BUF_SZ;
 	struct mddp_dev_req_set_ct_value_t     *ct_req;
 
-	memset(&dev_req, 0, sizeof(dev_req));
 	/*
 	 * NG. copy_from_user fail!
 	 */

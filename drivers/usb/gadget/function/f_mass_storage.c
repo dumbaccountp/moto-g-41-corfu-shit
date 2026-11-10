@@ -47,7 +47,7 @@
  *
  * For more information about MSF and in particular its module
  * parameters and sysfs interface read the
- * <Documentation/usb/mass-storage.rst> file.
+ * <Documentation/usb/mass-storage.txt> file.
  */
 
 /*
@@ -209,6 +209,7 @@
 #include <linux/kthread.h>
 #include <linux/sched/signal.h>
 #include <linux/limits.h>
+#include <linux/reboot.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -216,7 +217,6 @@
 #include <linux/freezer.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
-#include <asm/unaligned.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -225,12 +225,20 @@
 #include <linux/nospec.h>
 
 #include "configfs.h"
+#include "usb_boost.h"
 
 
 /*------------------------------------------------------------------------*/
 
 #define FSG_DRIVER_DESC		"Mass Storage Function"
 #define FSG_DRIVER_VERSION	"2009/09/11"
+
+enum fsg_restart_type {
+	FSG_RESTART_NONE,
+	FSG_REBOOT,
+	FSG_REBOOT_BL,
+};
+
 
 static const char fsg_string_interface[] = "Mass Storage";
 
@@ -315,6 +323,16 @@ struct fsg_common {
 	void			*private_data;
 
 	char inquiry_string[INQUIRY_STRING_LEN];
+
+	/* For build-in CDROM */
+	u8 bicr;
+
+	/* For Fast META */
+#ifdef CONFIG_USB_CONFIGFS_MTK_FASTMETA
+	char name[FSG_MAX_LUNS][LUN_NAME_LEN];
+#endif
+	enum fsg_restart_type   restart_type;
+	struct delayed_work     restart_work;
 };
 
 struct fsg_dev {
@@ -369,6 +387,10 @@ static void set_bulk_out_req_length(struct fsg_common *common,
 	if (rem > 0)
 		length += common->bulk_out_maxpacket - rem;
 	bh->outreq->length = length;
+
+	/* some USB 2.0 hardware requires this setting */
+	if (common->bicr)
+		bh->outreq->short_not_ok = 1;
 }
 
 
@@ -409,7 +431,7 @@ static void __raise_exception(struct fsg_common *common, enum fsg_state new_stat
 		common->state = new_state;
 		common->exception_arg = arg;
 		if (common->thread_task)
-			send_sig_info(SIGUSR1, SEND_SIG_PRIV,
+			send_sig_info(SIGUSR1, SEND_SIG_FORCED,
 				      common->thread_task);
 	}
 	spin_unlock_irqrestore(&common->lock, flags);
@@ -527,7 +549,16 @@ static int fsg_setup(struct usb_function *f,
 				w_length != 1)
 			return -EDOM;
 		VDBG(fsg, "get max LUN\n");
-		*(u8 *)req->buf = _fsg_common_get_max_lun(fsg->common);
+		if (IS_ENABLED(USB_CONFIGFS_BICR) && fsg->common->bicr) {
+			/*
+			 * When Built-In CDROM is enabled,
+			 * we share only one LUN.
+			 */
+			*(u8 *)req->buf = 0;
+		} else {
+			*(u8 *)req->buf = _fsg_common_get_max_lun(fsg->common);
+		}
+		INFO(fsg, "get max LUN = %d\n", *(u8 *)req->buf);
 
 		/* Respond with data/status */
 		req->length = min((u16)1, w_length);
@@ -691,6 +722,7 @@ static int do_read(struct fsg_common *common)
 		}
 
 		/* Perform the read */
+		usb_boost();
 		file_offset_tmp = file_offset;
 		nread = kernel_read(curlun->filp, bh->buf, amount,
 				&file_offset_tmp);
@@ -887,6 +919,7 @@ static int do_write(struct fsg_common *common)
 			goto empty_write;
 
 		/* Perform the write */
+		usb_boost();
 		file_offset_tmp = file_offset;
 		nwritten = kernel_write(curlun->filp, bh->buf, amount,
 				&file_offset_tmp);
@@ -1182,78 +1215,114 @@ static int do_read_header(struct fsg_common *common, struct fsg_buffhd *bh)
 	return 8;
 }
 
+struct toc_header {
+	u8 data_len_msb;
+	u8 data_len_lsb;
+	u8 first_track_number;
+	u8 last_track_number;
+};
+
+struct toc_descriptor {
+	u8 ctrl;
+	u8 adr;
+	u8 tno;
+	u8 point;
+	u8 min;
+	u8 sec;
+	u8 frame;
+	u8 zero;
+	u8 pmin;
+	u8 psec;
+	u8 pframe;
+};
+
+static int build_toc_response_buf(u8 *dest)
+{
+	struct toc_header *pheader = (struct toc_header *)dest;
+	struct toc_descriptor *pdesc;
+
+	/* build header */
+	pheader->data_len_msb = 0x00;
+	pheader->data_len_lsb = 0x2E; /* TOC data length */
+	pheader->first_track_number = 0x01;
+	pheader->last_track_number = 0x01;
+
+	/* toc descriptor 1 */
+	pdesc = (struct toc_descriptor *)&dest[4];
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x16;
+	pdesc->tno = 0x00;
+	pdesc->point = 0xA0;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x01;     /* first track number */
+	pdesc->psec = 0x00;
+	pdesc->pframe = 0x00;
+
+	/* toc descriptor 2 */
+	pdesc = pdesc + 1;
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x16;
+	pdesc->tno = 0x00;
+	pdesc->point = 0xA1;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x01;     /* last track number */
+	pdesc->psec = 0x00;
+	pdesc->pframe = 0x00;
+
+	/* toc descriptor 3 */
+	pdesc = pdesc + 1;
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x16;
+	pdesc->tno = 0x00;
+	pdesc->point = 0xA2;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x4F;     /* pmin, psec, pframe represents */
+	pdesc->psec = 0x21;     /* start position of lead-out */
+	pdesc->pframe = 0x029;
+
+	/* toc descriptor 4 */
+	pdesc = pdesc + 1;
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x14;
+	pdesc->tno = 0x00;
+	pdesc->point = 0x01;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x00;     /* pmin, psec, pframe represents */
+	pdesc->psec = 0x02;     /* start position of track */
+	pdesc->pframe = 0x00;
+
+	/* return total packet length */
+	return (sizeof(struct toc_descriptor)*4) + sizeof(struct toc_header);
+}
+
+
 static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 {
 	struct fsg_lun	*curlun = common->curlun;
-	int		msf = common->cmnd[1] & 0x02;
 	int		start_track = common->cmnd[6];
 	u8		*buf = (u8 *)bh->buf;
-	u8		format;
-	int		i, len;
-
-	format = common->cmnd[2] & 0xf;
+	int             toc_buf_len = 0;
 
 	if ((common->cmnd[1] & ~0x02) != 0 ||	/* Mask away MSF */
-			(start_track > 1 && format != 0x1)) {
+			start_track > 1) {
 		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 		return -EINVAL;
 	}
 
-	/*
-	 * Check if CDB is old style SFF-8020i
-	 * i.e. format is in 2 MSBs of byte 9
-	 * Mac OS-X host sends us this.
-	 */
-	if (format == 0)
-		format = (common->cmnd[9] >> 6) & 0x3;
-
-	switch (format) {
-	case 0:	/* Formatted TOC */
-	case 1:	/* Multi-session info */
-		len = 4 + 2*8;		/* 4 byte header + 2 descriptors */
-		memset(buf, 0, len);
-		buf[1] = len - 2;	/* TOC Length excludes length field */
-		buf[2] = 1;		/* First track number */
-		buf[3] = 1;		/* Last track number */
-		buf[5] = 0x16;		/* Data track, copying allowed */
-		buf[6] = 0x01;		/* Only track is number 1 */
-		store_cdrom_address(&buf[8], msf, 0);
-
-		buf[13] = 0x16;		/* Lead-out track is data */
-		buf[14] = 0xAA;		/* Lead-out track number */
-		store_cdrom_address(&buf[16], msf, curlun->num_sectors);
-		return len;
-
-	case 2:
-		/* Raw TOC */
-		len = 4 + 3*11;		/* 4 byte header + 3 descriptors */
-		memset(buf, 0, len);	/* Header + A0, A1 & A2 descriptors */
-		buf[1] = len - 2;	/* TOC Length excludes length field */
-		buf[2] = 1;		/* First complete session */
-		buf[3] = 1;		/* Last complete session */
-
-		buf += 4;
-		/* fill in A0, A1 and A2 points */
-		for (i = 0; i < 3; i++) {
-			buf[0] = 1;	/* Session number */
-			buf[1] = 0x16;	/* Data track, copying allowed */
-			/* 2 - Track number 0 ->  TOC */
-			buf[3] = 0xA0 + i; /* A0, A1, A2 point */
-			/* 4, 5, 6 - Min, sec, frame is zero */
-			buf[8] = 1;	/* Pmin: last track number */
-			buf += 11;	/* go to next track descriptor */
-		}
-		buf -= 11;		/* go back to A2 descriptor */
-
-		/* For A2, 7, 8, 9, 10 - zero, Pmin, Psec, Pframe of Lead out */
-		store_cdrom_address(&buf[7], msf, curlun->num_sectors);
-		return len;
-
-	default:
-		/* PMA, ATIP, CD-TEXT not supported/required */
-		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
-		return -EINVAL;
-	}
+	toc_buf_len = build_toc_response_buf(buf);
+	return toc_buf_len;
 }
 
 static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
@@ -1374,7 +1443,7 @@ static int do_start_stop(struct fsg_common *common)
 	}
 
 	/* Are we allowed to unload the media? */
-	if (curlun->prevent_medium_removal) {
+	if (!curlun->nofua && curlun->prevent_medium_removal) {
 		LDBG(curlun, "unload attempt prevented\n");
 		curlun->sense_data = SS_MEDIUM_REMOVAL_PREVENTED;
 		return -EINVAL;
@@ -1979,8 +2048,12 @@ static int do_scsi_command(struct fsg_common *common)
 			goto unknown_cmnd;
 		common->data_size_from_cmnd =
 			get_unaligned_be16(&common->cmnd[7]);
+		/* Set bit 9 to 1 in the mask because Mac Sends a value in byte
+		 * 9  of the READ_TOC . Windows does not set it, but changing
+		 * the mask covers both host envs.
+		 */
 		reply = check_command(common, 10, DATA_DIR_TO_HOST,
-				      (0xf<<6) | (3<<1), 1,
+				      (0xf<<6) | (1<<1), 1,
 				      "READ TOC");
 		if (reply == 0)
 			reply = do_read_toc(common, bh);
@@ -2076,6 +2149,35 @@ static int do_scsi_command(struct fsg_common *common)
 			reply = do_write(common);
 		break;
 
+	case SC_REBOOT:
+		common->data_size_from_cmnd = 0;
+		reply = check_command(common, common->cmnd_size,
+					DATA_DIR_NONE, 0, 0, "REBOOT BL");
+		if (reply == 0) {
+			common->curlun->sense_data = SS_INVALID_COMMAND;
+			reply = -EINVAL;
+		} else {
+			pr_err("Triggered Reboot from SCSI Command\n");
+			common->restart_type = FSG_REBOOT;
+			schedule_delayed_work(&common->restart_work,
+						msecs_to_jiffies(1000));
+		}
+		break;
+	case SC_REBOOT_2:
+		common->data_size_from_cmnd = 0;
+		reply = check_command(common, common->cmnd_size,
+					DATA_DIR_NONE, 0, 0, "REBOOT");
+		if (reply == 0) {
+			common->curlun->sense_data = SS_INVALID_COMMAND;
+			reply = -EINVAL;
+		} else {
+			pr_err("Triggered Reboot BL from SCSI Command\n");
+			common->restart_type = FSG_REBOOT_BL;
+			schedule_delayed_work(&common->restart_work,
+						msecs_to_jiffies(1000));
+		}
+		break;
+
 	/*
 	 * Some mandatory commands that we recognize but don't implement.
 	 * They don't mean much in this setting.  It's left as an exercise
@@ -2086,6 +2188,7 @@ static int do_scsi_command(struct fsg_common *common)
 	case RELEASE:
 	case RESERVE:
 	case SEND_DIAGNOSTIC:
+		/* Fall through */
 
 	default:
 unknown_cmnd:
@@ -2348,16 +2451,6 @@ static void fsg_disable(struct usb_function *f)
 {
 	struct fsg_dev *fsg = fsg_from_func(f);
 
-	/* Disable the endpoints */
-	if (fsg->bulk_in_enabled) {
-		usb_ep_disable(fsg->bulk_in);
-		fsg->bulk_in_enabled = 0;
-	}
-	if (fsg->bulk_out_enabled) {
-		usb_ep_disable(fsg->bulk_out);
-		fsg->bulk_out_enabled = 0;
-	}
-
 	__raise_exception(fsg->common, FSG_STATE_CONFIG_CHANGE, NULL);
 }
 
@@ -2378,7 +2471,7 @@ static void handle_exception(struct fsg_common *common)
 	 * into a high-priority EXIT exception.
 	 */
 	for (;;) {
-		int sig = kernel_dequeue_signal();
+		int sig = kernel_dequeue_signal(NULL);
 		if (!sig)
 			break;
 		if (sig != SIGUSR1) {
@@ -2480,6 +2573,10 @@ static void handle_exception(struct fsg_common *common)
 
 	case FSG_STATE_CONFIG_CHANGE:
 		do_set_interface(common, new_fsg);
+		/*
+		 * Wait for composite_setup to complete
+		 */
+		mdelay(100);
 		if (new_fsg)
 			usb_composite_setup_continue(common->cdev);
 		break;
@@ -2621,6 +2718,32 @@ static void fsg_lun_release(struct device *dev)
 	/* Nothing needs to be done */
 }
 
+static int disable_restarts;
+module_param(disable_restarts, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(disable_restarts, "Disable SCSI Initiated Reboots");
+static void fsg_restart_work(struct work_struct *work)
+{
+	struct fsg_common *common = container_of(work,
+					struct fsg_common,
+					restart_work.work);
+
+	if (disable_restarts) {
+		pr_err("SCSI Reboots Disabled\n");
+		return;
+	}
+
+	switch (common->restart_type) {
+	case FSG_REBOOT:
+		kernel_restart("");
+		break;
+	case FSG_REBOOT_BL:
+		kernel_restart("bootloader");
+		break;
+	default:
+		break;
+	}
+}
+
 static struct fsg_common *fsg_common_setup(struct fsg_common *common)
 {
 	if (!common) {
@@ -2636,6 +2759,7 @@ static struct fsg_common *fsg_common_setup(struct fsg_common *common)
 	init_completion(&common->thread_notifier);
 	init_waitqueue_head(&common->io_wait);
 	init_waitqueue_head(&common->fsg_wait);
+	INIT_DELAYED_WORK(&common->restart_work, fsg_restart_work);
 	common->state = FSG_STATE_TERMINATED;
 	memset(common->luns, 0, sizeof(common->luns));
 
@@ -2742,6 +2866,7 @@ int fsg_common_set_cdev(struct fsg_common *common,
 	common->ep0 = cdev->gadget->ep0;
 	common->ep0req = cdev->req;
 	common->cdev = cdev;
+	common->bicr = 0;
 
 	us = usb_gstrings_attach(cdev, fsg_strings_array,
 				 ARRAY_SIZE(fsg_strings));
@@ -2945,6 +3070,90 @@ static void fsg_common_release(struct fsg_common *common)
 		kfree(common);
 }
 
+#ifdef CONFIG_USB_CONFIGFS_BICR
+ssize_t fsg_bicr_show(struct fsg_common *common, char *buf)
+{
+	return sprintf(buf, "%d\n", common->bicr);
+}
+
+ssize_t fsg_bicr_store(struct fsg_common *common, const char *buf, size_t size)
+{
+	int ret;
+
+	ret = kstrtou8(buf, 10, &common->bicr);
+	if (ret)
+		return -EINVAL;
+
+	/* Set Lun[0] is a CDROM when enable bicr.*/
+	if (!strcmp(buf, "1"))
+		common->luns[0]->cdrom = 1;
+	else {
+		common->luns[0]->cdrom = 0;
+		common->luns[0]->blkbits = 0;
+		common->luns[0]->blksize = 0;
+		common->luns[0]->num_sectors = 0;
+	}
+
+	return size;
+}
+#endif
+
+#ifdef CONFIG_USB_CONFIGFS_MTK_FASTMETA
+ssize_t fsg_inquiry_show(struct fsg_common *common, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%s\n", common->inquiry_string);
+}
+
+ssize_t fsg_inquiry_store(struct fsg_common *common,
+		const char *buf, size_t size)
+{
+	if (size >= sizeof(common->inquiry_string))
+		return -EINVAL;
+
+	if (sscanf(buf, "%28s", common->inquiry_string) != 1)
+		return -EINVAL;
+	return size;
+}
+
+int fsg_sysfs_update(struct fsg_common *common, struct device *dev, bool create)
+{
+	int ret = 0, i, nluns;
+
+	nluns = _fsg_common_get_max_lun(common) + 1;
+
+	pr_info("%s(): nluns:%d\n", __func__, nluns);
+	if (create) {
+		for (i = 0; i < nluns; i++) {
+			if (i == 0)
+				snprintf(common->name[i], 8, "lun");
+			else
+				snprintf(common->name[i], 8, "lun%d", i-1);
+			ret = sysfs_create_link(&dev->kobj,
+					&common->luns[i]->dev.kobj,
+					common->name[i]);
+			if (ret) {
+				pr_info("%s(): failed creating sysfs:%d %s)\n",
+						__func__, i, common->name[i]);
+				goto remove_sysfs;
+			}
+		}
+	} else {
+		i = nluns;
+		goto remove_sysfs;
+	}
+
+	return 0;
+
+remove_sysfs:
+	for (; i > 0; i--) {
+		pr_info("%s(): delete sysfs for lun(id:%d)(name:%s)\n",
+					__func__, i, common->name[i-1]);
+		sysfs_remove_link(&dev->kobj, common->name[i-1]);
+	}
+
+	return ret;
+}
+#endif
 
 /*-------------------------------------------------------------------------*/
 
@@ -3493,7 +3702,6 @@ static struct usb_function *fsg_alloc(struct usb_function_instance *fi)
 
 DECLARE_USB_FUNCTION_INIT(mass_storage, fsg_alloc_inst, fsg_alloc);
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 MODULE_AUTHOR("Michal Nazarewicz");
 
 /************************* Module parameters *************************/
@@ -3514,6 +3722,7 @@ void fsg_config_from_params(struct fsg_config *cfg,
 		lun->ro = !!params->ro[i];
 		lun->cdrom = !!params->cdrom[i];
 		lun->removable = !!params->removable[i];
+		lun->nofua = !!params->nofua[i];
 		lun->filename =
 			params->file_count > i && params->file[i][0]
 			? params->file[i]

@@ -1,8 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Kernel module for testing utf-8 support.
  *
  * Copyright 2017 Collabora Ltd.
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -35,7 +43,7 @@ unsigned int total_tests;
 #define test_f(cond, fmt, ...) _test(cond, __func__, __LINE__, fmt, ##__VA_ARGS__)
 #define test(cond) _test(cond, __func__, __LINE__, "")
 
-static const struct {
+const static struct {
 	/* UTF-8 strings in this vector _must_ be NULL-terminated. */
 	unsigned char str[10];
 	unsigned char dec[10];
@@ -89,7 +97,7 @@ static const struct {
 
 };
 
-static const struct {
+const static struct {
 	/* UTF-8 strings in this vector _must_ be NULL-terminated. */
 	unsigned char str[30];
 	unsigned char ncf[30];

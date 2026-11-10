@@ -13,6 +13,7 @@
 #include <linux/poll.h>         /* needed by poll */
 #include <linux/mutex.h>
 #include <linux/atomic.h>
+#include <mt-plat/sync_write.h>
 #include "sspm_define.h"
 #include "sspm_sysfs.h"
 #include "sspm_logger.h"
@@ -38,7 +39,7 @@ static ssize_t sspm_log_if_read(struct file *file, char __user *data,
 
 	ret = 0;
 
-	if (access_ok(data, len))
+	if (access_ok(VERIFY_WRITE, data, len))
 		ret = sspm_log_read(data, len);
 
 	return ret;

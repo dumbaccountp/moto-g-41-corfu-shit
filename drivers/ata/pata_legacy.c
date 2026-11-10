@@ -1,7 +1,20 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   pata-legacy.c - Legacy port PATA/SATA controller driver.
  *   Copyright 2005/2006 Red Hat, all rights reserved.
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2, or (at your option)
+ *  any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; see the file COPYING.  If not, write to
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  *   An ATA driver for the legacy ATA ports.
  *
@@ -42,6 +55,7 @@
  *
  *  For now use autospeed and pio_mask as above with the W83759A. This may
  *  change.
+ *
  */
 
 #include <linux/async.h>
@@ -278,10 +292,9 @@ static void pdc20230_set_piomode(struct ata_port *ap, struct ata_device *adev)
 	outb(inb(0x1F4) & 0x07, 0x1F4);
 
 	rt = inb(0x1F3);
-	rt &= ~(0x07 << (3 * !adev->devno));
+	rt &= 0x07 << (3 * adev->devno);
 	if (pio)
-		rt |= (1 + 3 * pio) << (3 * !adev->devno);
-	outb(rt, 0x1F3);
+		rt |= (1 + 3 * pio) << (3 * adev->devno);
 
 	udelay(100);
 	outb(inb(0x1F2) | 0x01, 0x1F2);
@@ -316,8 +329,7 @@ static unsigned int pdc_data_xfer_vlb(struct ata_queued_cmd *qc,
 			iowrite32_rep(ap->ioaddr.data_addr, buf, buflen >> 2);
 
 		if (unlikely(slop)) {
-			__le32 pad = 0;
-
+			__le32 pad;
 			if (rw == READ) {
 				pad = cpu_to_le32(ioread32(ap->ioaddr.data_addr));
 				memcpy(buf + buflen - slop, &pad, slop);
@@ -707,8 +719,7 @@ static unsigned int vlb32_data_xfer(struct ata_queued_cmd *qc,
 			ioread32_rep(ap->ioaddr.data_addr, buf, buflen >> 2);
 
 		if (unlikely(slop)) {
-			__le32 pad = 0;
-
+			__le32 pad;
 			if (rw == WRITE) {
 				memcpy(&pad, buf + buflen - slop, slop);
 				iowrite32(le32_to_cpu(pad), ap->ioaddr.data_addr);

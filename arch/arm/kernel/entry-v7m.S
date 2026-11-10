@@ -1,8 +1,11 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/arch/arm/kernel/entry-v7m.S
  *
  * Copyright (C) 2008 ARM Ltd.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
  * Low-level vector interface routines for the ARMv7-M architecture
  */
@@ -59,7 +62,7 @@ __irq_entry:
 
 	get_thread_info tsk
 	ldr	r2, [tsk, #TI_FLAGS]
-	movs	r2, r2, lsl #16
+	tst	r2, #_TIF_WORK_MASK
 	beq	2f			@ no work pending
 	mov	r0, #V7M_SCB_ICSR_PENDSVSET
 	str	r0, [r1, V7M_SCB_ICSR]	@ raise PendSV

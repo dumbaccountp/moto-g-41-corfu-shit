@@ -1,12 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/clocksource/arm_arch_timer.c
  *
  *  Copyright (C) 2011 ARM Ltd.
  *  All Rights Reserved
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
-#define pr_fmt(fmt) 	"arch_timer: " fmt
+#define pr_fmt(fmt)	"arm_arch_timer: " fmt
 
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -30,6 +33,9 @@
 
 #include <clocksource/arm_arch_timer.h>
 
+#undef pr_fmt
+#define pr_fmt(fmt) "arch_timer: " fmt
+
 #define CNTTIDR		0x08
 #define CNTTIDR_VIRT(n)	(BIT(1) << ((n) * 4))
 
@@ -46,6 +52,8 @@
 #define CNTFRQ		0x10
 #define CNTP_TVAL	0x28
 #define CNTP_CTL	0x2c
+#define CNTCVAL_LO	0x30
+#define CNTCVAL_HI	0x34
 #define CNTV_TVAL	0x38
 #define CNTV_CTL	0x3c
 
@@ -69,11 +77,7 @@ static enum arch_timer_ppi_nr arch_timer_uses_ppi = ARCH_TIMER_VIRT_PPI;
 static bool arch_timer_c3stop;
 static bool arch_timer_mem_use_virtual;
 static bool arch_counter_suspend_stop;
-#ifdef CONFIG_GENERIC_GETTIMEOFDAY
-static enum vdso_clock_mode vdso_default = VDSO_CLOCKMODE_ARCHTIMER;
-#else
-static enum vdso_clock_mode vdso_default = VDSO_CLOCKMODE_NONE;
-#endif /* CONFIG_GENERIC_GETTIMEOFDAY */
+static bool vdso_default = true;
 
 static cpumask_t evtstrm_available = CPU_MASK_NONE;
 static bool evtstrm_enable = IS_ENABLED(CONFIG_ARM_ARCH_TIMER_EVTSTREAM);
@@ -148,26 +152,6 @@ u32 arch_timer_reg_read(int access, enum arch_timer_reg reg,
 	}
 
 	return val;
-}
-
-static notrace u64 arch_counter_get_cntpct_stable(void)
-{
-	return __arch_counter_get_cntpct_stable();
-}
-
-static notrace u64 arch_counter_get_cntpct(void)
-{
-	return __arch_counter_get_cntpct();
-}
-
-static notrace u64 arch_counter_get_cntvct_stable(void)
-{
-	return __arch_counter_get_cntvct_stable();
-}
-
-static notrace u64 arch_counter_get_cntvct(void)
-{
-	return __arch_counter_get_cntvct();
 }
 
 /*
@@ -352,7 +336,7 @@ static u64 notrace arm64_858921_read_cntvct_el0(void)
 	do {								\
 		_val = read_sysreg(reg);				\
 		_retries--;						\
-	} while (((_val + 1) & GENMASK(8, 0)) <= 1 && _retries);	\
+	} while (((_val + 1) & GENMASK(9, 0)) <= 1 && _retries);	\
 									\
 	WARN_ON_ONCE(!_retries);					\
 	_val;								\
@@ -383,7 +367,8 @@ static u32 notrace sun50i_a64_read_cntv_tval_el0(void)
 DEFINE_PER_CPU(const struct arch_timer_erratum_workaround *, timer_unstable_counter_workaround);
 EXPORT_SYMBOL_GPL(timer_unstable_counter_workaround);
 
-static atomic_t timer_unstable_counter_workaround_in_use = ATOMIC_INIT(0);
+DEFINE_STATIC_KEY_FALSE(arch_timer_read_ool_enabled);
+EXPORT_SYMBOL_GPL(arch_timer_read_ool_enabled);
 
 static void erratum_set_next_event_tval_generic(const int access, unsigned long evt,
 						struct clock_event_device *clk)
@@ -396,10 +381,10 @@ static void erratum_set_next_event_tval_generic(const int access, unsigned long 
 	ctrl &= ~ARCH_TIMER_CTRL_IT_MASK;
 
 	if (access == ARCH_TIMER_PHYS_ACCESS) {
-		cval = evt + arch_counter_get_cntpct_stable();
+		cval = evt + arch_counter_get_cntpct();
 		write_sysreg(cval, cntp_cval_el0);
 	} else {
-		cval = evt + arch_counter_get_cntvct_stable();
+		cval = evt + arch_counter_get_cntvct();
 		write_sysreg(cval, cntv_cval_el0);
 	}
 
@@ -480,14 +465,6 @@ static const struct arch_timer_erratum_workaround ool_workarounds[] = {
 		.set_next_event_virt = erratum_set_next_event_tval_virt,
 	},
 #endif
-#ifdef CONFIG_ARM64_ERRATUM_1418040
-	{
-		.match_type = ate_match_local_cap_id,
-		.id = (void *)ARM64_WORKAROUND_1418040,
-		.desc = "ARM erratum 1418040",
-		.disable_compat_vdso = true,
-	},
-#endif
 };
 
 typedef bool (*ate_match_fn_t)(const struct arch_timer_erratum_workaround *,
@@ -562,8 +539,11 @@ void arch_timer_enable_workaround(const struct arch_timer_erratum_workaround *wa
 			per_cpu(timer_unstable_counter_workaround, i) = wa;
 	}
 
-	if (wa->read_cntvct_el0 || wa->read_cntpct_el0)
-		atomic_set(&timer_unstable_counter_workaround_in_use, 1);
+	/*
+	 * Use the locked version, as we're called from the CPU
+	 * hotplug framework. Otherwise, we end-up in deadlock-land.
+	 */
+	static_branch_enable_cpuslocked(&arch_timer_read_ool_enabled);
 
 	/*
 	 * Don't use the vdso fastpath if errata require using the
@@ -572,18 +552,15 @@ void arch_timer_enable_workaround(const struct arch_timer_erratum_workaround *wa
 	 * change both the default value and the vdso itself.
 	 */
 	if (wa->read_cntvct_el0) {
-		clocksource_counter.vdso_clock_mode = VDSO_CLOCKMODE_NONE;
-		vdso_default = VDSO_CLOCKMODE_NONE;
-	} else if (wa->disable_compat_vdso && vdso_default != VDSO_CLOCKMODE_NONE) {
-		vdso_default = VDSO_CLOCKMODE_ARCHTIMER_NOCOMPAT;
-		clocksource_counter.vdso_clock_mode = vdso_default;
+		clocksource_counter.archdata.vdso_direct = false;
+		vdso_default = false;
 	}
 }
 
 static void arch_timer_check_ool_workaround(enum arch_timer_erratum_match_type type,
 					    void *arg)
 {
-	const struct arch_timer_erratum_workaround *wa, *__wa;
+	const struct arch_timer_erratum_workaround *wa;
 	ate_match_fn_t match_fn = NULL;
 	bool local = false;
 
@@ -607,32 +584,53 @@ static void arch_timer_check_ool_workaround(enum arch_timer_erratum_match_type t
 	if (!wa)
 		return;
 
-	__wa = __this_cpu_read(timer_unstable_counter_workaround);
-	if (__wa && wa != __wa)
-		pr_warn("Can't enable workaround for %s (clashes with %s\n)",
-			wa->desc, __wa->desc);
+	if (needs_unstable_timer_counter_workaround()) {
+		const struct arch_timer_erratum_workaround *__wa;
+		__wa = __this_cpu_read(timer_unstable_counter_workaround);
+		if (__wa && wa != __wa)
+			pr_warn("Can't enable workaround for %s (clashes with %s\n)",
+				wa->desc, __wa->desc);
 
-	if (__wa)
-		return;
+		if (__wa)
+			return;
+	}
 
 	arch_timer_enable_workaround(wa, local);
 	pr_info("Enabling %s workaround for %s\n",
 		local ? "local" : "global", wa->desc);
 }
 
+#define erratum_handler(fn, r, ...)					\
+({									\
+	bool __val;							\
+	if (needs_unstable_timer_counter_workaround()) {		\
+		const struct arch_timer_erratum_workaround *__wa;	\
+		__wa = __this_cpu_read(timer_unstable_counter_workaround); \
+		if (__wa && __wa->fn) {					\
+			r = __wa->fn(__VA_ARGS__);			\
+			__val = true;					\
+		} else {						\
+			__val = false;					\
+		}							\
+	} else {							\
+		__val = false;						\
+	}								\
+	__val;								\
+})
+
 static bool arch_timer_this_cpu_has_cntvct_wa(void)
 {
-	return has_erratum_handler(read_cntvct_el0);
-}
+	const struct arch_timer_erratum_workaround *wa;
 
-static bool arch_timer_counter_has_wa(void)
-{
-	return atomic_read(&timer_unstable_counter_workaround_in_use);
+	wa = __this_cpu_read(timer_unstable_counter_workaround);
+	return wa && wa->read_cntvct_el0;
 }
 #else
 #define arch_timer_check_ool_workaround(t,a)		do { } while(0)
+#define erratum_set_next_event_tval_virt(...)		({BUG(); 0;})
+#define erratum_set_next_event_tval_phys(...)		({BUG(); 0;})
+#define erratum_handler(fn, r, ...)			({false;})
 #define arch_timer_this_cpu_has_cntvct_wa()		({false;})
-#define arch_timer_counter_has_wa()			({false;})
 #endif /* CONFIG_ARM_ARCH_TIMER_OOL_WORKAROUND */
 
 static __always_inline irqreturn_t timer_handler(const int access,
@@ -725,6 +723,11 @@ static __always_inline void set_next_event(const int access, unsigned long evt,
 static int arch_timer_set_next_event_virt(unsigned long evt,
 					  struct clock_event_device *clk)
 {
+	int ret;
+
+	if (erratum_handler(set_next_event_virt, ret, evt, clk))
+		return ret;
+
 	set_next_event(ARCH_TIMER_VIRT_ACCESS, evt, clk);
 	return 0;
 }
@@ -732,6 +735,11 @@ static int arch_timer_set_next_event_virt(unsigned long evt,
 static int arch_timer_set_next_event_phys(unsigned long evt,
 					  struct clock_event_device *clk)
 {
+	int ret;
+
+	if (erratum_handler(set_next_event_phys, ret, evt, clk))
+		return ret;
+
 	set_next_event(ARCH_TIMER_PHYS_ACCESS, evt, clk);
 	return 0;
 }
@@ -756,10 +764,6 @@ static void __arch_timer_setup(unsigned type,
 	clk->features = CLOCK_EVT_FEAT_ONESHOT;
 
 	if (type == ARCH_TIMER_TYPE_CP15) {
-		typeof(clk->set_next_event) sne;
-
-		arch_timer_check_ool_workaround(ate_match_local_cap_id, NULL);
-
 		if (arch_timer_c3stop)
 			clk->features |= CLOCK_EVT_FEAT_C3STOP;
 		clk->name = "arch_sys_timer";
@@ -770,20 +774,20 @@ static void __arch_timer_setup(unsigned type,
 		case ARCH_TIMER_VIRT_PPI:
 			clk->set_state_shutdown = arch_timer_shutdown_virt;
 			clk->set_state_oneshot_stopped = arch_timer_shutdown_virt;
-			sne = erratum_handler(set_next_event_virt);
+			clk->set_next_event = arch_timer_set_next_event_virt;
 			break;
 		case ARCH_TIMER_PHYS_SECURE_PPI:
 		case ARCH_TIMER_PHYS_NONSECURE_PPI:
 		case ARCH_TIMER_HYP_PPI:
 			clk->set_state_shutdown = arch_timer_shutdown_phys;
 			clk->set_state_oneshot_stopped = arch_timer_shutdown_phys;
-			sne = erratum_handler(set_next_event_phys);
+			clk->set_next_event = arch_timer_set_next_event_phys;
 			break;
 		default:
 			BUG();
 		}
 
-		clk->set_next_event = sne;
+		arch_timer_check_ool_workaround(ate_match_local_cap_id, NULL);
 	} else {
 		clk->features |= CLOCK_EVT_FEAT_DYNIRQ;
 		clk->name = "arch_mem_timer";
@@ -816,7 +820,10 @@ static void arch_timer_evtstrm_enable(int divider)
 	cntkctl |= (divider << ARCH_TIMER_EVT_TRIGGER_SHIFT)
 			| ARCH_TIMER_VIRT_EVT_EN;
 	arch_timer_set_cntkctl(cntkctl);
-	arch_timer_set_evtstrm_feature();
+	elf_hwcap |= HWCAP_EVTSTRM;
+#ifdef CONFIG_COMPAT
+	compat_elf_hwcap |= COMPAT_HWCAP_EVTSTRM;
+#endif
 	cpumask_set_cpu(smp_processor_id(), &evtstrm_available);
 }
 
@@ -909,17 +916,6 @@ static int arch_timer_starting_cpu(unsigned int cpu)
 	return 0;
 }
 
-static int validate_timer_rate(void)
-{
-	if (!arch_timer_rate)
-		return -EINVAL;
-
-	/* Arch timer frequency < 1MHz can cause trouble */
-	WARN_ON(arch_timer_rate < 1000000);
-
-	return 0;
-}
-
 /*
  * For historical reasons, when probing with DT we use whichever (non-zero)
  * rate was probed first, and don't verify that others match. If the first node
@@ -935,7 +931,7 @@ static void arch_timer_of_configure_rate(u32 rate, struct device_node *np)
 		arch_timer_rate = rate;
 
 	/* Check the timer frequency. */
-	if (validate_timer_rate())
+	if (arch_timer_rate == 0)
 		pr_warn("frequency not available\n");
 }
 
@@ -961,6 +957,7 @@ u32 arch_timer_get_rate(void)
 {
 	return arch_timer_rate;
 }
+EXPORT_SYMBOL_GPL(arch_timer_get_rate);
 
 bool arch_timer_evtstrm_available(void)
 {
@@ -971,6 +968,24 @@ bool arch_timer_evtstrm_available(void)
 	 */
 	return cpumask_test_cpu(raw_smp_processor_id(), &evtstrm_available);
 }
+
+void arch_timer_mem_get_cval(u32 *lo, u32 *hi)
+{
+	u32 ctrl;
+
+	*lo = *hi = ~0U;
+
+	if (!arch_counter_base)
+		return;
+
+	ctrl = readl_relaxed(arch_counter_base + CNTV_CTL);
+
+	if (ctrl & ARCH_TIMER_CTRL_ENABLE) {
+		*lo = readl_relaxed(arch_counter_base + CNTCVAL_LO);
+		*hi = readl_relaxed(arch_counter_base + CNTCVAL_HI);
+	}
+}
+EXPORT_SYMBOL_GPL(arch_timer_mem_get_cval);
 
 static u64 arch_counter_get_cntvct_mem(void)
 {
@@ -998,23 +1013,13 @@ static void __init arch_counter_register(unsigned type)
 
 	/* Register the CP15 based counter if we have one */
 	if (type & ARCH_TIMER_TYPE_CP15) {
-		u64 (*rd)(void);
-
 		if ((IS_ENABLED(CONFIG_ARM64) && !is_hyp_mode_available()) ||
-		    arch_timer_uses_ppi == ARCH_TIMER_VIRT_PPI) {
-			if (arch_timer_counter_has_wa())
-				rd = arch_counter_get_cntvct_stable;
-			else
-				rd = arch_counter_get_cntvct;
-		} else {
-			if (arch_timer_counter_has_wa())
-				rd = arch_counter_get_cntpct_stable;
-			else
-				rd = arch_counter_get_cntpct;
-		}
+		    arch_timer_uses_ppi == ARCH_TIMER_VIRT_PPI)
+			arch_timer_read_counter = arch_counter_get_cntvct;
+		else
+			arch_timer_read_counter = arch_counter_get_cntpct;
 
-		arch_timer_read_counter = rd;
-		clocksource_counter.vdso_clock_mode = vdso_default;
+		clocksource_counter.archdata.vdso_direct = vdso_default;
 	} else {
 		arch_timer_read_counter = arch_counter_get_cntvct_mem;
 	}
@@ -1065,7 +1070,7 @@ static int arch_timer_cpu_pm_notify(struct notifier_block *self,
 	} else if (action == CPU_PM_ENTER_FAILED || action == CPU_PM_EXIT) {
 		arch_timer_set_cntkctl(__this_cpu_read(saved_cntkctl));
 
-		if (arch_timer_have_evtstrm_feature())
+		if (elf_hwcap & HWCAP_EVTSTRM)
 			cpumask_set_cpu(smp_processor_id(), &evtstrm_available);
 	}
 	return NOTIFY_OK;
@@ -1271,13 +1276,6 @@ static enum arch_timer_ppi_nr __init arch_timer_select_ppi(void)
 	return ARCH_TIMER_PHYS_SECURE_PPI;
 }
 
-static void __init arch_timer_populate_kvm_info(void)
-{
-	arch_timer_kvm_info.virtual_irq = arch_timer_ppi[ARCH_TIMER_VIRT_PPI];
-	if (is_kernel_in_hyp_mode())
-		arch_timer_kvm_info.physical_irq = arch_timer_ppi[ARCH_TIMER_PHYS_NONSECURE_PPI];
-}
-
 static int __init arch_timer_of_init(struct device_node *np)
 {
 	int i, ret;
@@ -1292,7 +1290,7 @@ static int __init arch_timer_of_init(struct device_node *np)
 	for (i = ARCH_TIMER_PHYS_SECURE_PPI; i < ARCH_TIMER_MAX_TIMER_PPI; i++)
 		arch_timer_ppi[i] = irq_of_parse_and_map(np, i);
 
-	arch_timer_populate_kvm_info();
+	arch_timer_kvm_info.virtual_irq = arch_timer_ppi[ARCH_TIMER_VIRT_PPI];
 
 	rate = arch_timer_get_cntfrq();
 	arch_timer_of_configure_rate(rate, np);
@@ -1608,8 +1606,10 @@ static int __init arch_timer_acpi_init(struct acpi_table_header *table)
 	arch_timers_present |= ARCH_TIMER_TYPE_CP15;
 
 	ret = acpi_gtdt_init(table, &platform_timer_count);
-	if (ret)
+	if (ret) {
+		pr_err("Failed to init GTDT table.\n");
 		return ret;
+	}
 
 	arch_timer_ppi[ARCH_TIMER_PHYS_NONSECURE_PPI] =
 		acpi_gtdt_map_ppi(ARCH_TIMER_PHYS_NONSECURE_PPI);
@@ -1620,17 +1620,16 @@ static int __init arch_timer_acpi_init(struct acpi_table_header *table)
 	arch_timer_ppi[ARCH_TIMER_HYP_PPI] =
 		acpi_gtdt_map_ppi(ARCH_TIMER_HYP_PPI);
 
-	arch_timer_populate_kvm_info();
+	arch_timer_kvm_info.virtual_irq = arch_timer_ppi[ARCH_TIMER_VIRT_PPI];
 
 	/*
 	 * When probing via ACPI, we have no mechanism to override the sysreg
 	 * CNTFRQ value. This *must* be correct.
 	 */
 	arch_timer_rate = arch_timer_get_cntfrq();
-	ret = validate_timer_rate();
-	if (ret) {
+	if (!arch_timer_rate) {
 		pr_err(FW_BUG "frequency not available.\n");
-		return ret;
+		return -EINVAL;
 	}
 
 	arch_timer_uses_ppi = arch_timer_select_ppi();

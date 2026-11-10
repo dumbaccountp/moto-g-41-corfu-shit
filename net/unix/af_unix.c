@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NET4:	Implementation of BSD Unix domain sockets.
  *
  * Authors:	Alan Cox, <alan@lxorguk.ukuu.org.uk>
+ *
+ *		This program is free software; you can redistribute it and/or
+ *		modify it under the terms of the GNU General Public License
+ *		as published by the Free Software Foundation; either version
+ *		2 of the License, or (at your option) any later version.
  *
  * Fixes:
  *		Linus Torvalds	:	Assorted bug cures.
@@ -44,6 +48,7 @@
  *	     Arnaldo C. Melo	:	Remove MOD_{INC,DEC}_USE_COUNT,
  *	     				the core infrastructure is doing that
  *	     				for all net proto families now (2.5.69+)
+ *
  *
  * Known differences from reference BSD that was tested:
  *
@@ -290,9 +295,11 @@ static struct sock *__unix_find_socket_byname(struct net *net,
 
 		if (u->addr->len == len &&
 		    !memcmp(u->addr->name, sunname, len))
-			return s;
+			goto found;
 	}
-	return NULL;
+	s = NULL;
+found:
+	return s;
 }
 
 static inline struct sock *unix_find_socket_byname(struct net *net,
@@ -438,7 +445,7 @@ static int unix_dgram_peer_wake_me(struct sock *sk, struct sock *other)
 	 * -ECONNREFUSED. Otherwise, if we haven't queued any skbs
 	 * to other and its full, we will hang waiting for POLLOUT.
 	 */
-	if (unix_recvq_full_lockless(other) && !sock_flag(other, SOCK_DEAD))
+	if (unix_recvq_full(other) && !sock_flag(other, SOCK_DEAD))
 		return 1;
 
 	if (connected)
@@ -535,13 +542,11 @@ static void unix_release_sock(struct sock *sk, int embrion)
 	u->path.mnt = NULL;
 	state = sk->sk_state;
 	sk->sk_state = TCP_CLOSE;
-
-	skpair = unix_peer(sk);
-	unix_peer(sk) = NULL;
-
 	unix_state_unlock(sk);
 
 	wake_up_interruptible_all(&u->peer_wait);
+
+	skpair = unix_peer(sk);
 
 	if (skpair != NULL) {
 		if (sk->sk_type == SOCK_STREAM || sk->sk_type == SOCK_SEQPACKET) {
@@ -557,6 +562,7 @@ static void unix_release_sock(struct sock *sk, int embrion)
 
 		unix_dgram_peer_wake_disconnect(sk, skpair);
 		sock_put(skpair); /* It may now die */
+		unix_peer(sk) = NULL;
 	}
 
 	/* Try to flush out this socket. Throw out buffers at least */
@@ -593,42 +599,20 @@ static void unix_release_sock(struct sock *sk, int embrion)
 
 static void init_peercred(struct sock *sk)
 {
-	const struct cred *old_cred;
-	struct pid *old_pid;
-
-	spin_lock(&sk->sk_peer_lock);
-	old_pid = sk->sk_peer_pid;
-	old_cred = sk->sk_peer_cred;
+	put_pid(sk->sk_peer_pid);
+	if (sk->sk_peer_cred)
+		put_cred(sk->sk_peer_cred);
 	sk->sk_peer_pid  = get_pid(task_tgid(current));
 	sk->sk_peer_cred = get_current_cred();
-	spin_unlock(&sk->sk_peer_lock);
-
-	put_pid(old_pid);
-	put_cred(old_cred);
 }
 
 static void copy_peercred(struct sock *sk, struct sock *peersk)
 {
-	const struct cred *old_cred;
-	struct pid *old_pid;
-
-	if (sk < peersk) {
-		spin_lock(&sk->sk_peer_lock);
-		spin_lock_nested(&peersk->sk_peer_lock, SINGLE_DEPTH_NESTING);
-	} else {
-		spin_lock(&peersk->sk_peer_lock);
-		spin_lock_nested(&sk->sk_peer_lock, SINGLE_DEPTH_NESTING);
-	}
-	old_pid = sk->sk_peer_pid;
-	old_cred = sk->sk_peer_cred;
+	put_pid(sk->sk_peer_pid);
+	if (sk->sk_peer_cred)
+		put_cred(sk->sk_peer_cred);
 	sk->sk_peer_pid  = get_pid(peersk->sk_peer_pid);
 	sk->sk_peer_cred = get_cred(peersk->sk_peer_cred);
-
-	spin_unlock(&sk->sk_peer_lock);
-	spin_unlock(&peersk->sk_peer_lock);
-
-	put_pid(old_pid);
-	put_cred(old_cred);
 }
 
 static int unix_listen(struct socket *sock, int backlog)
@@ -636,6 +620,7 @@ static int unix_listen(struct socket *sock, int backlog)
 	int err;
 	struct sock *sk = sock->sk;
 	struct unix_sock *u = unix_sk(sk);
+	struct pid *old_pid = NULL;
 
 	err = -EOPNOTSUPP;
 	if (sock->type != SOCK_STREAM && sock->type != SOCK_SEQPACKET)
@@ -656,6 +641,7 @@ static int unix_listen(struct socket *sock, int backlog)
 
 out_unlock:
 	unix_state_unlock(sk);
+	put_pid(old_pid);
 out:
 	return err;
 }
@@ -703,21 +689,6 @@ static int unix_set_peek_off(struct sock *sk, int val)
 	return 0;
 }
 
-#ifdef CONFIG_PROC_FS
-static void unix_show_fdinfo(struct seq_file *m, struct socket *sock)
-{
-	struct sock *sk = sock->sk;
-	struct unix_sock *u;
-
-	if (sk) {
-		u = unix_sk(sock->sk);
-		seq_printf(m, "scm_fds: %u\n",
-			   atomic_read(&u->scm_stat.nr_fds));
-	}
-}
-#else
-#define unix_show_fdinfo NULL
-#endif
 
 static const struct proto_ops unix_stream_ops = {
 	.family =	PF_UNIX,
@@ -735,13 +706,14 @@ static const struct proto_ops unix_stream_ops = {
 #endif
 	.listen =	unix_listen,
 	.shutdown =	unix_shutdown,
+	.setsockopt =	sock_no_setsockopt,
+	.getsockopt =	sock_no_getsockopt,
 	.sendmsg =	unix_stream_sendmsg,
 	.recvmsg =	unix_stream_recvmsg,
 	.mmap =		sock_no_mmap,
 	.sendpage =	unix_stream_sendpage,
 	.splice_read =	unix_stream_splice_read,
 	.set_peek_off =	unix_set_peek_off,
-	.show_fdinfo =	unix_show_fdinfo,
 };
 
 static const struct proto_ops unix_dgram_ops = {
@@ -760,12 +732,13 @@ static const struct proto_ops unix_dgram_ops = {
 #endif
 	.listen =	sock_no_listen,
 	.shutdown =	unix_shutdown,
+	.setsockopt =	sock_no_setsockopt,
+	.getsockopt =	sock_no_getsockopt,
 	.sendmsg =	unix_dgram_sendmsg,
 	.recvmsg =	unix_dgram_recvmsg,
 	.mmap =		sock_no_mmap,
 	.sendpage =	sock_no_sendpage,
 	.set_peek_off =	unix_set_peek_off,
-	.show_fdinfo =	unix_show_fdinfo,
 };
 
 static const struct proto_ops unix_seqpacket_ops = {
@@ -784,12 +757,13 @@ static const struct proto_ops unix_seqpacket_ops = {
 #endif
 	.listen =	unix_listen,
 	.shutdown =	unix_shutdown,
+	.setsockopt =	sock_no_setsockopt,
+	.getsockopt =	sock_no_getsockopt,
 	.sendmsg =	unix_seqpacket_sendmsg,
 	.recvmsg =	unix_seqpacket_recvmsg,
 	.mmap =		sock_no_mmap,
 	.sendpage =	sock_no_sendpage,
 	.set_peek_off =	unix_set_peek_off,
-	.show_fdinfo =	unix_show_fdinfo,
 };
 
 static struct proto unix_proto = {
@@ -827,7 +801,6 @@ static struct sock *unix_create1(struct net *net, struct socket *sock, int kern)
 	mutex_init(&u->bindlock); /* single task binding lock */
 	init_waitqueue_head(&u->peer_wait);
 	init_waitqueue_func_entry(&u->peer_wake, unix_dgram_peer_wake_relay);
-	memset(&u->scm_stat, 0, sizeof(struct scm_stat));
 	unix_insert_socket(unix_sockets_unbound(sk), sk);
 out:
 	if (sk == NULL)
@@ -858,7 +831,7 @@ static int unix_create(struct net *net, struct socket *sock, int protocol,
 		 */
 	case SOCK_RAW:
 		sock->type = SOCK_DGRAM;
-		fallthrough;
+		/* fall through */
 	case SOCK_DGRAM:
 		sock->ops = &unix_dgram_ops;
 		break;
@@ -899,6 +872,7 @@ static int unix_autobind(struct socket *sock)
 	if (err)
 		return err;
 
+	err = 0;
 	if (u->addr)
 		goto out;
 
@@ -1226,7 +1200,6 @@ out:
 }
 
 static long unix_wait_for_peer(struct sock *other, long timeo)
-	__releases(&unix_sk(other)->lock)
 {
 	struct unix_sock *u = unix_sk(other);
 	int sched;
@@ -1547,42 +1520,34 @@ static void unix_peek_fds(struct scm_cookie *scm, struct sk_buff *skb)
 {
 	scm->fp = scm_fp_dup(UNIXCB(skb).fp);
 
-	/*
-	 * Garbage collection of unix sockets starts by selecting a set of
+	/* Garbage collection of unix sockets starts by selecting a set of
 	 * candidate sockets which have reference only from being in flight
 	 * (total_refs == inflight_refs).  This condition is checked once during
 	 * the candidate collection phase, and candidates are marked as such, so
 	 * that non-candidates can later be ignored.  While inflight_refs is
 	 * protected by unix_gc_lock, total_refs (file count) is not, hence this
 	 * is an instantaneous decision.
-	 *
 	 * Once a candidate, however, the socket must not be reinstalled into a
 	 * file descriptor while the garbage collection is in progress.
-	 *
 	 * If the above conditions are met, then the directed graph of
 	 * candidates (*) does not change while unix_gc_lock is held.
-	 *
 	 * Any operations that changes the file count through file descriptors
 	 * (dup, close, sendmsg) does not change the graph since candidates are
 	 * not installed in fds.
-	 *
 	 * Dequeing a candidate via recvmsg would install it into an fd, but
 	 * that takes unix_gc_lock to decrement the inflight count, so it's
 	 * serialized with garbage collection.
-	 *
 	 * MSG_PEEK is special in that it does not change the inflight count,
 	 * yet does install the socket into an fd.  The following lock/unlock
 	 * pair is to ensure serialization with garbage collection.  It must be
 	 * done between incrementing the file count and installing the file into
 	 * an fd.
-	 *
 	 * If garbage collection starts after the barrier provided by the
 	 * lock/unlock, then it will see the elevated refcount and not mark this
 	 * as a candidate.  If a garbage collection is already in progress
 	 * before the file count was incremented, then the lock/unlock pair will
 	 * ensure that garbage collection is finished before progressing to
 	 * installing the fd.
-	 *
 	 * (*) A -> B where B is on the queue of A or B is on the queue of C
 	 * which is on the queue of listening socket A.
 	 */
@@ -1657,24 +1622,6 @@ static bool unix_skb_scm_eq(struct sk_buff *skb,
 	       uid_eq(u->uid, scm->creds.uid) &&
 	       gid_eq(u->gid, scm->creds.gid) &&
 	       unix_secdata_eq(scm, skb);
-}
-
-static void scm_stat_add(struct sock *sk, struct sk_buff *skb)
-{
-	struct scm_fp_list *fp = UNIXCB(skb).fp;
-	struct unix_sock *u = unix_sk(sk);
-
-	if (unlikely(fp && fp->count))
-		atomic_add(fp->count, &u->scm_stat.nr_fds);
-}
-
-static void scm_stat_del(struct sock *sk, struct sk_buff *skb)
-{
-	struct scm_fp_list *fp = UNIXCB(skb).fp;
-	struct unix_sock *u = unix_sk(sk);
-
-	if (unlikely(fp && fp->count))
-		atomic_sub(fp->count, &u->scm_stat.nr_fds);
 }
 
 /*
@@ -1863,7 +1810,6 @@ restart_locked:
 	if (sock_flag(other, SOCK_RCVTSTAMP))
 		__net_timestamp(skb);
 	maybe_add_creds(skb, sock, other);
-	scm_stat_add(other, skb);
 	skb_queue_tail(&other->sk_receive_queue, skb);
 	unix_state_unlock(other);
 	other->sk_data_ready(other);
@@ -1966,7 +1912,6 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 			goto pipe_err_free;
 
 		maybe_add_creds(skb, sock, other);
-		scm_stat_add(other, skb);
 		skb_queue_tail(&other->sk_receive_queue, skb);
 		unix_state_unlock(other);
 		other->sk_data_ready(other);
@@ -2153,8 +2098,8 @@ static int unix_dgram_recvmsg(struct socket *sock, struct msghdr *msg,
 	struct unix_sock *u = unix_sk(sk);
 	struct sk_buff *skb, *last;
 	long timeo;
-	int skip;
 	int err;
+	int peeked, skip;
 
 	err = -EOPNOTSUPP;
 	if (flags&MSG_OOB)
@@ -2166,21 +2111,17 @@ static int unix_dgram_recvmsg(struct socket *sock, struct msghdr *msg,
 		mutex_lock(&u->iolock);
 
 		skip = sk_peek_offset(sk, flags);
-		skb = __skb_try_recv_datagram(sk, &sk->sk_receive_queue, flags,
-					      &skip, &err, &last);
-		if (skb) {
-			if (!(flags & MSG_PEEK))
-				scm_stat_del(sk, skb);
+		skb = __skb_try_recv_datagram(sk, flags, NULL, &peeked, &skip,
+					      &err, &last);
+		if (skb)
 			break;
-		}
 
 		mutex_unlock(&u->iolock);
 
 		if (err != -EAGAIN)
 			break;
 	} while (timeo &&
-		 !__skb_wait_for_more_packets(sk, &sk->sk_receive_queue,
-					      &err, &timeo, last));
+		 !__skb_wait_for_more_packets(sk, &err, &timeo, last));
 
 	if (!skb) { /* implies iolock unlocked */
 		unix_state_lock(sk);
@@ -2465,10 +2406,8 @@ unlock:
 
 			sk_peek_offset_bwd(sk, chunk);
 
-			if (UNIXCB(skb).fp) {
-				scm_stat_del(sk, skb);
+			if (UNIXCB(skb).fp)
 				unix_detach_fds(&scm, skb);
-			}
 
 			if (unix_skb_len(skb))
 				break;
@@ -2791,7 +2730,7 @@ static __poll_t unix_dgram_poll(struct file *file, struct socket *sock,
 
 		other = unix_peer(sk);
 		if (other && unix_peer(other) != sk &&
-		    unix_recvq_full_lockless(other) &&
+		    unix_recvq_full(other) &&
 		    unix_dgram_peer_wake_me(sk, other))
 			writable = 0;
 
@@ -2979,7 +2918,7 @@ static int __init af_unix_init(void)
 {
 	int rc = -1;
 
-	BUILD_BUG_ON(sizeof(struct unix_skb_parms) > sizeof_field(struct sk_buff, cb));
+	BUILD_BUG_ON(sizeof(struct unix_skb_parms) > FIELD_SIZEOF(struct sk_buff, cb));
 
 	rc = proto_register(&unix_proto, 1);
 	if (rc != 0) {
@@ -3008,5 +2947,4 @@ fs_initcall(af_unix_init);
 module_exit(af_unix_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 MODULE_ALIAS_NETPROTO(PF_UNIX);

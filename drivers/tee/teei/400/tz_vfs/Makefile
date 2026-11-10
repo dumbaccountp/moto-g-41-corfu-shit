@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2019, MICROTRUST Incorporated
+# Copyright (c) 2015-2020, MICROTRUST Incorporated
 # All Rights Reserved.
 #
 # This program is free software; you can redistribute it and/or
@@ -10,5 +10,5 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
-obj-y += vfsFun.o fp_vendor.o
+obj-$(CONFIG_MICROTRUST_VFS_DRIVER) += vfsFun.o fp_vendor.o
 ccflags-y += -D DEBUG_DO -fno-pic

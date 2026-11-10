@@ -1,8 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2016 MediaTek Inc.
- * Author: Ming Hsiu Tsai <minghsiu.tsai@mediatek.com>
- *         Rick Chang <rick.chang@mediatek.com>
+ * Copyright (c) 2019 MediaTek Inc.
+ *
  */
 
 #include <linux/io.h>
@@ -26,7 +25,7 @@ enum mtk_jpeg_color {
 static inline int mtk_jpeg_verify_align(u32 val, int align, u32 reg)
 {
 	if (val & (align - 1)) {
-		pr_err("mtk-jpeg: write reg %x without %d align\n", reg, align);
+		pr_info("write reg %x without %d align\n", reg, align);
 		return -1;
 	}
 
@@ -153,10 +152,10 @@ static int mtk_jpeg_calc_dst_size(struct mtk_jpeg_dec_param *param)
 				param->sampling_w[i];
 		/* output format is 420/422 */
 		param->comp_w[i] = padding_w >> brz_w[i];
-		param->comp_w[i] = round_up(param->comp_w[i],
-					    MTK_JPEG_DCTSIZE);
-		param->img_stride[i] = i ? round_up(param->comp_w[i], 16)
-					: round_up(param->comp_w[i], 32);
+		param->comp_w[i] = mtk_jpeg_align(param->comp_w[i],
+						  MTK_JPEG_DCTSIZE);
+		param->img_stride[i] = i ? mtk_jpeg_align(param->comp_w[i], 16)
+					: mtk_jpeg_align(param->comp_w[i], 32);
 		ds_row_h[i] = (MTK_JPEG_DCTSIZE * param->sampling_h[i]);
 	}
 	param->dec_w = param->img_stride[0];
@@ -293,6 +292,12 @@ static void mtk_jpeg_dec_set_dec_mode(void __iomem *base, u32 mode)
 	writel(mode & 0x03, base + JPGDEC_REG_OPERATION_MODE);
 }
 
+static void mtk_jpeg_dec_set_huffman_mode(void __iomem *base, u32 huffman_exist)
+{
+	if (huffman_exist == 0)
+		writel(0x01, base + JPGDEC_REG_ST_HUFFMAN_EN);
+}
+
 static void mtk_jpeg_dec_set_bs_write_ptr(void __iomem *base, u32 ptr)
 {
 	mtk_jpeg_verify_align(ptr, 16, JPGDEC_REG_FILE_BRP);
@@ -389,6 +394,7 @@ void mtk_jpeg_dec_set_config(void __iomem *base,
 				 config->comp_id[2]);
 	mtk_jpeg_dec_set_q_table(base, config->qtbl_num[0],
 				 config->qtbl_num[1], config->qtbl_num[2]);
+	mtk_jpeg_dec_set_huffman_mode(base, config->huffman_exist);
 	mtk_jpeg_dec_set_sampling_factor(base, config->comp_num,
 					 config->sampling_w[0],
 					 config->sampling_h[0],

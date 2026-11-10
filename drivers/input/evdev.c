@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Event char devices, giving access to raw input device events.
  *
  * Copyright (c) 1999-2002 Vojtech Pavlik
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published by
+ * the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -28,6 +31,7 @@
 struct evdev {
 	int open;
 	struct input_handle handle;
+	wait_queue_head_t wait;
 	struct evdev_client __rcu *grab;
 	struct list_head client_list;
 	spinlock_t client_lock; /* protects client_list */
@@ -42,7 +46,6 @@ struct evdev_client {
 	unsigned int tail;
 	unsigned int packet_head; /* [future] position of the first element of next packet */
 	spinlock_t buffer_lock; /* protects access to buffer, head and tail */
-	wait_queue_head_t wait;
 	struct fasync_struct *fasync;
 	struct evdev *evdev;
 	struct list_head node;
@@ -245,6 +248,7 @@ static void evdev_pass_values(struct evdev_client *client,
 			const struct input_value *vals, unsigned int count,
 			ktime_t *ev_time)
 {
+	struct evdev *evdev = client->evdev;
 	const struct input_value *v;
 	struct input_event event;
 	struct timespec64 ts;
@@ -281,8 +285,7 @@ static void evdev_pass_values(struct evdev_client *client,
 	spin_unlock(&client->buffer_lock);
 
 	if (wakeup)
-		wake_up_interruptible_poll(&client->wait,
-			EPOLLIN | EPOLLOUT | EPOLLRDNORM | EPOLLWRNORM);
+		wake_up_interruptible(&evdev->wait);
 }
 
 /*
@@ -425,11 +428,11 @@ static void evdev_hangup(struct evdev *evdev)
 	struct evdev_client *client;
 
 	spin_lock(&evdev->client_lock);
-	list_for_each_entry(client, &evdev->client_list, node) {
+	list_for_each_entry(client, &evdev->client_list, node)
 		kill_fasync(&client->fasync, SIGIO, POLL_HUP);
-		wake_up_interruptible_poll(&client->wait, EPOLLHUP | EPOLLERR);
-	}
 	spin_unlock(&evdev->client_lock);
+
+	wake_up_interruptible(&evdev->wait);
 }
 
 static int evdev_release(struct inode *inode, struct file *file)
@@ -471,14 +474,17 @@ static int evdev_open(struct inode *inode, struct file *file)
 {
 	struct evdev *evdev = container_of(inode->i_cdev, struct evdev, cdev);
 	unsigned int bufsize = evdev_compute_buffer_size(evdev->handle.dev);
+	unsigned int size = sizeof(struct evdev_client) +
+					bufsize * sizeof(struct input_event);
 	struct evdev_client *client;
 	int error;
 
-	client = kvzalloc(struct_size(client, buffer, bufsize), GFP_KERNEL);
+	client = kzalloc(size, GFP_KERNEL | __GFP_NOWARN);
+	if (!client)
+		client = vzalloc(size);
 	if (!client)
 		return -ENOMEM;
 
-	init_waitqueue_head(&client->wait);
 	client->bufsize = bufsize;
 	spin_lock_init(&client->buffer_lock);
 	client->evdev = evdev;
@@ -489,7 +495,7 @@ static int evdev_open(struct inode *inode, struct file *file)
 		goto err_free_client;
 
 	file->private_data = client;
-	stream_open(inode, file);
+	nonseekable_open(inode, file);
 
 	return 0;
 
@@ -595,7 +601,7 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
 			break;
 
 		if (!(file->f_flags & O_NONBLOCK)) {
-			error = wait_event_interruptible(client->wait,
+			error = wait_event_interruptible(evdev->wait,
 					client->packet_head != client->tail ||
 					!evdev->exist || client->revoked);
 			if (error)
@@ -613,7 +619,7 @@ static __poll_t evdev_poll(struct file *file, poll_table *wait)
 	struct evdev *evdev = client->evdev;
 	__poll_t mask;
 
-	poll_wait(file, &client->wait, wait);
+	poll_wait(file, &evdev->wait, wait);
 
 	if (evdev->exist && !client->revoked)
 		mask = EPOLLOUT | EPOLLWRNORM;
@@ -946,7 +952,7 @@ static int evdev_revoke(struct evdev *evdev, struct evdev_client *client,
 	client->revoked = true;
 	evdev_ungrab(evdev, client);
 	input_flush_device(&evdev->handle, file);
-	wake_up_interruptible_poll(&client->wait, EPOLLHUP | EPOLLERR);
+	wake_up_interruptible(&evdev->wait);
 
 	return 0;
 }
@@ -1358,6 +1364,7 @@ static int evdev_connect(struct input_handler *handler, struct input_dev *dev,
 	INIT_LIST_HEAD(&evdev->client_list);
 	spin_lock_init(&evdev->client_lock);
 	mutex_init(&evdev->mutex);
+	init_waitqueue_head(&evdev->wait);
 	evdev->exist = true;
 
 	dev_no = minor;

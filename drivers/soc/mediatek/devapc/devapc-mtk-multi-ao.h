@@ -3,8 +3,8 @@
  * Copyright (C) 2019 MediaTek Inc.
  */
 
-#ifndef __DEVAPC_MTK_MULTI_AO_H__
-#define __DEVAPC_MTK_MULTI_AO_H__
+#ifndef __DEVAPC_MTK_MULTI_4_H__
+#define __DEVAPC_MTK_MULTI_4_H__
 
 #include <linux/platform_device.h>
 #include <linux/types.h>
@@ -17,17 +17,14 @@
 #define DEAD			0xdeadbeaf
 #define RANDOM_OFFSET		0x88
 #define PFX			"[DEVAPC]: "
-#define SLAVE_TYPE_NUM_MAX	7
-#define IRQ_TYPE_NUM_MAX	5
-#define IRQ_TYPE_NUM_DEFAULT	1
-#define VIO_ADDR_HIGH_MASK	0xFFFFFFFF
+#define SLAVE_TYPE_NUM_MAX	5
 
 #define devapc_log(p, s, fmt, args...) \
 	(p += scnprintf(p, sizeof(s) - strlen(s), fmt, ##args))
 
 #define UNUSED(x)		(void)(x)
 
-#define RETRY_COUNT	3
+#define RETRY_COUNT 3
 
 /******************************************************************************
  * DATA STRUCTURE & FUNCTION DEFINATION
@@ -42,16 +39,11 @@ enum DEVAPC_PD_REG_TYPE {
 	VIO_SHIFT_STA,
 	VIO_SHIFT_SEL,
 	VIO_SHIFT_CON,
-	VIO_DBG3,
 	PD_REG_TYPE_NUM,
 };
 
 enum DEVAPC_UT_CMD {
-	DEVAPC_UT_DAPC_INFRA_VIO = 1,
-	DEVAPC_UT_DAPC_VLP_VIO,
-	DEVAPC_UT_DAPC_ADSP_VIO,
-	DEVAPC_UT_DAPC_MMINFRA_VIO,
-	DEVAPC_UT_DAPC_MMUP_VIO,
+	DEVAPC_UT_DAPC_VIO = 1,
 	DEVAPC_UT_SRAM_VIO,
 };
 
@@ -115,7 +107,6 @@ struct mtk_device_info {
 struct mtk_device_num {
 	int slave_type;
 	uint32_t vio_slave_num;
-	int irq_type;
 };
 
 struct mtk_devapc_vio_info {
@@ -169,19 +160,6 @@ struct mtk_devapc_pd_desc {
 	uint32_t pd_shift_con_offset;
 };
 
-struct mtk_devapc_pd_reg {
-	uint32_t pd_vio_dbg0_reg;
-	uint32_t pd_vio_dbg1_reg;
-	uint32_t pd_vio_dbg2_reg;
-	uint32_t pd_vio_dbg3_reg;
-	uint32_t pd_apc_con_reg;
-	uint32_t pd_vio_shift_sta_reg;
-	uint32_t pd_vio_shift_sel_reg;
-	uint32_t pd_vio_shift_con_reg;
-	uint32_t *pd_vio_mask_reg;
-	uint32_t *pd_vio_sta_reg;
-};
-
 struct mtk_devapc_soc {
 	struct mtk_devapc_dbg_status *dbg_stat;
 	const char * const *slave_type_arr;
@@ -192,7 +170,6 @@ struct mtk_devapc_soc {
 	const struct mtk_infra_vio_dbg_desc *vio_dbgs;
 	const struct mtk_sramrom_sec_vio_desc *sramrom_sec_vios;
 	const uint32_t *devapc_pds;
-	uint32_t irq_type_num;
 
 	/* platform specific operations */
 	const char* (*subsys_get)(int slave_type, uint32_t vio_index,
@@ -205,14 +182,12 @@ struct mtk_devapc_soc {
 	uint32_t (*shift_group_get)(int slave_type, uint32_t vio_index);
 };
 
-int devapc_suspend_noirq(struct device *dev);
-int devapc_resume_noirq(struct device *dev);
-int mtk_devapc_probe(struct platform_device *pdev,
+extern int mtk_devapc_probe(struct platform_device *pdev,
 		struct mtk_devapc_soc *soc);
-int mtk_devapc_remove(struct platform_device *dev);
+extern int mtk_devapc_remove(struct platform_device *dev);
 ssize_t mtk_devapc_dbg_read(struct file *file, char __user *buffer,
 	size_t count, loff_t *ppos);
 ssize_t mtk_devapc_dbg_write(struct file *file, const char __user *buffer,
 	size_t count, loff_t *data);
 
-#endif /* __DEVAPC_MTK_MULTI_AO_H__ */
+#endif /* __DEVAPC_MTK_MULTI_4_H__ */

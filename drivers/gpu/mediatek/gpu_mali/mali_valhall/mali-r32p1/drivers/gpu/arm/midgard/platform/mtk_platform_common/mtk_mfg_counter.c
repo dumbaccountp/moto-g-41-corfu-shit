@@ -1,6 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2021 MediaTek Inc.
+ * Copyright (C) 2017 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
  */
 
 #include <linux/spinlock.h>
@@ -27,7 +35,8 @@
 #define SHADER_BLOCK_NAME_POS	2
 #define MMU_BLOCK_NAME_POS		3
 //gpu stall counter
-#if IS_ENABLED(CONFIG_MACH_MT6873) || IS_ENABLED(CONFIG_MACH_MT6853) || IS_ENABLED(CONFIG_MACH_MT6833)|| IS_ENABLED(CONFIG_MACH_MT6877)
+#if IS_ENABLED(CONFIG_MACH_MT6873) || IS_ENABLED(CONFIG_MACH_MT6853) || IS_ENABLED(CONFIG_MACH_MT6833) \
+	|| IS_ENABLED(CONFIG_MACH_MT6877) || IS_ENABLED(CONFIG_MACH_MT6781)
 #define GPU_STALL_ADD_BASE	0x1021C000
 #else
 #define GPU_STALL_ADD_BASE	0x1021E000
@@ -518,7 +527,7 @@ static void _mtk_mfg_init_counter(void)
 static int _mtk_mfg_update_counter(void)
 {
 	uint32_t success, ret, status, gpu_freq;
-	static struct timespec64 tv_start, tv_end;
+	static struct timeval tv_start, tv_end;
 	static unsigned long long start_utime, end_utime, timd_diff_us;
 	int block[RESERVED_BLOCK + 1] = {0};
 	ret = timd_diff_us = gpu_freq = active_cycle = 0;
@@ -535,14 +544,10 @@ static int _mtk_mfg_update_counter(void)
 
 		nr_hwc_blocks = info.nr_hwc_blocks ;
 		cnt = 0;
-		ktime_get_real_ts64(&tv_end);
-		end_utime = tv_end.tv_sec * 1000000 + (tv_end.tv_nsec / 1000);
+		do_gettimeofday(&tv_end);
+		end_utime = tv_end.tv_sec * 1000000 + tv_end.tv_usec;
 		timd_diff_us = (end_utime > start_utime) ? (end_utime - start_utime) : 0;
-#if defined(CONFIG_MTK_GPUFREQ_V2)
-		gpu_freq = gpufreq_get_cur_freq(TARGET_DEFAULT)*1000;
-#else
-		gpu_freq = mt_gpufreq_get_cur_freq()*1000;
-#endif
+		gpu_freq = mt_gpufreq_get_cur_freq();
 		_mtk_mfg_reset_counter(1);
 		for (i = 0; i < nr_hwc_blocks; i++) {
 			shader_block = 0;
@@ -604,8 +609,8 @@ static int _mtk_mfg_update_counter(void)
 FINISH:
 	if (handle) {
 		kbase_gator_instr_hwcnt_dump_irq(handle);
-		ktime_get_real_ts64(&tv_start);
-		start_utime = tv_start.tv_sec * 1000000 + (tv_start.tv_nsec / 1000);
+		do_gettimeofday(&tv_start);
+		start_utime = tv_start.tv_sec * 1000000 + tv_start.tv_usec;
 	}
 
 	return ret;

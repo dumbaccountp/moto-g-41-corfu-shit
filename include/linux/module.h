@@ -1,14 +1,11 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef _LINUX_MODULE_H
+#define _LINUX_MODULE_H
 /*
  * Dynamic loading of modules into the kernel.
  *
  * Rewritten by Richard Henderson <rth@tamu.edu> Dec 1996
  * Rewritten again by Rusty Russell, 2002
  */
-
-#ifndef _LINUX_MODULE_H
-#define _LINUX_MODULE_H
-
 #include <linux/list.h>
 #include <linux/stat.h>
 #include <linux/compiler.h>
@@ -24,13 +21,14 @@
 #include <linux/rbtree_latch.h>
 #include <linux/error-injection.h>
 #include <linux/tracepoint-defs.h>
-#include <linux/srcu.h>
-#include <linux/static_call_types.h>
 #include <linux/cfi.h>
 #include <linux/android_kabi.h>
 
 #include <linux/percpu.h>
 #include <asm/module.h>
+
+/* In stripped ARM and x86-64 modules, ~ is surprisingly rare. */
+#define MODULE_SIG_STRING "~Module signature appended~\n"
 
 /* Not Yet Implemented */
 #define MODULE_SUPPORTED_DEVICE(name)
@@ -128,22 +126,19 @@ extern void cleanup_module(void);
 #define late_initcall_sync(fn)		module_init(fn)
 
 #define console_initcall(fn)		module_init(fn)
+#define security_initcall(fn)		module_init(fn)
 
 /* Each module must use one module_init(). */
 #define module_init(initfn)					\
 	static inline initcall_t __maybe_unused __inittest(void)		\
 	{ return initfn; }					\
-	int init_module(void) __copy(initfn) 			\
-		__attribute__((alias(#initfn)));		\
-	__CFI_ADDRESSABLE(init_module)
+	int init_module(void) __copy(initfn) __attribute__((alias(#initfn)));
 
 /* This is only required if you want to be unloadable. */
 #define module_exit(exitfn)					\
 	static inline exitcall_t __maybe_unused __exittest(void)		\
 	{ return exitfn; }					\
-	void cleanup_module(void) __copy(exitfn) 		\
-		__attribute__((alias(#exitfn))); 		\
-	__CFI_ADDRESSABLE(cleanup_module)
+	void cleanup_module(void) __copy(exitfn) __attribute__((alias(#exitfn)));
 
 #endif
 
@@ -177,20 +172,10 @@ extern void cleanup_module(void);
 #define MODULE_SOFTDEP(_softdep) MODULE_INFO(softdep, _softdep)
 
 /*
- * MODULE_FILE is used for generating modules.builtin
- * So, make it no-op when this is being built as a module
- */
-#ifdef MODULE
-#define MODULE_FILE
-#else
-#define MODULE_FILE	MODULE_INFO(file, KBUILD_MODFILE);
-#endif
-
-/*
  * The following license idents are currently accepted as indicating free
  * software modules
  *
- *	"GPL"				[GNU Public License v2]
+ *	"GPL"				[GNU Public License v2 or later]
  *	"GPL v2"			[GNU Public License v2]
  *	"GPL and additional rights"	[GNU Public License v2 rights and more]
  *	"Dual BSD/GPL"			[GNU Public License v2
@@ -204,22 +189,6 @@ extern void cleanup_module(void);
  *
  *	"Proprietary"			[Non free products]
  *
- * Both "GPL v2" and "GPL" (the latter also in dual licensed strings) are
- * merely stating that the module is licensed under the GPL v2, but are not
- * telling whether "GPL v2 only" or "GPL v2 or later". The reason why there
- * are two variants is a historic and failed attempt to convey more
- * information in the MODULE_LICENSE string. For module loading the
- * "only/or later" distinction is completely irrelevant and does neither
- * replace the proper license identifiers in the corresponding source file
- * nor amends them in any way. The sole purpose is to make the
- * 'Proprietary' flagging work and to refuse to bind symbols which are
- * exported with EXPORT_SYMBOL_GPL when a non free module is loaded.
- *
- * In the same way "BSD" is not a clear license information. It merely
- * states, that the module is licensed under one of the compatible BSD
- * license variants. The detailed and correct license information is again
- * to be found in the corresponding source files.
- *
  * There are dual licensed components, but when running with Linux it is the
  * GPL that is relevant so this is a non issue. Similarly LGPL linked with GPL
  * is a GPL combined work.
@@ -230,7 +199,7 @@ extern void cleanup_module(void);
  * 2.	So the community can ignore bug reports including proprietary modules
  * 3.	So vendors can do likewise based on their own policies
  */
-#define MODULE_LICENSE(_license) MODULE_FILE MODULE_INFO(license, _license)
+#define MODULE_LICENSE(_license) MODULE_INFO(license, _license)
 
 /*
  * Author(s), use "Name <email>" or just "Name", for multiple
@@ -271,7 +240,6 @@ extern typeof(name) __mod_##type##__##name##_device_table		\
 #define MODULE_VERSION(_version) MODULE_INFO(version, _version)
 #else
 #define MODULE_VERSION(_version)					\
-	MODULE_INFO(version, _version);					\
 	static struct module_version_attribute ___modver_attr = {	\
 		.mattr	= {						\
 			.attr	= {					\
@@ -284,7 +252,7 @@ extern typeof(name) __mod_##type##__##name##_device_table		\
 		.version	= _version,				\
 	};								\
 	static const struct module_version_attribute			\
-	__used __section("__modver")					\
+	__used __attribute__ ((__section__ ("__modver")))		\
 	* __moduleparam_const __modver_attr = &___modver_attr
 #endif
 
@@ -292,8 +260,6 @@ extern typeof(name) __mod_##type##__##name##_device_table		\
  * format is simply firmware file name.  Multiple firmware
  * files require multiple MODULE_FIRMWARE() specifiers */
 #define MODULE_FIRMWARE(_firmware) MODULE_INFO(firmware, _firmware)
-
-#define MODULE_IMPORT_NS(ns)	MODULE_INFO(import_ns, __stringify(ns))
 
 struct notifier_block;
 
@@ -352,7 +318,6 @@ struct mod_kallsyms {
 	Elf_Sym *symtab;
 	unsigned int num_symtab;
 	char *strtab;
-	char *typetab;
 };
 
 #ifdef CONFIG_LIVEPATCH
@@ -378,7 +343,6 @@ struct module {
 	struct module_attribute *modinfo_attrs;
 	const char *version;
 	const char *srcversion;
-	const char *scmversion;
 	struct kobject *holders_dir;
 
 	/* Exported symbols */
@@ -439,6 +403,7 @@ struct module {
 	/* Core layout: rbtree is accessed frequently, so keep together. */
 	struct module_layout core_layout __module_layout_align;
 	struct module_layout init_layout;
+	struct module_layout init_layout_backup;
 
 	/* Arch-specific module values */
 	struct mod_arch_specific arch;
@@ -454,7 +419,7 @@ struct module {
 
 #ifdef CONFIG_KALLSYMS
 	/* Protected by RCU and/or module_mutex: use rcu_dereference() */
-	struct mod_kallsyms __rcu *kallsyms;
+	struct mod_kallsyms *kallsyms;
 	struct mod_kallsyms core_kallsyms;
 
 	/* Section attributes */
@@ -473,20 +438,10 @@ struct module {
 	void __percpu *percpu;
 	unsigned int percpu_size;
 #endif
-	void *noinstr_text_start;
-	unsigned int noinstr_text_size;
 
 #ifdef CONFIG_TRACEPOINTS
 	unsigned int num_tracepoints;
 	tracepoint_ptr_t *tracepoints_ptrs;
-#endif
-#ifdef CONFIG_TREE_SRCU
-	unsigned int num_srcu_structs;
-	struct srcu_struct **srcu_struct_ptrs;
-#endif
-#ifdef CONFIG_BPF_EVENTS
-	unsigned int num_bpf_raw_events;
-	struct bpf_raw_event_map *bpf_raw_events;
 #endif
 #ifdef CONFIG_JUMP_LABEL
 	struct jump_entry *jump_entries;
@@ -505,16 +460,6 @@ struct module {
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD
 	unsigned int num_ftrace_callsites;
 	unsigned long *ftrace_callsites;
-#endif
-#ifdef CONFIG_KPROBES
-	void *kprobes_text_start;
-	unsigned int kprobes_text_size;
-	unsigned long *kprobe_blacklist;
-	unsigned int num_kprobe_blacklist;
-#endif
-#ifdef CONFIG_HAVE_STATIC_CALL_INLINE
-	int num_static_call_sites;
-	struct static_call_site *static_call_sites;
 #endif
 
 #ifdef CONFIG_LIVEPATCH
@@ -554,13 +499,6 @@ struct module {
 } ____cacheline_aligned __randomize_layout;
 #ifndef MODULE_ARCH_INIT
 #define MODULE_ARCH_INIT {}
-#endif
-
-#ifndef HAVE_ARCH_KALLSYMS_SYMBOL_VALUE
-static inline unsigned long kallsyms_symbol_value(const Elf_Sym *sym)
-{
-	return sym->st_value;
-}
 #endif
 
 extern struct mutex module_mutex;
@@ -705,7 +643,6 @@ static inline bool is_livepatch_module(struct module *mod)
 #endif /* CONFIG_LIVEPATCH */
 
 bool is_module_sig_enforced(void);
-void set_module_sig_enforced(void);
 
 #else /* !CONFIG_MODULES... */
 
@@ -757,7 +694,7 @@ static inline bool within_module(unsigned long addr, const struct module *mod)
 }
 
 /* Get/put a kernel symbol (calls should be symmetric) */
-#define symbol_get(x) ({ extern typeof(x) x __attribute__((weak,visibility("hidden"))); &(x); })
+#define symbol_get(x) ({ extern typeof(x) x __attribute__((weak)); &(x); })
 #define symbol_put(x) do { } while (0)
 #define symbol_put_addr(x) do { } while (0)
 
@@ -843,10 +780,6 @@ static inline bool is_module_sig_enforced(void)
 	return false;
 }
 
-static inline void set_module_sig_enforced(void)
-{
-}
-
 /* Dereference module function descriptor */
 static inline
 void *dereference_module_function_descriptor(struct module *mod, void *ptr)
@@ -867,6 +800,18 @@ extern int module_sysfs_initialized;
 /* BELOW HERE ALL THESE ARE OBSOLETE AND WILL VANISH */
 
 #define __MODULE_STRING(x) __stringify(x)
+
+#ifdef CONFIG_STRICT_MODULE_RWX
+extern void set_all_modules_text_rw(void);
+extern void set_all_modules_text_ro(void);
+extern void module_enable_ro(const struct module *mod, bool after_init);
+extern void module_disable_ro(const struct module *mod);
+#else
+static inline void set_all_modules_text_rw(void) { }
+static inline void set_all_modules_text_ro(void) { }
+static inline void module_enable_ro(const struct module *mod, bool after_init) { }
+static inline void module_disable_ro(const struct module *mod) { }
+#endif
 
 #ifdef CONFIG_GENERIC_BUG
 void module_bug_finalize(const Elf_Ehdr *, const Elf_Shdr *,

@@ -528,7 +528,7 @@ static void setup_sgmii_internal_phy(struct fman_mac *memac,
 		case 100:
 			tmp_reg16 |= IF_MODE_SGMII_SPEED_100M;
 		break;
-		case 1000:
+		case 1000: /* fallthrough */
 		default:
 			tmp_reg16 |= IF_MODE_SGMII_SPEED_1G;
 		break;
@@ -596,6 +596,10 @@ static void setup_sgmii_internal_phy_base_x(struct fman_mac *memac)
 
 static int check_init_parameters(struct fman_mac *memac)
 {
+	if (memac->addr == 0) {
+		pr_err("Ethernet MAC must have a valid MAC address\n");
+		return -EINVAL;
+	}
 	if (!memac->exception_cb) {
 		pr_err("Uninitialized exception handler\n");
 		return -EINVAL;
@@ -778,7 +782,7 @@ int memac_adjust_link(struct fman_mac *memac, u16 speed)
 	/* Set full duplex */
 	tmp &= ~IF_MODE_HD;
 
-	if (phy_interface_mode_is_rgmii(memac->phy_if)) {
+	if (memac->phy_if == PHY_INTERFACE_MODE_RGMII) {
 		/* Configure RGMII in manual mode */
 		tmp &= ~IF_MODE_RGMII_AUTO;
 		tmp &= ~IF_MODE_RGMII_SP_MASK;
@@ -1052,10 +1056,8 @@ int memac_init(struct fman_mac *memac)
 	}
 
 	/* MAC Address */
-	if (memac->addr != 0) {
-		MAKE_ENET_ADDR_FROM_UINT64(memac->addr, eth_addr);
-		add_addr_in_paddr(memac->regs, (u8 *)eth_addr, 0);
-	}
+	MAKE_ENET_ADDR_FROM_UINT64(memac->addr, eth_addr);
+	add_addr_in_paddr(memac->regs, (u8 *)eth_addr, 0);
 
 	fixed_link = memac_drv_param->fixed_link;
 

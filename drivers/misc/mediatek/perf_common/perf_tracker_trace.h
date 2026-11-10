@@ -11,7 +11,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/tracepoint.h>
-#include <perf_tracker_internal.h>
+#include <perf_tracker.h>
 
 TRACE_EVENT(perf_index_s,
 	TP_PROTO(
@@ -23,13 +23,10 @@ TRACE_EVENT(perf_index_s,
 		int bw_g,
 		int bw_mm,
 		int bw_total,
-		int vcore_uv,
-		unsigned int cf0,
-		unsigned int cf1,
-		unsigned int cf2
+		int vcore_uv
 	),
 
-	TP_ARGS(sf0, sf1, sf2, dram_freq, bw_c, bw_g, bw_mm, bw_total, vcore_uv, cf0, cf1, cf2),
+	TP_ARGS(sf0, sf1, sf2, dram_freq, bw_c, bw_g, bw_mm, bw_total, vcore_uv),
 
 	TP_STRUCT__entry(
 		__field(unsigned int, sf0)
@@ -41,9 +38,6 @@ TRACE_EVENT(perf_index_s,
 		__field(int, bw_mm)
 		__field(int, bw_total)
 		__field(int, vcore_uv)
-		__field(unsigned int, cf0)
-		__field(unsigned int, cf1)
-		__field(unsigned int, cf2)
 	),
 
 	TP_fast_assign(
@@ -56,12 +50,9 @@ TRACE_EVENT(perf_index_s,
 		__entry->bw_mm     = bw_mm;
 		__entry->bw_total  = bw_total;
 		__entry->vcore_uv  = vcore_uv;
-		__entry->cf0       =  cf0;
-		__entry->cf1       =  cf1;
-		__entry->cf2       =  cf2;
 	),
 
-	TP_printk("sched_freq=%u|%u|%u dram_freq=%d bw=%d|%d|%d|%d vcore=%d cpu_mcupm_freq=%u|%u|%u",
+	TP_printk("sched_freq=%d|%d|%d dram_freq=%d bw=%d|%d|%d|%d vcore=%d",
 		__entry->sf0,
 		__entry->sf1,
 		__entry->sf2,
@@ -70,10 +61,8 @@ TRACE_EVENT(perf_index_s,
 		__entry->bw_g,
 		__entry->bw_mm,
 		__entry->bw_total,
-		__entry->vcore_uv,
-		__entry->cf0,
-		__entry->cf1,
-		__entry->cf2)
+		__entry->vcore_uv
+		)
 );
 
 TRACE_EVENT(perf_index_l,
@@ -151,58 +140,6 @@ TRACE_EVENT(perf_index_l,
 		)
 );
 
-TRACE_EVENT(fuel_gauge,
-	TP_PROTO(
-		int cur,
-		int volt,
-		int uisoc
-	),
-
-	TP_ARGS(cur, volt, uisoc),
-
-	TP_STRUCT__entry(
-		__field(int, cur)
-		__field(int, volt)
-		__field(int, uisoc)
-	),
-
-	TP_fast_assign(
-		__entry->cur = cur;
-		__entry->volt = volt;
-		__entry->uisoc = uisoc;
-	),
-
-	TP_printk("cur=%d vol=%d UISOC=%d",
-		__entry->cur,
-		__entry->volt,
-		__entry->uisoc
-	)
-);
-
-TRACE_EVENT(charger,
-	TP_PROTO(
-		int temp,
-		int volt
-	),
-
-	TP_ARGS(temp, volt),
-
-	TP_STRUCT__entry(
-		__field(int, temp)
-		__field(int, volt)
-	),
-
-	TP_fast_assign(
-		__entry->temp = temp;
-		__entry->volt = volt;
-	),
-
-	TP_printk("ICHG=%d IBUS=%d",
-		__entry->temp,
-		__entry->volt
-	)
-);
-
 TRACE_EVENT(perf_index_sbin,
 	TP_PROTO(u32 *raw_data, u32 lens),
 	TP_ARGS(raw_data, lens),
@@ -218,39 +155,6 @@ TRACE_EVENT(perf_index_sbin,
 	TP_printk("data=%s", __print_array(__get_dynamic_array(raw_data),
 		__entry->lens, sizeof(u32)))
 );
-
-TRACE_EVENT(freq_qos_user_setting,
-	TP_PROTO(
-		int cid,
-		int type,
-		int value,
-		const char *caller
-	),
-
-	TP_ARGS(cid, type, value, caller),
-
-	TP_STRUCT__entry(
-		__field(int, cid)
-		__field(int, type)
-		__field(int, value)
-		__string(caller, caller)
-	),
-
-	TP_fast_assign(
-		__entry->cid = cid;
-		__entry->type = type;
-		__entry->value = value;
-		__assign_str(caller, caller);
-	),
-
-	TP_printk("cid=%d type=%d value=%d caller=%s",
-		__entry->cid,
-		__entry->type,
-		__entry->value,
-		__get_str(caller)
-	)
-);
-
 #endif /*_PERF_TRACKER_TRACE_H */
 
 #undef TRACE_INCLUDE_PATH

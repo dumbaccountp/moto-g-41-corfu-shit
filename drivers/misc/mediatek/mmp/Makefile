@@ -14,10 +14,10 @@
 
 ifeq ($(CONFIG_MTK_MMPROFILE_SUPPORT),y)
 # The src folder should exist
-obj-$(CONFIG_MMPROFILE) += src/
+obj-y += src/
 
 else
 
-obj-$(CONFIG_MMPROFILE) += dummy/
+obj-y += dummy/
 
 endif

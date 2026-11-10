@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (c) 2020 MediaTek Inc.
  */
 
 /*****************************************************************************
@@ -36,7 +36,7 @@
 
 int set_rps_map(struct netdev_rx_queue *queue, unsigned long rps_value)
 {
-#if IS_ENABLED(CONFIG_RPS)
+#ifdef CONFIG_RPS
 	struct rps_map *old_map, *map;
 	cpumask_var_t mask;
 	int cpu, i, len = 3;
@@ -70,10 +70,9 @@ int set_rps_map(struct netdev_rx_queue *queue, unsigned long rps_value)
 				mutex_is_locked(&rps_map_mutex));
 	rcu_assign_pointer(queue->rps_map, map);
 	if (map)
-		static_branch_inc(&rps_needed);
+		static_key_slow_inc(&rps_needed);
 	if (old_map)
-		static_branch_dec(&rps_needed);
-
+		static_key_slow_dec(&rps_needed);
 	mutex_unlock(&rps_map_mutex);
 
 	if (old_map)
@@ -86,6 +85,3 @@ int set_rps_map(struct netdev_rx_queue *queue, unsigned long rps_value)
 #endif
 }
 EXPORT_SYMBOL(set_rps_map);
-MODULE_LICENSE("GPL");
-
-

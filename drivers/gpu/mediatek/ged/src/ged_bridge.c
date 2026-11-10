@@ -6,7 +6,9 @@
 #include <linux/kernel.h>
 #include <mt-plat/mtk_gpu_utility.h>
 
+#ifdef CONFIG_MTK_FPSGO_V3
 #include <mt-plat/fpsgo_common.h>
+#endif
 
 #include "ged_base.h"
 #include "ged_bridge.h"
@@ -63,17 +65,8 @@ int ged_bridge_monitor_3D_fence(
 	struct GED_BRIDGE_IN_MONITOR3DFENCE *psMonitor3DFenceINT,
 	struct GED_BRIDGE_OUT_MONITOR3DFENCE *psMonitor3DFenceOUT)
 {
-	if (psMonitor3DFenceINT->dump_flag == 1) {
-		mtk_gpu_fence_debug_dump(
-			psMonitor3DFenceINT->fd,
-			psMonitor3DFenceINT->pid,
-			psMonitor3DFenceINT->eType,
-			psMonitor3DFenceINT->timeouts);
-		psMonitor3DFenceOUT->eError = GED_OK;
-	} else {
-		psMonitor3DFenceOUT->eError =
-			ged_monitor_3D_fence_add(psMonitor3DFenceINT->fd);
-	}
+	psMonitor3DFenceOUT->eError =
+		ged_monitor_3D_fence_add(psMonitor3DFenceINT->fd);
 	return 0;
 }
 //-----------------------------------------------------------------------------
@@ -210,11 +203,12 @@ int ged_bridge_query_dvfs_freq_pred(
 	struct GED_BRIDGE_IN_QUERY_DVFS_FREQ_PRED *QueryDVFSFreqPredIn,
 	struct GED_BRIDGE_OUT_QUERY_DVFS_FREQ_PRED *QueryDVFSFreqPredOut)
 {
+	/* GiFT hint status to GED */
 	if (QueryDVFSFreqPredIn->hint) {
 		QueryDVFSFreqPredOut->eError =
 			ged_kpi_set_gift_status(QueryDVFSFreqPredIn->hint);
 	}
-
+	/* GiFT query gpu_freq info from GED */
 	else {
 		QueryDVFSFreqPredOut->eError = ged_kpi_query_dvfs_freq_pred(
 			&QueryDVFSFreqPredOut->gpu_freq_cur,
@@ -229,9 +223,11 @@ int ged_bridge_query_gpu_dvfs_info(
 	struct GED_BRIDGE_IN_QUERY_GPU_DVFS_INFO *QueryGPUDVFSInfoIn,
 	struct GED_BRIDGE_OUT_QUERY_GPU_DVFS_INFO *QueryGPUDVFSInfoOut)
 {
+	/* GiFT hint PID status to GED */
 	if (QueryGPUDVFSInfoIn->pid)
 		ged_kpi_set_gift_target_pid(QueryGPUDVFSInfoIn->pid);
 
+	/* GiFT hint status to GED */
 	if (QueryGPUDVFSInfoIn->hint) {
 		if (QueryGPUDVFSInfoIn->gift_ratio)
 			QueryGPUDVFSInfoOut->eError =
@@ -241,8 +237,7 @@ int ged_bridge_query_gpu_dvfs_info(
 				ged_kpi_set_gift_status(QueryGPUDVFSInfoIn->hint);
 	}
 	QueryGPUDVFSInfoOut->eError = ged_kpi_query_gpu_dvfs_info(
-		QueryGPUDVFSInfoOut);
-
+			QueryGPUDVFSInfoOut);
 	return 0;
 }
 

@@ -2,34 +2,44 @@
 /*
  * Copyright (c) 2015 MediaTek Inc.
  */
+ 
 #ifndef _MT_DPE_H
 #define _MT_DPE_H
+
 #include <linux/ioctl.h>
-#if IS_ENABLED(CONFIG_COMPAT)
+
+#ifdef CONFIG_COMPAT
 /* 64 bit */
 #include <linux/fs.h>
 #include <linux/compat.h>
 #endif
+
 /*
  *   enforce kernel log enable
  */
 #define KERNEL_LOG		/* enable debug log flag if defined */
+
 #define _SUPPORT_MAX_DPE_FRAME_REQUEST_ 12 // 6
 #define _SUPPORT_MAX_DPE_REQUEST_RING_SIZE_ 4
-#define eION_VERSION_LEGACY -1
-#define eION_VERSION_AOSP 1
+
+
 #define SIG_ERESTARTSYS 512	/* ERESTARTSYS */
 /*
  *
  */
 #define DPE_DEV_MAJOR_NUMBER    302
+
 #define DPE_MAGIC               'd'
+
 #define DPE_REG_RANGE           (0x1000)
+
 #define DPE_BASE_HW             0x1B100000
+
 /*This macro is for setting irq status represnted
  * by a local variable,DPEInfo.IrqInfo.Status[DPE_IRQ_TYPE_INT_DPE_ST]
  */
 #define DPE_INT_ST              (1UL<<31)
+
 // MEDV buffer width size should be 64B align
 // All other buffer width size should be 128B align
 // Assume max width = 640 should meet above requirements
@@ -39,9 +49,11 @@
 #define WB_ASFRM_SIZE DPE_MAX_FRAME_SIZE
 #define WB_ASFRMExt_SIZE DPE_MAX_FRAME_SIZE
 #define WB_WMFHF_SIZE DPE_MAX_FRAME_SIZE
+
 #define WB_TOTAL_SIZE \
 	(WB_INT_MEDV_SIZE+WB_DCV_L_SIZE+ \
 	WB_ASFRM_SIZE+WB_ASFRMExt_SIZE+WB_WMFHF_SIZE)
+
 // ----------------- DPE_DVS_ME  Grouping Definitions -------------------
 struct DVS_ME_CFG {
 	unsigned int                   DVS_ME_00;           //1B100300
@@ -70,6 +82,7 @@ struct DVS_ME_CFG {
 	unsigned int                   DVS_ME_23;           //1B10035C
 	unsigned int                   DVS_ME_24;           //1B100360
 };
+
 // ----------------- DPE_DVS_OCC  Grouping Definitions -------------------
 struct DVS_OCC_CFG {
 	unsigned int                DVS_OCC_PQ_0;        //1B1003A0
@@ -79,6 +92,7 @@ struct DVS_OCC_CFG {
 	unsigned int                DVS_OCC_PQ_4;        //1B1003B0
 	unsigned int                DVS_OCC_PQ_5;        //1B1003B4
 };
+
 // ----------------- DPE_DVP_CTRL  Grouping Definitions -------------------
 struct DVP_CORE_CFG {
 	unsigned int                 DVP_CORE_00;         //1B100900
@@ -98,16 +112,20 @@ struct DVP_CORE_CFG {
 	unsigned int                 DVP_CORE_14;         //1B100938
 	unsigned int                 DVP_CORE_15;         //1B10093C
 };
+
 // -----------------------------------------------------
+
 struct DPE_REG_STRUCT {
 	unsigned int module;
 	unsigned int Addr;	/* register's addr */
 	unsigned int Val;	/* register's value */
 };
+
 struct DPE_REG_IO_STRUCT {
 	struct DPE_REG_STRUCT *pData;	/* pointer to DPE_REG_STRUCT */
 	unsigned int Count;	/* count */
 };
+
 /*
  *   interrupt clear type
  */
@@ -119,6 +137,8 @@ enum DPE_IRQ_CLEAR_ENUM {
 	DPE_IRQ_CLEAR_STATUS,	/* clear specific status only */
 	DPE_IRQ_CLEAR_ALL	/* clear all status */
 };
+
+
 /*
  *   module's interrupt , each module should have its own isr.
  *   note:
@@ -129,6 +149,7 @@ enum DPE_IRQ_TYPE_ENUM {
 	DPE_IRQ_TYPE_INT_DVS_ST,	/* DVS */
 	DPE_IRQ_TYPE_AMOUNT
 };
+
 struct DPE_WAIT_IRQ_STRUCT {
 	enum DPE_IRQ_CLEAR_ENUM Clear;
 	enum DPE_IRQ_TYPE_ENUM Type;
@@ -138,11 +159,13 @@ struct DPE_WAIT_IRQ_STRUCT {
 	int ProcessID;		/* user ProcessID (will filled in kernel) */
 	unsigned int bDumpReg;	/* check dump register or not */
 };
+
 struct DPE_CLEAR_IRQ_STRUCT {
 	enum DPE_IRQ_TYPE_ENUM Type;
 	int UserKey;		/* user key for doing interrupt operation */
 	unsigned int Status;	/* Input */
 };
+
 struct DPE_Kernel_Config {
 	unsigned int	DVS_CTRL00;
 	unsigned int	DVS_CTRL01;
@@ -265,6 +288,7 @@ struct DPE_Kernel_Config {
 	unsigned int	DVS_OCC_PQ_4;
 	unsigned int	DVS_OCC_PQ_5;
 	unsigned int   DVS_OCC_ATPG;
+
 	unsigned int	DVP_CTRL00;
 	unsigned int	DVP_CTRL01;
 	unsigned int	DVP_CTRL02;
@@ -354,20 +378,24 @@ struct DPE_Kernel_Config {
 	//unsigned int	USERDUMP_EN;
 	unsigned int DPE_MODE;
 };
+
 enum DPEMODE {
 	MODE_DVS_DVP_BOTH = 0,
 	MODE_DVS_ONLY,
 	MODE_DVP_ONLY
 };
+
 enum DPE_MAINEYE_SEL {
 	LEFT = 0,
 	RIGHT = 1
 };
+
 struct DVS_SubModule_EN {
 	bool sbf_en;
 	bool conf_en;
 	bool occ_en;
 };
+
 struct DVP_SubModule_EN {
 	bool asf_crm_en;
 	bool asf_rm_en;
@@ -380,6 +408,7 @@ struct DVP_SubModule_EN {
 	unsigned int wmf_filt_rounds;
 	bool asf_recursive_en;
 };
+
 struct DVS_Iteration {
 	unsigned int y_IterTimes;
 	unsigned int y_IterStartDirect_0;
@@ -387,10 +416,12 @@ struct DVS_Iteration {
 	unsigned int x_IterStartDirect_0;
 	unsigned int x_IterStartDirect_1;
 };
+
 struct DPE_feedback {
 	unsigned int reg1;
 	unsigned int reg2;
 };
+
 struct DVS_Settings {
 	enum DPE_MAINEYE_SEL mainEyeSel;
 	struct DVS_ME_CFG TuningBuf_ME;
@@ -411,6 +442,7 @@ struct DVS_Settings {
 	unsigned int occStart_x;
 	unsigned int pitch;
 };
+
 struct DVP_Settings {
 	enum DPE_MAINEYE_SEL	mainEyeSel;
 	bool Y_only;
@@ -486,6 +518,7 @@ struct DPE_Config {
 	unsigned int Dpe_OutBuf_CONF;
 	unsigned int Dpe_OutBuf_OCC;
 	unsigned int Dpe_OutBuf_OCC_Ext;
+
 	unsigned int Dpe_InBuf_OCC;
 	unsigned int Dpe_InBuf_OCC_Ext;
 	unsigned int Dpe_OutBuf_CRM;
@@ -497,6 +530,7 @@ struct DPE_Config {
 	unsigned int Dpe_OutBuf_ASF_HF_Ext;
 	//MUINT32 Dpe_OutBuf_WMF_HF;
 	unsigned int Dpe_OutBuf_WMF_FILT;
+
 	unsigned int DVS_SRC_21_INTER_MEDV;
 	unsigned int DVS_SRC_34_DCV_L_FRM0;
 	unsigned int DVP_SRC_18_ASF_RMDV;
@@ -504,6 +538,7 @@ struct DPE_Config {
 	unsigned int DVP_EXT_SRC_18_ASF_RMDV;
 	struct DPE_feedback	Dpe_feedback;
 };
+
 /*
  *
  */
@@ -524,46 +559,49 @@ enum DPE_CMD_ENUM {
 	DPE_CMD_TOTAL,
 };
 /*  */
+
 struct DPE_Request {
 	unsigned int m_ReqNum;
 	struct DPE_Config *m_pDpeConfig;
 };
-#if IS_ENABLED(CONFIG_COMPAT)
+
+#ifdef CONFIG_COMPAT
 struct compat_DPE_REG_IO_STRUCT {
 	compat_uptr_t pData;
 	unsigned int Count;	/* count */
 };
+
 struct compat_DPE_Request {
 	unsigned int m_ReqNum;
 	compat_uptr_t m_pDpeConfig;
 };
+
 #endif
+
 #define DPE_RESET	       _IO(DPE_MAGIC, DPE_CMD_RESET)
 #define DPE_DUMP_REG        _IO(DPE_MAGIC, DPE_CMD_DUMP_REG)
 #define DPE_DUMP_ISR_LOG    _IO(DPE_MAGIC, DPE_CMD_DUMP_ISR_LOG)
-#define DPE_READ_REGISTER						\
-	_IOWR(DPE_MAGIC, DPE_CMD_READ_REG, struct DPE_REG_IO_STRUCT)
-#define DPE_WRITE_REGISTER						\
-	_IOWR(DPE_MAGIC, DPE_CMD_WRITE_REG, struct DPE_REG_IO_STRUCT)
+
 #define DPE_WAIT_IRQ							\
 	_IOW(DPE_MAGIC, DPE_CMD_WAIT_IRQ, struct DPE_WAIT_IRQ_STRUCT)
 #define DPE_CLEAR_IRQ							\
 	_IOW(DPE_MAGIC, DPE_CMD_CLEAR_IRQ, struct DPE_CLEAR_IRQ_STRUCT)
+
 #define DPE_ENQNUE_NUM  _IOW(DPE_MAGIC, DPE_CMD_ENQUE_NUM,    int)
 #define DPE_ENQUE      _IOWR(DPE_MAGIC, DPE_CMD_ENQUE,      struct DPE_Config)
 #define DPE_ENQUE_REQ  _IOWR(DPE_MAGIC, DPE_CMD_ENQUE_REQ,  struct DPE_Request)
+
 #define DPE_DEQUE_NUM  _IOR(DPE_MAGIC, DPE_CMD_DEQUE_NUM,    int)
 #define DPE_DEQUE      _IOWR(DPE_MAGIC, DPE_CMD_DEQUE,      struct DPE_Config)
 #define DPE_DEQUE_REQ  _IOWR(DPE_MAGIC, DPE_CMD_DEQUE_REQ,  struct DPE_Request)
-#if IS_ENABLED(CONFIG_COMPAT)
-#define COMPAT_DPE_WRITE_REGISTER					\
-	_IOWR(DPE_MAGIC, DPE_CMD_WRITE_REG, struct compat_DPE_REG_IO_STRUCT)
-#define COMPAT_DPE_READ_REGISTER					\
-	_IOWR(DPE_MAGIC, DPE_CMD_READ_REG, struct compat_DPE_REG_IO_STRUCT)
+
+#ifdef CONFIG_COMPAT
+
 #define COMPAT_DPE_ENQUE_REQ						\
 	_IOWR(DPE_MAGIC, DPE_CMD_ENQUE_REQ, struct compat_DPE_Request)
 #define COMPAT_DPE_DEQUE_REQ						\
 	_IOWR(DPE_MAGIC, DPE_CMD_DEQUE_REQ, struct compat_DPE_Request)
 #endif
+
 /*  */
 #endif

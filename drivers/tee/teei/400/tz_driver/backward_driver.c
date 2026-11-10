@@ -110,7 +110,8 @@ static void reetime_deinit(struct service_handler *handler)
 
 static int reetime_handle(struct NQ_entry *entry)
 {
-	struct timespec64 tp;
+	struct timespec tp;
+	struct timeval tv;
 	int tv_sec;
 	int tv_usec;
 	unsigned long long block_p = 0;
@@ -121,13 +122,13 @@ static int reetime_handle(struct NQ_entry *entry)
 	block_p = entry->block_p;
 
 	if (time_type == GET_UPTIME) {
-		getboottime64(&tp);
+		get_monotonic_boottime(&tp);
 		tv_sec = tp.tv_sec;
-		tv_usec = tp.tv_nsec / 1000;
+		tv_usec = tp.tv_nsec/1000;
 	} else {
-		ktime_get_real_ts64(&tp);
-		tv_sec = tp.tv_sec;
-		tv_usec = tp.tv_nsec / 1000;
+		do_gettimeofday(&tv);
+		tv_sec = tv.tv_sec;
+		tv_usec = tv.tv_usec;
 	}
 
 	retVal = add_work_entry(SMC_CALL_TYPE, N_INVOKE_T_NQ, 0, 0, 0);

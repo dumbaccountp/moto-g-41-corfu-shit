@@ -32,6 +32,7 @@
 #include <mmu/mali_kbase_mmu.h>
 #include "mali_kbase_csf_timeout.h"
 #include <csf/ipa_control/mali_kbase_csf_ipa_control.h>
+#include <mali_kbase_hwaccess_time.h>
 
 #define CS_REQ_EXCEPTION_MASK (CS_REQ_FAULT_MASK | CS_REQ_FATAL_MASK)
 #define CS_ACK_EXCEPTION_MASK (CS_ACK_FAULT_MASK | CS_ACK_FATAL_MASK)
@@ -140,7 +141,7 @@ static void gpu_munmap_user_io_pages(struct kbase_context *kctx,
 	WARN_ON(reg->flags & KBASE_REG_FREE);
 
 	mutex_lock(&kctx->kbdev->csf.reg_lock);
-	kbase_remove_va_region(reg);
+	kbase_remove_va_region(kctx->kbdev, reg);
 	mutex_unlock(&kctx->kbdev->csf.reg_lock);
 }
 
@@ -218,7 +219,7 @@ bad_insert_output_page:
 				 reg->start_pfn, 1, MCU_AS_NR);
 bad_insert:
 	mutex_lock(&kbdev->csf.reg_lock);
-	kbase_remove_va_region(reg);
+	kbase_remove_va_region(kbdev, reg);
 	mutex_unlock(&kbdev->csf.reg_lock);
 
 	return ret;
@@ -348,7 +349,7 @@ int kbase_csf_alloc_command_stream_user_pages(struct kbase_context *kctx,
 
 	ret = kbase_mem_pool_alloc_pages(
 				&kctx->mem_pools.small[KBASE_MEM_GROUP_CSF_IO],
-				num_pages, queue->phys, false);
+				num_pages, queue->phys, false, kctx->task);
 
 	if (ret != num_pages)
 		goto phys_alloc_failed;
@@ -455,6 +456,17 @@ static void release_queue(struct kbase_queue *queue)
 		/* The queue can't still be on the per context list. */
 		WARN_ON(!list_empty(&queue->link));
 		WARN_ON(queue->group);
+
+		/* After this the Userspace would be able to free the
+		 * memory for GPU queue. In case the Userspace missed
+		 * terminating the queue, the cleanup will happen on
+		 * context termination where tear down of region tracker
+		 * would free up the GPU queue memory.
+		 */
+		kbase_gpu_vm_lock(queue->kctx);
+		kbase_va_region_no_user_free_put(queue->kctx, queue->queue_reg);
+		kbase_gpu_vm_unlock(queue->kctx);
+
 		kfree(queue);
 	}
 }
@@ -508,7 +520,8 @@ static int csf_queue_register_internal(struct kbase_context *kctx,
 	region = kbase_region_tracker_find_region_enclosing_address(kctx,
 								    queue_addr);
 
-	if (kbase_is_region_invalid_or_free(region)) {
+	if (kbase_is_region_invalid_or_free(region) || kbase_is_region_shrinkable(region) ||
+	    region->gpu_alloc->type != KBASE_MEM_TYPE_NATIVE) {
 		ret = -ENOENT;
 		goto out_unlock_vm;
 	}
@@ -557,7 +570,7 @@ static int csf_queue_register_internal(struct kbase_context *kctx,
 
 	queue->kctx = kctx;
 	queue->base_addr = queue_addr;
-	queue->queue_reg = region;
+	queue->queue_reg = kbase_va_region_no_user_free_get(kctx, region);
 	queue->size = (queue_size << PAGE_SHIFT);
 	queue->csi_index = KBASEP_IF_NR_INVALID;
 	queue->enabled = false;
@@ -582,8 +595,6 @@ static int csf_queue_register_internal(struct kbase_context *kctx,
 	INIT_WORK(&queue->oom_event_work, oom_event_worker);
 	INIT_WORK(&queue->fatal_event_work, fatal_event_worker);
 	list_add(&queue->link, &kctx->csf.queue_list);
-
-	region->flags |= KBASE_REG_NO_USER_FREE;
 
 	/* Initialize the cs_trace configuration parameters, When buffer_size
 	 * is 0, trace is disabled. Here we only update the fields when
@@ -678,15 +689,8 @@ void kbase_csf_queue_terminate(struct kbase_context *kctx,
 		unbind_queue(kctx, queue);
 
 		kbase_gpu_vm_lock(kctx);
-		if (!WARN_ON(!queue->queue_reg)) {
-			/* After this the Userspace would be able to free the
-			 * memory for GPU queue. In case the Userspace missed
-			 * terminating the queue, the cleanup will happen on
-			 * context termination where teardown of region tracker
-			 * would free up the GPU queue memory.
-			 */
-			queue->queue_reg->flags &= ~KBASE_REG_NO_USER_FREE;
-		}
+		if (!WARN_ON(!queue->queue_reg))
+			queue->queue_reg->user_data = NULL;
 		kbase_gpu_vm_unlock(kctx);
 
 		spin_lock_irqsave(&kctx->csf.event_lock, flags);
@@ -897,6 +901,7 @@ static void unbind_stopped_queue(struct kbase_context *kctx,
 		kbase_csf_scheduler_spin_unlock(kctx->kbdev, flags);
 
 		put_user_pages_mmap_handle(kctx, queue);
+		WARN_ON_ONCE(queue->doorbell_nr != KBASEP_USER_DB_NR_INVALID);
 		queue->bind_state = KBASE_CSF_QUEUE_UNBOUND;
 	}
 }
@@ -1072,7 +1077,7 @@ static int create_normal_suspend_buffer(struct kbase_context *const kctx,
 	/* Get physical page for a normal suspend buffer */
 	err = kbase_mem_pool_alloc_pages(
 			&kctx->mem_pools.small[KBASE_MEM_GROUP_CSF_FW],
-			nr_pages, &s_buf->phy[0], false);
+			nr_pages, &s_buf->phy[0], false,kctx->task);
 
 	if (err < 0)
 		goto phy_pages_alloc_failed;
@@ -1102,7 +1107,7 @@ static int create_normal_suspend_buffer(struct kbase_context *const kctx,
 
 mmu_insert_failed:
 	mutex_lock(&kctx->kbdev->csf.reg_lock);
-	WARN_ON(kbase_remove_va_region(reg));
+	kbase_remove_va_region(kctx->kbdev, reg);
 	mutex_unlock(&kctx->kbdev->csf.reg_lock);
 
 add_va_region_failed:
@@ -1183,7 +1188,7 @@ static int create_protected_suspend_buffer(struct kbase_device *const kbdev,
 
 mmu_insert_failed:
 	mutex_lock(&kbdev->csf.reg_lock);
-	WARN_ON(kbase_remove_va_region(reg));
+	kbase_remove_va_region(kbdev, reg);
 	mutex_unlock(&kbdev->csf.reg_lock);
 
 add_va_region_failed:
@@ -1403,7 +1408,7 @@ static void term_normal_suspend_buffer(struct kbase_context *const kctx,
 	WARN_ON(s_buf->reg->flags & KBASE_REG_FREE);
 
 	mutex_lock(&kctx->kbdev->csf.reg_lock);
-	WARN_ON(kbase_remove_va_region(s_buf->reg));
+	kbase_remove_va_region(kctx->kbdev, s_buf->reg);
 	mutex_unlock(&kctx->kbdev->csf.reg_lock);
 
 	kbase_mem_pool_free_pages(
@@ -1436,7 +1441,7 @@ static void term_protected_suspend_buffer(struct kbase_device *const kbdev,
 	WARN_ON(s_buf->reg->flags & KBASE_REG_FREE);
 
 	mutex_lock(&kbdev->csf.reg_lock);
-	WARN_ON(kbase_remove_va_region(s_buf->reg));
+	kbase_remove_va_region(kbdev, s_buf->reg);
 	mutex_unlock(&kbdev->csf.reg_lock);
 
 	kbase_csf_protected_memory_free(kbdev, s_buf->pma, nr_pages);
@@ -1534,6 +1539,22 @@ void kbase_csf_queue_group_terminate(struct kbase_context *kctx,
 	if (group) {
 		unsigned long flags;
 
+		/* Stop the running of the given group */
+		term_queue_group(group);
+		kctx->csf.queue_groups[group_handle] = NULL;
+
+		mutex_unlock(&kctx->csf.lock);
+
+		/* Cancel any pending event callbacks. If one is in progress
+		 * then this thread waits synchronously for it to complete (which
+		 * is why we must unlock the context first). We already ensured
+		 * that no more callbacks can be enqueued by terminating the group.
+		 */
+		cancel_queue_group_events(group);
+
+		mutex_lock(&kctx->csf.lock);
+
+		/* Clean up after the termination */
 		spin_lock_irqsave(&kctx->csf.event_lock, flags);
 
 		dev_dbg(kbdev->dev,
@@ -1544,24 +1565,12 @@ void kbase_csf_queue_group_terminate(struct kbase_context *kctx,
 		list_del_init(&group->error_timeout.link);
 		list_del_init(&group->error_fatal.link);
 		spin_unlock_irqrestore(&kctx->csf.event_lock, flags);
-
-		term_queue_group(group);
-		kctx->csf.queue_groups[group_handle] = NULL;
 	}
 
 	mutex_unlock(&kctx->csf.lock);
 	if (reset_prevented)
 		kbase_reset_gpu_allow(kbdev);
 
-	if (!group)
-		return;
-
-	/* Cancel any pending event callbacks. If one is in progress
-	 * then this thread waits synchronously for it to complete (which
-	 * is why we must unlock the context first). We already ensured
-	 * that no more callbacks can be enqueued by terminating the group.
-	 */
-	cancel_queue_group_events(group);
 	kfree(group);
 }
 
@@ -1891,9 +1900,7 @@ void kbase_csf_ctx_term(struct kbase_context *kctx)
 		 * only one reference left that was taken when queue was
 		 * registered.
 		 */
-		if (atomic_read(&queue->refcount) != 1)
-			dev_warn(kctx->kbdev->dev,
-				 "Releasing queue with incorrect refcounting!\n");
+		WARN_ON(atomic_read(&queue->refcount) != 1);
 		list_del_init(&queue->link);
 		release_queue(queue);
 	}
@@ -2757,9 +2764,14 @@ static void process_csg_interrupts(struct kbase_device *const kbdev,
 			 group->handle, csg_nr);
 
 		/* Check if the scheduling tick can be advanced */
-		if (kbase_csf_scheduler_all_csgs_idle(kbdev) &&
-		    !scheduler->gpu_idle_fw_timer_enabled) {
-			kbase_csf_scheduler_advance_tick_nolock(kbdev);
+		if (kbase_csf_scheduler_all_csgs_idle(kbdev)) {
+			if (!scheduler->gpu_idle_fw_timer_enabled)
+				kbase_csf_scheduler_advance_tick_nolock(kbdev);
+		} else if (atomic_read(&scheduler->non_idle_offslot_grps)) {
+			/* If there are non-idle CSGs waiting for a slot, fire
+			 * a tock for a replacement.
+			 */
+			mod_delayed_work(scheduler->wq, &scheduler->tock_work, 0);
 		}
 	}
 
@@ -2770,7 +2782,8 @@ static void process_csg_interrupts(struct kbase_device *const kbdev,
 		KBASE_KTRACE_ADD_CSF_GRP(kbdev, CSG_PROGRESS_TIMER_INTERRUPT,
 					 group, req ^ ack);
 		dev_info(kbdev->dev,
-			"Timeout notification received for group %u of ctx %d_%d on slot %d\n",
+			"[%llu] Iterator PROGRESS_TIMER timeout notification received for group %u of ctx %d_%d on slot %d\n",
+			kbase_backend_get_cycle_cnt(kbdev),
 			group->handle, group->kctx->tgid, group->kctx->id, csg_nr);
 
 		handle_progress_timer_event(group);
@@ -2995,7 +3008,7 @@ int kbase_csf_doorbell_mapping_init(struct kbase_device *kbdev)
 
 	ret = kbase_mem_pool_alloc_pages(
 		&kbdev->mem_pools.small[KBASE_MEM_GROUP_CSF_FW],
-		1, &phys, false);
+		1, &phys, false,NULL);
 
 	if (ret <= 0) {
 		fput(filp);
@@ -3031,7 +3044,7 @@ int kbase_csf_setup_dummy_user_reg_page(struct kbase_device *kbdev)
 
 	ret = kbase_mem_pool_alloc_pages(
 		&kbdev->mem_pools.small[KBASE_MEM_GROUP_CSF_FW], 1, &phys,
-		false);
+		false,NULL);
 
 	if (ret <= 0)
 		return ret;
@@ -3066,4 +3079,3 @@ u8 kbase_csf_priority_check(struct kbase_device *kbdev, u8 req_priority)
 
 	return out_priority;
 }
-

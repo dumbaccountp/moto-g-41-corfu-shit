@@ -13,9 +13,9 @@
 #endif
 
 struct nft_tproxy {
-	u8	sreg_addr;
-	u8	sreg_port;
-	u8	family;
+	enum nft_registers      sreg_addr:8;
+	enum nft_registers      sreg_port:8;
+	u8			family;
 };
 
 static void nft_tproxy_eval_v4(const struct nft_expr *expr,
@@ -29,12 +29,6 @@ static void nft_tproxy_eval_v4(const struct nft_expr *expr,
 	__be32 taddr = 0;
 	__be16 tport = 0;
 	struct sock *sk;
-
-	if (pkt->tprot != IPPROTO_TCP &&
-	    pkt->tprot != IPPROTO_UDP) {
-		regs->verdict.code = NFT_BREAK;
-		return;
-	}
 
 	hp = skb_header_pointer(skb, ip_hdrlen(skb), sizeof(_hdr), &_hdr);
 	if (!hp) {
@@ -97,8 +91,7 @@ static void nft_tproxy_eval_v6(const struct nft_expr *expr,
 
 	memset(&taddr, 0, sizeof(taddr));
 
-	if (pkt->tprot != IPPROTO_TCP &&
-	    pkt->tprot != IPPROTO_UDP) {
+	if (!pkt->tprot_set) {
 		regs->verdict.code = NFT_BREAK;
 		return;
 	}
@@ -225,14 +218,14 @@ static int nft_tproxy_init(const struct nft_ctx *ctx,
 
 	switch (priv->family) {
 	case NFPROTO_IPV4:
-		alen = sizeof_field(union nf_inet_addr, in);
+		alen = FIELD_SIZEOF(union nf_inet_addr, in);
 		err = nf_defrag_ipv4_enable(ctx->net);
 		if (err)
 			return err;
 		break;
 #if IS_ENABLED(CONFIG_NF_TABLES_IPV6)
 	case NFPROTO_IPV6:
-		alen = sizeof_field(union nf_inet_addr, in6);
+		alen = FIELD_SIZEOF(union nf_inet_addr, in6);
 		err = nf_defrag_ipv6_enable(ctx->net);
 		if (err)
 			return err;
@@ -254,15 +247,15 @@ static int nft_tproxy_init(const struct nft_ctx *ctx,
 	}
 
 	if (tb[NFTA_TPROXY_REG_ADDR]) {
-		err = nft_parse_register_load(tb[NFTA_TPROXY_REG_ADDR],
-					      &priv->sreg_addr, alen);
+		priv->sreg_addr = nft_parse_register(tb[NFTA_TPROXY_REG_ADDR]);
+		err = nft_validate_register_load(priv->sreg_addr, alen);
 		if (err < 0)
 			return err;
 	}
 
 	if (tb[NFTA_TPROXY_REG_PORT]) {
-		err = nft_parse_register_load(tb[NFTA_TPROXY_REG_PORT],
-					      &priv->sreg_port, sizeof(u16));
+		priv->sreg_port = nft_parse_register(tb[NFTA_TPROXY_REG_PORT]);
+		err = nft_validate_register_load(priv->sreg_port, sizeof(u16));
 		if (err < 0)
 			return err;
 	}

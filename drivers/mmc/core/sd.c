@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/mmc/core/sd.c
  *
  *  Copyright (C) 2003-2004 Russell King, All Rights Reserved.
  *  SD support Copyright (C) 2004 Ian Molton, All Rights Reserved.
  *  Copyright (C) 2005-2007 Pierre Ossman, All Rights Reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/err.h>
@@ -17,8 +20,6 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/sd.h>
-
-#include <trace/hooks/mmc_core.h>
 
 #include "core.h"
 #include "card.h"
@@ -214,11 +215,6 @@ static int mmc_decode_scr(struct mmc_card *card)
 		/* Check if Physical Layer Spec v3.0 is supported */
 		scr->sda_spec3 = UNSTUFF_BITS(resp, 47, 1);
 
-	if (scr->sda_spec3) {
-		scr->sda_spec4 = UNSTUFF_BITS(resp, 42, 1);
-		scr->sda_specx = UNSTUFF_BITS(resp, 38, 4);
-	}
-
 	if (UNSTUFF_BITS(resp, 55, 1))
 		card->erased_byte = 0xFF;
 	else
@@ -244,8 +240,6 @@ static int mmc_read_ssr(struct mmc_card *card)
 {
 	unsigned int au, es, et, eo;
 	__be32 *raw_ssr;
-	u32 resp[4] = {};
-	u8 discard_support;
 	int i;
 
 	if (!(card->csd.cmdclass & CCC_APP_SPEC)) {
@@ -290,14 +284,6 @@ static int mmc_read_ssr(struct mmc_card *card)
 				mmc_hostname(card->host));
 		}
 	}
-
-	/*
-	 * starting SD5.1 discard is supported if DISCARD_SUPPORT (b313) is set
-	 */
-	resp[3] = card->raw_ssr[6];
-	discard_support = UNSTUFF_BITS(resp, 313 - 288, 1);
-	card->erase_arg = (card->scr.sda_specx && discard_support) ?
-			    SD_DISCARD_ARG : SD_ERASE_ARG;
 
 	return 0;
 }
@@ -384,11 +370,11 @@ int mmc_sd_switch_hs(struct mmc_card *card)
 	if (!status)
 		return -ENOMEM;
 
-	err = mmc_sd_switch(card, 1, 0, HIGH_SPEED_BUS_SPEED, status);
+	err = mmc_sd_switch(card, 1, 0, 1, status);
 	if (err)
 		goto out;
 
-	if ((status[16] & 0xF) != HIGH_SPEED_BUS_SPEED) {
+	if ((status[16] & 0xF) != 1) {
 		pr_warn("%s: Problem switching card into high-speed mode!\n",
 			mmc_hostname(card->host));
 		err = 0;
@@ -464,8 +450,6 @@ static void sd_update_bus_speed_mode(struct mmc_card *card)
 		    SD_MODE_UHS_SDR12)) {
 			card->sd_bus_speed = UHS_SDR12_BUS_SPEED;
 	}
-
-	trace_android_vh_sd_update_bus_speed_mode(card);
 }
 
 static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
@@ -717,36 +701,7 @@ static ssize_t mmc_dsr_show(struct device *dev,
 
 static DEVICE_ATTR(dsr, S_IRUGO, mmc_dsr_show, NULL);
 
-MMC_DEV_ATTR(vendor, "0x%04x\n", card->cis.vendor);
-MMC_DEV_ATTR(device, "0x%04x\n", card->cis.device);
-MMC_DEV_ATTR(revision, "%u.%u\n", card->major_rev, card->minor_rev);
-
-#define sdio_info_attr(num)									\
-static ssize_t info##num##_show(struct device *dev, struct device_attribute *attr, char *buf)	\
-{												\
-	struct mmc_card *card = mmc_dev_to_card(dev);						\
-												\
-	if (num > card->num_info)								\
-		return -ENODATA;								\
-	if (!card->info[num-1][0])								\
-		return 0;									\
-	return sprintf(buf, "%s\n", card->info[num-1]);						\
-}												\
-static DEVICE_ATTR_RO(info##num)
-
-sdio_info_attr(1);
-sdio_info_attr(2);
-sdio_info_attr(3);
-sdio_info_attr(4);
-
 static struct attribute *sd_std_attrs[] = {
-	&dev_attr_vendor.attr,
-	&dev_attr_device.attr,
-	&dev_attr_revision.attr,
-	&dev_attr_info1.attr,
-	&dev_attr_info2.attr,
-	&dev_attr_info3.attr,
-	&dev_attr_info4.attr,
 	&dev_attr_cid.attr,
 	&dev_attr_csd.attr,
 	&dev_attr_scr.attr,
@@ -765,32 +720,7 @@ static struct attribute *sd_std_attrs[] = {
 	&dev_attr_dsr.attr,
 	NULL,
 };
-
-static umode_t sd_std_is_visible(struct kobject *kobj, struct attribute *attr,
-				 int index)
-{
-	struct device *dev = kobj_to_dev(kobj);
-	struct mmc_card *card = mmc_dev_to_card(dev);
-
-	/* CIS vendor and device ids, revision and info string are available only for Combo cards */
-	if ((attr == &dev_attr_vendor.attr ||
-	     attr == &dev_attr_device.attr ||
-	     attr == &dev_attr_revision.attr ||
-	     attr == &dev_attr_info1.attr ||
-	     attr == &dev_attr_info2.attr ||
-	     attr == &dev_attr_info3.attr ||
-	     attr == &dev_attr_info4.attr
-	    ) && card->type != MMC_TYPE_SD_COMBO)
-		return 0;
-
-	return attr->mode;
-}
-
-static const struct attribute_group sd_std_group = {
-	.attrs = sd_std_attrs,
-	.is_visible = sd_std_is_visible,
-};
-__ATTRIBUTE_GROUPS(sd_std);
+ATTRIBUTE_GROUPS(sd_std);
 
 struct device_type sd_type = {
 	.groups = sd_std_groups,
@@ -851,14 +781,11 @@ try_again:
 		return err;
 
 	/*
-	 * In case the S18A bit is set in the response, let's start the signal
-	 * voltage switch procedure. SPI mode doesn't support CMD11.
-	 * Note that, according to the spec, the S18A bit is not valid unless
-	 * the CCS bit is set as well. We deliberately deviate from the spec in
-	 * regards to this, which allows UHS-I to be supported for SDSC cards.
+	 * In case CCS and S18A in the response is set, start Signal Voltage
+	 * Switch procedure. SPI mode doesn't support CMD11.
 	 */
-	if (!mmc_host_is_spi(host) && (ocr & SD_OCR_S18R) &&
-	    rocr && (*rocr & SD_ROCR_S18A)) {
+	if (!mmc_host_is_spi(host) && rocr &&
+	   ((*rocr & 0x41000000) == 0x41000000)) {
 		err = mmc_set_uhs_voltage(host, pocr);
 		if (err == -EAGAIN) {
 			retries--;
@@ -937,15 +864,14 @@ int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
 
 		/* Erase init depends on CSD and SSR */
 		mmc_init_erase(card);
-	}
 
-	/*
-	 * Fetch switch information from card. Note, sd3_bus_mode can change if
-	 * voltage switch outcome changes, so do this always.
-	 */
-	err = mmc_read_switch(card);
-	if (err)
-		return err;
+		/*
+		 * Fetch switch information from card.
+		 */
+		err = mmc_read_switch(card);
+		if (err)
+			return err;
+	}
 
 	/*
 	 * For SPI, enable CRC as appropriate.
@@ -1024,11 +950,8 @@ retry:
 		return err;
 
 	if (oldcard) {
-		if (memcmp(cid, oldcard->raw_cid, sizeof(cid)) != 0) {
-			pr_debug("%s: Perhaps the card was replaced\n",
-				mmc_hostname(host));
+		if (memcmp(cid, oldcard->raw_cid, sizeof(cid)) != 0)
 			return -ENOENT;
-		}
 
 		card = oldcard;
 	} else {
@@ -1095,15 +1018,26 @@ retry:
 	if (!v18_fixup_failed && !mmc_host_is_spi(host) && mmc_host_uhs(host) &&
 	    mmc_sd_card_using_v18(card) &&
 	    host->ios.signal_voltage != MMC_SIGNAL_VOLTAGE_180) {
-		if (mmc_host_set_uhs_voltage(host) ||
-		    mmc_sd_init_uhs_card(card)) {
-			v18_fixup_failed = true;
-			mmc_power_cycle(host, ocr);
-			if (!oldcard)
-				mmc_remove_card(card);
-			goto retry;
+		/*
+		 * Re-read switch information in case it has changed since
+		 * oldcard was initialized.
+		 */
+		if (oldcard) {
+			err = mmc_read_switch(card);
+			if (err)
+				goto free_card;
 		}
-		goto cont;
+		if (mmc_sd_card_using_v18(card)) {
+			if (mmc_host_set_uhs_voltage(host) ||
+			    mmc_sd_init_uhs_card(card)) {
+				v18_fixup_failed = true;
+				mmc_power_cycle(host, ocr);
+				if (!oldcard)
+					mmc_remove_card(card);
+				goto retry;
+			}
+			goto done;
+		}
 	}
 
 	/* Initialization sequence for UHS-I cards */
@@ -1138,16 +1072,6 @@ retry:
 			mmc_set_bus_width(host, MMC_BUS_WIDTH_4);
 		}
 	}
-cont:
-	if (host->cqe_ops && !host->cqe_enabled) {
-		err = host->cqe_ops->cqe_enable(host, card);
-		if (!err) {
-			host->cqe_enabled = true;
-			host->hsq_enabled = true;
-			pr_info("%s: Host Software Queue enabled\n",
-				mmc_hostname(host));
-		}
-	}
 
 	if (host->caps2 & MMC_CAP2_AVOID_3_3V &&
 	    host->ios.signal_voltage == MMC_SIGNAL_VOLTAGE_330) {
@@ -1156,7 +1080,7 @@ cont:
 		err = -EINVAL;
 		goto free_card;
 	}
-
+done:
 	host->card = card;
 	return 0;
 
@@ -1399,8 +1323,6 @@ err:
 
 	pr_err("%s: error %d whilst initialising SD card\n",
 		mmc_hostname(host), err);
-
-	trace_android_vh_mmc_attach_sd(host, ocr, err);
 
 	return err;
 }

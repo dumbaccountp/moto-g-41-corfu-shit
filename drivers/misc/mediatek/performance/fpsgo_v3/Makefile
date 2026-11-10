@@ -1,72 +1,41 @@
-ifeq ($(CONFIG_MTK_FPSGO_V3),$(filter $(CONFIG_MTK_FPSGO_V3),m))
-ccflags-y += -DCONFIG_MTK_FPSGO_V3
-subdir-ccflags-y += -DCONFIG_MTK_FPSGO_V3
-endif
-
+#
+# Copyright (C) 2017 MediaTek Inc.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+MTK_TOP = $(srctree)/drivers/misc/mediatek/
 FPSGO_TOP = $(srctree)/drivers/misc/mediatek/performance/fpsgo_v3/
 BASE_TOP = $(FPSGO_TOP)/base
 FBT_TOP = $(FPSGO_TOP)/fbt
 FSTB_TOP = $(FPSGO_TOP)/fstb
 COM_TOP = $(FPSGO_TOP)/composer
-GBE_TOP = $(FPSGO_TOP)/gbe
+VIDEOX_TOP += $(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox
+
+obj-y += fpsgo_main.o
+obj-y += base/
+obj-y += composer/
+
+obj-y += fbt/
+obj-y += fstb/
 
 ccflags-y += \
         -I$(srctree)/include/ \
-        -I$(srctree)/drivers/gpu/drm/mediatek/mediatek_v2/ \
-        -I$(srctree)/drivers/gpu/mediatek/ged/include/ \
-        -I$(FPSGO_TOP)/mt-plat/ \
-        -I$(BASE_TOP)/include/ \
+        -I$(MTK_TOP)/include/ \
+	-I$(MTK_TOP)/dfrc/ \
+	-I$(BASE_TOP)/include/ \
         -I$(FBT_TOP)/include/ \
         -I$(FSTB_TOP)/ \
         -I$(COM_TOP)/include/ \
-        -I$(srctree)/kernel/ \
-        -I$(srctree)/drivers/misc/mediatek/sched/ \
-        -I$(srctree)/drivers/misc/mediatek/include/mt-plat/ \
-        -I$(srctree)/drivers/thermal/mediatek/ \
-        -I$(GBE_TOP)/ \
-
-subdir-ccflags-y += \
-        -I$(srctree)/include/ \
-        -I$(srctree)/drivers/gpu/drm/mediatek/mediatek_v2/ \
-        -I$(srctree)/drivers/gpu/mediatek/ged/include/ \
-        -I$(FPSGO_TOP)/mt-plat/ \
-        -I$(BASE_TOP)/include/ \
-        -I$(FBT_TOP)/include/ \
-        -I$(FSTB_TOP)/ \
-        -I$(COM_TOP)/include/ \
-        -I$(srctree)/kernel/ \
-        -I$(srctree)/drivers/misc/mediatek/sched/ \
-        -I$(srctree)/drivers/misc/mediatek/include/mt-plat/ \
-        -I$(srctree)/drivers/thermal/mediatek/ \
-        -I$(GBE_TOP)/ \
-
-
-#fpsgo_main
-MTK_FPSGO_MAIN += fpsgo_main.o
-
-#base
-include $(FPSGO_TOP)/base/build.mk
-MTK_FPSGO_BASE = $(mtk_fpsgo_base_objs:%.o=base/%.o)
-
-#composer
-include $(FPSGO_TOP)/composer/build.mk
-MTK_FPSGO_COMPOSER = $(mtk_fpsgo_composer_objs:%.o=composer/%.o)
-
-#fbt
-include $(FPSGO_TOP)/fbt/build.mk
-ccflags-y += -DNR_FREQ_CPU=32
-MTK_FPSGO_FBT = $(mtk_fpsgo_fbt_objs:%.o=fbt/%.o)
-
-#fstb
-include $(FPSGO_TOP)/fstb/build.mk
-MTK_FPSGO_FSTB = $(mtk_fpsgo_fstb_objs:%.o=fstb/%.o)
-
-#gbe
-include $(FPSGO_TOP)/gbe/build.mk
-MTK_FPSGO_GBE = $(mtk_fpsgo_gbe_objs:%.o=gbe/%.o)
-
-MTK_FPSGO_SRC = $(MTK_FPSGO_MAIN) $(MTK_FPSGO_BASE) $(MTK_FPSGO_COMPOSER) $(MTK_FPSGO_FBT) $(MTK_FPSGO_FSTB) $(MTK_FPSGO_GBE)
-
-obj-$(CONFIG_MTK_FPSGO_V3) += mtk_fpsgo.o
-mtk_fpsgo-objs += $(MTK_FPSGO_SRC)
-
+        -I$(EARA_JOB_TOP)/include/ \
+        -I$(VIDEOX_TOP)/ \
+        -I$(srctree)/drivers/gpu/drm/mediatek/ \

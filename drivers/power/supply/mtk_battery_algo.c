@@ -16,24 +16,20 @@ int set_kernel_soc(struct mtk_battery *gm, int _soc)
 
 void set_fg_bat_tmp_c_gap(int tmp)
 {
-	battery_set_property(BAT_PROP_TEMP_TH_GAP, tmp);
+	battery_set_property(BAT_PROP_UISOC, tmp);
 }
 
 void set_fg_time(struct mtk_battery *gm, int _time)
 {
-	struct timespec64 tmp_time_now, end_time;
-	ktime_t ktime, time_now;
+	struct timespec time, time_now, end_time;
+	ktime_t ktime;
 
-	if (_time != 0 && _time > 0) {
-		time_now = ktime_get_boottime();
-		tmp_time_now = ktime_to_timespec64(time_now);
-		end_time.tv_sec = tmp_time_now.tv_sec + _time;
-
-		ktime = ktime_set(end_time.tv_sec, end_time.tv_nsec);
-		alarm_start(&gm->tracking_timer, ktime);
-	} else {
-		alarm_cancel(&gm->tracking_timer);
-	}
+	get_monotonic_boottime(&time_now);
+	time.tv_sec = _time;
+	time.tv_nsec = 0;
+	end_time = timespec_add(time_now, time);
+	ktime = ktime_set(end_time.tv_sec, end_time.tv_nsec);
+	alarm_start(&gm->tracking_timer, ktime);
 }
 
 int get_d0_c_soc_cust(struct mtk_battery *gm, int value)
@@ -65,9 +61,7 @@ int get_ptim_i(struct mtk_battery *gm)
 	union power_supply_propval val;
 
 	psy = gm->gauge->psy;
-
-	if (psy != NULL)
-		power_supply_get_property(psy,
+	power_supply_get_property(psy,
 				POWER_SUPPLY_PROP_CURRENT_NOW, &val);
 
 	return val.intval;
@@ -336,9 +330,9 @@ void fgr_construct_battery_profile(struct mtk_battery *gm, int table_idx)
 		temp_profile_p[i].resistance =
 		interpolation(low_temp, low_profile_p[i].resistance,
 		high_temp, high_profile_p[i].resistance, temperature);
-		temp_profile_p[i].charge_r.rdc[0] =
-		interpolation(low_temp, low_profile_p[i].charge_r.rdc[0],
-		high_temp, high_profile_p[i].charge_r.rdc[0], temperature);
+		temp_profile_p[i].resistance2 =
+		interpolation(low_temp, low_profile_p[i].resistance2,
+		high_temp, high_profile_p[i].resistance2, temperature);
 
 	}
 
@@ -1398,12 +1392,7 @@ void fgr_int_end_flow(struct mtk_battery *gm, unsigned int intr_no)
 
 	algo->car = gauge_get_int_property(GAUGE_PROP_COULOMB);
 	get_hw_info();
-
-	if (gm->disableGM30)
-		vbat = 4000;
-	else
-		vbat = gauge_get_int_property(GAUGE_PROP_BATTERY_VOLTAGE);
-
+	vbat = gauge_get_int_property(GAUGE_PROP_BATTERY_VOLTAGE);
 	curr_temp = force_get_tbat(gm, true);
 
 	set_kernel_soc(gm, algo->soc);
@@ -1646,10 +1635,7 @@ void fgr_time_handler(struct mtk_battery *gm)
 				algo->low_tracking_enable = 0;
 			}
 		}
-	}
-	if (algo->low_tracking_enable)
-		set_fg_time(gm, gm->fg_cust_data.discharge_tracking_time);
-	else
+	} else
 		set_fg_time(gm, 0);
 }
 
@@ -1809,7 +1795,7 @@ void fgr_set_int1(struct mtk_battery *gm)
 
 void battery_algo_init(struct mtk_battery *gm)
 {
-	int is_bat_exist = 1;
+	int is_bat_exist;
 	struct mtk_battery_algo *algo;
 	struct fuel_gauge_table_custom_data *ptable;
 

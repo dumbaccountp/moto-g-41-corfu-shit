@@ -15,12 +15,6 @@
 
 #include <linux/mfd/mt6360-private.h>
 
-#if IS_ENABLED(CONFIG_MTK_FLASHLIGHT)
-#include "flashlight-core.h"
-
-#include <linux/power_supply.h>
-#endif
-
 enum {
 	MT6360_LED_ISINK1 = 0,
 	MT6360_LED_ISINK2,
@@ -136,13 +130,6 @@ enum {
 					 LED_FAULT_INPUT_VOLTAGE |\
 					 LED_FAULT_TIMEOUT)
 
-/* debug info */
-#define MT6360_PMU_CHG_CTRL1	(0x11)
-#define MT6360_PMU_CHG_CTRL2	(0x12)
-#define MT6360_MASK_HZ_EN	(0x04)
-#define MT6360_MASK_CFO_EN	(0x02)
-#define MT6360_FLED_CHG_VINOVP	(MT6360_PMU_CHG_MASK2)
-
 struct mt6360_led_platform_data {
 	u32 rgbon_sync;
 	u32 fled1_ultraistrb;
@@ -192,21 +179,7 @@ struct mt6360_fled_classdev {
 	unsigned int strobe_external_reg;
 	unsigned int strobe_external_mask;
 	u32 faults;
-#if IS_ENABLED(CONFIG_MTK_FLASHLIGHT)
-	struct flashlight_device_id dev_id;
-#endif
 };
-
-#if IS_ENABLED(CONFIG_MTK_FLASHLIGHT)
-static struct led_classdev_flash *mt6360_flash_class[MT6360_FLED_MAX];
-
-/* is decrease voltage */
-static int is_decrease_voltage;
-static DEFINE_MUTEX(mt6360_mutex);
-
-/* define usage count */
-static int fd_use_count;
-#endif
 
 struct mt6360_led_info {
 	struct device *dev;
@@ -436,18 +409,10 @@ static int mt6360_fled_strobe_set(
 	struct led_classdev *led_cdev = &fled_cdev->led_cdev;
 	struct mt6360_led_info *mli = dev_get_drvdata(led_cdev->dev->parent);
 	struct mt6360_fled_classdev *mtfled_cdev = (void *)fled_cdev;
-	int id = mtfled_cdev->index, ret, regval = 0;
+	int id = mtfled_cdev->index, ret;
 
-	/* Un-mask fled_chg_vinovp */
-	ret = regmap_update_bits(mli->regmap,
-				 MT6360_FLED_CHG_VINOVP, 0x08, 0);
-	if (ret < 0)
-		dev_err(led_cdev->dev, "Fail to set fled_chg_vinovp, %d\n", ret);
-
-	dev_notice(led_cdev->dev, "%s: id[%d], state %d\n", __func__, id, state);
+	dev_dbg(led_cdev->dev, "%s: id[%d], state %d\n", __func__, id, state);
 	if (!(state ^ test_bit(id, &mli->fl_strobe_flags))) {
-		regmap_update_bits(mli->regmap,
-				   MT6360_FLED_CHG_VINOVP, 0x08, 0xff);
 		dev_dbg(led_cdev->dev,
 			"no change for strobe [%lu]\n", mli->fl_strobe_flags);
 		return 0;
@@ -457,33 +422,6 @@ static int mt6360_fled_strobe_set(
 			"Disable all leds torch [%lu]\n", mli->fl_torch_flags);
 		return -EINVAL;
 	}
-
-	if (state == true) {
-		ret = regmap_read(mli->regmap, MT6360_PMU_CHG_CTRL1, &regval);
-		if (ret < 0)
-			return ret;
-		if (regval & MT6360_MASK_HZ_EN)
-			dev_notice(led_cdev->dev,
-				   "%s: strobe with hz mode\n", __func__);
-
-		ret = regmap_read(mli->regmap, MT6360_PMU_CHG_CTRL2, &regval);
-		if (ret < 0)
-			return ret;
-		if (regval & MT6360_MASK_CFO_EN)
-			dev_notice(led_cdev->dev,
-				   "%s: strobe with cfo_en=0\n", __func__);
-	}
-
-#ifdef CONFIG_MTK_FLASHLIGHT_DLPT
-	flashlight_kicker_pbm(state);
-#endif
-#ifdef CONFIG_MTK_FLASHLIGHT_PT
-	if (flashlight_pt_is_low()) {
-		dev_info(led_cdev->dev, "pt is low\n");
-		return 0;
-	}
-#endif
-
 	ret = regmap_update_bits(mli->regmap, mtfled_cdev->cs_enable_reg,
 				 mtfled_cdev->cs_enable_mask, state ? 0xff : 0);
 	if (ret < 0) {
@@ -506,8 +444,6 @@ static int mt6360_fled_strobe_set(
 		if (!mt6360_fled_check_flags_if_any(&mli->fl_strobe_flags))
 			usleep_range(400, 500);
 	}
-	regmap_update_bits(mli->regmap,
-			   MT6360_FLED_CHG_VINOVP, 0x08, 0xff);
 out_strobe_set:
 	return ret;
 }
@@ -598,17 +534,6 @@ static int mt6360_fled_brightness_set(struct led_classdev *led_cdev,
 			dev_err(led_cdev->dev, "Fail to set torch disable\n");
 		goto out_bright_set;
 	}
-
-#ifdef CONFIG_MTK_FLASHLIGHT_DLPT
-	flashlight_kicker_pbm(1);
-#endif
-#ifdef CONFIG_MTK_FLASHLIGHT_PT
-	if (flashlight_pt_is_low()) {
-		dev_info(led_cdev->dev, "pt is low\n");
-		return 0;
-	}
-#endif
-
 	shift = ffs(mtfled_cdev->torch_bright_mask) - 1;
 	brightness -= 1;
 	ret = regmap_update_bits(mli->regmap, mtfled_cdev->torch_bright_reg,
@@ -737,15 +662,9 @@ static void mt6360_init_v4l2_flash_config(
 	struct led_flash_setting *torch_intensity = &config->intensity;
 	struct led_classdev *led_cdev = &(mtfled_cdev->fl_cdev.led_cdev);
 	s32 val;
-	int ret = 0;
 
-	ret = snprintf(config->dev_name, sizeof(config->dev_name),
+	snprintf(config->dev_name, sizeof(config->dev_name),
 		 "%s", mtfled_cdev->fl_cdev.led_cdev.name);
-	if ((ret < 0) || (ret >= sizeof(config->dev_name))) {
-		dev_notice(led_cdev->dev, "%s:fail,ret = %d\n", __func__, ret);
-		return;
-	}
-
 	torch_intensity->min = MT6360_TORCHCUR_MIN;
 	torch_intensity->step = MT6360_TORCHCUR_STEP;
 	val = MT6360_TORCHCUR_MIN;
@@ -855,159 +774,6 @@ static int mt6360_fled_irq_register(struct platform_device *pdev)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_MTK_FLASHLIGHT)
-/******************************************************************************
- * Charger power supply class
- *****************************************************************************/
-static int mt6360_high_voltage_supply(int enable)
-{
-	union power_supply_propval prop;
-	static struct power_supply *chg_psy;
-	int ret;
-
-	if (chg_psy == NULL)
-		chg_psy = power_supply_get_by_name("mtk-master-charger");
-	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		pr_notice("%s Couldn't get chg_psy\n", __func__);
-		ret = -1;
-	} else {
-		prop.intval = enable;
-		ret = power_supply_set_property(chg_psy,
-			 POWER_SUPPLY_PROP_VOLTAGE_MAX, &prop);
-		pr_notice("%s enable_hv:%d\n", __func__, prop.intval);
-		power_supply_changed(chg_psy);
-	}
-
-	return ret;
-}
-
-static int mt6360_set_scenario(int scenario)
-{
-	/* notify charger to increase or decrease voltage */
-	mutex_lock(&mt6360_mutex);
-	if (scenario & FLASHLIGHT_SCENARIO_CAMERA_MASK) {
-		if (!is_decrease_voltage) {
-			pr_info("Decrease voltage level.\n");
-			mt6360_high_voltage_supply(0);
-			is_decrease_voltage = 1;
-		}
-	} else {
-		if (is_decrease_voltage) {
-			pr_info("Increase voltage level.\n");
-			mt6360_high_voltage_supply(1);
-			is_decrease_voltage = 0;
-		}
-	}
-	mutex_unlock(&mt6360_mutex);
-
-	return 0;
-}
-
-static int mt6360_open(void)
-{
-	mutex_lock(&mt6360_mutex);
-	fd_use_count++;
-	pr_debug("open driver: %d\n", fd_use_count);
-	mutex_unlock(&mt6360_mutex);
-	return 0;
-}
-
-static int mt6360_release(void)
-{
-	mutex_lock(&mt6360_mutex);
-	fd_use_count--;
-	pr_debug("close driver: %d\n", fd_use_count);
-	/* If camera NE, we need to enable pe by ourselves*/
-	if (fd_use_count == 0 && is_decrease_voltage) {
-		pr_info("Increase voltage level.\n");
-		mt6360_high_voltage_supply(1);
-		is_decrease_voltage = 0;
-	}
-	mutex_unlock(&mt6360_mutex);
-	return 0;
-}
-
-static int mt6360_ioctl(unsigned int cmd, unsigned long arg)
-{
-	struct flashlight_dev_arg *fl_arg;
-	int channel;
-	struct led_classdev_flash *flcdev;
-	struct led_classdev *lcdev;
-
-	fl_arg = (struct flashlight_dev_arg *)arg;
-	channel = fl_arg->channel;
-
-	if (channel >= MT6360_FLED_MAX || channel < 0) {
-		pr_info("Failed with error channel\n");
-		return -EINVAL;
-	}
-
-	flcdev = mt6360_flash_class[channel];
-	if (flcdev == NULL) {
-		pr_info("Get flcdev failed\n");
-		return -EINVAL;
-	}
-
-	lcdev = &flcdev->led_cdev;
-	if (lcdev == NULL) {
-		pr_info("Get lcdev failed\n");
-		return -EINVAL;
-	}
-
-	switch (cmd) {
-	case FLASH_IOC_SET_ONOFF:
-		pr_info("FLASH_IOC_SET_ONOFF(%d): %d\n",
-				channel, (int)fl_arg->arg);
-		mt6360_fled_brightness_set(lcdev, (int)fl_arg->arg);
-		break;
-
-	case FLASH_IOC_SET_SCENARIO:
-		pr_debug("FLASH_IOC_SET_SCENARIO(%d): %d\n",
-				channel, (int)fl_arg->arg);
-		mt6360_set_scenario(fl_arg->arg);
-		break;
-
-	default:
-		dev_info(lcdev->dev, "No such command and arg(%d): (%d, %d)\n",
-				channel, _IOC_NR(cmd), (int)fl_arg->arg);
-		return -ENOTTY;
-
-	}
-	return 0;
-}
-
-static ssize_t mt6360_strobe_store(struct flashlight_arg arg)
-{
-	struct led_classdev_flash *flcdev;
-	struct led_classdev *lcdev;
-
-	if (arg.channel < 0 || arg.channel >= MT6360_FLED_MAX) {
-		pr_info("%s: fail, error channel %d\n", __func__, arg.channel);
-		return -EINVAL;
-	}
-
-	flcdev = mt6360_flash_class[arg.channel];
-	lcdev = &flcdev->led_cdev;
-	mt6360_fled_brightness_set(lcdev, 1);
-	msleep(arg.dur);
-	mt6360_fled_brightness_set(lcdev, 0);
-	return 0;
-}
-
-static int mt6360_set_driver(int set)
-{
-	return 0;
-}
-
-static struct flashlight_operations mt6360_ops = {
-	mt6360_open,
-	mt6360_release,
-	mt6360_ioctl,
-	mt6360_strobe_store,
-	mt6360_set_driver
-};
-#endif
-
 static int mt6360_iled_parse_dt(struct device *dev,
 				struct mt6360_led_info *mli)
 {
@@ -1062,8 +828,6 @@ static int mt6360_fled_parse_dt(struct device *dev,
 	if (!fled_np)
 		return 0;
 	for_each_available_child_of_node(fled_np, child) {
-		u32 reg = 0;
-
 		ret = of_property_read_u32(child, "reg", &val);
 		if (ret) {
 			dev_err(dev, "Fail to read reg property\n");
@@ -1075,7 +839,6 @@ static int mt6360_fled_parse_dt(struct device *dev,
 			goto out_fled_dt;
 		}
 		mtfled_cdev = mli->mtfled_cdev + val;
-		reg = val;
 
 		of_property_read_string(child, "label",
 					&(mtfled_cdev->fl_cdev.led_cdev.name));
@@ -1108,24 +871,6 @@ static int mt6360_fled_parse_dt(struct device *dev,
 		fs = &(mtfled_cdev->fl_cdev.timeout);
 		fs->val = fs->max = min(fs->max, val);
 		mtfled_cdev->np = child;
-#if IS_ENABLED(CONFIG_MTK_FLASHLIGHT)
-		of_property_read_u32(child, "type", &mtfled_cdev->dev_id.type);
-		of_property_read_u32(child, "ct", &mtfled_cdev->dev_id.ct);
-		of_property_read_u32(child, "part", &mtfled_cdev->dev_id.part);
-		snprintf(mtfled_cdev->dev_id.name, FLASHLIGHT_NAME_SIZE,
-				mtfled_cdev->fl_cdev.led_cdev.name);
-		mtfled_cdev->dev_id.channel = reg;
-		mt6360_flash_class[reg] = &mtfled_cdev->fl_cdev;
-		mtfled_cdev->dev_id.decouple = 0;
-		dev_info(dev, "Parse dt (type,ct,part,name,channel,decouple)=(%d,%d,%d,%s,%d,%d).\n",
-				mtfled_cdev->dev_id.type, mtfled_cdev->dev_id.ct,
-				mtfled_cdev->dev_id.part, mtfled_cdev->dev_id.name,
-				mtfled_cdev->dev_id.channel,
-				mtfled_cdev->dev_id.decouple);
-		if (flashlight_dev_register_by_device_id(&mtfled_cdev->dev_id,
-			&mt6360_ops))
-			return -EFAULT;
-#endif
 	}
 	return 0;
 out_fled_dt:
@@ -1261,18 +1006,6 @@ static int mt6360_led_probe(struct platform_device *pdev)
 			goto out_v4l2_sd;
 		}
 	}
-
-	/* Default mask fled_chg_vinovp*/
-	ret = regmap_update_bits(mli->regmap,
-			   MT6360_FLED_CHG_VINOVP, 0x08, 0xff);
-	if (ret < 0)
-		dev_err(&pdev->dev, "Fail to set fled_chg_vinovp, %d\n", ret);
-#if IS_ENABLED(CONFIG_MTK_FLASHLIGHT)
-	/* clear attributes */
-	fd_use_count = 0;
-	is_decrease_voltage = 0;
-#endif
-
 	ret = mt6360_fled_irq_register(pdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to register irqs\n");
@@ -1302,9 +1035,6 @@ static int mt6360_led_remove(struct platform_device *pdev)
 
 	for (i = 0; i < MT6360_FLED_MAX; i++) {
 		mtfled_cdev = mli->mtfled_cdev + i;
-#if IS_ENABLED(CONFIG_MTK_FLASHLIGHT)
-		flashlight_dev_unregister_by_device_id(&mtfled_cdev->dev_id);
-#endif
 		v4l2_flash_release(mtfled_cdev->v4l2_flash);
 		led_classdev_flash_unregister(&mtfled_cdev->fl_cdev);
 	}

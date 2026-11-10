@@ -20,6 +20,9 @@
 #include <linux/seq_file.h>
 
 #include <teei_client_main.h>
+#ifdef CONFIG_MTK_TEE_SANITY
+#include <tee_sanity.h>
+#endif
 #include "tz_log.h"
 #include "nt_smc_call.h"
 #include "notify_queue.h"
@@ -121,7 +124,6 @@ static void tz_driver_dump_logs(struct tz_log_state *s)
 	struct boot_log_rb *boot_log = s->boot_log;
 	uint32_t get, put, alloc;
 	int read_chars;
-	int ret = 0;
 	static DEFINE_RATELIMIT_STATE(_rs,
 				TZ_LOG_RATELIMIT_INTERVAL,
 				TZ_LOG_RATELIMIT_BURST);
@@ -172,10 +174,7 @@ static void tz_driver_dump_logs(struct tz_log_state *s)
 		 * if log level >= KERN_INFO)
 		 */
 
-		if (likely(is_teei_ready()))
-			IMSG_PRINTK("[TZ_LOG] %s", s->line_buffer);
-		else
-			IMSG_PRINTK("[TZ_LOG] %s", s->line_buffer);
+		IMSG_PRINTK("[TZ_LOG] %s", s->line_buffer);
 
 		/*
 		 * Dump early log to boot log buffer
@@ -190,9 +189,7 @@ static void tz_driver_dump_logs(struct tz_log_state *s)
 
 		/* Print warning message */
 		/* if log output frequency is over rate limit */
-		ret = __ratelimit(&_rs);
-		if (ret != 0)
-			IMSG_DEBUG("ratelimit failed\n");
+		__ratelimit(&_rs);
 
 		get += read_chars;
 
@@ -207,8 +204,9 @@ static void tz_driver_dump_logs(struct tz_log_state *s)
 int teei_log_fn(void *work)
 {
 	int retVal = 0;
-#if IS_ENABLED(CONFIG_MICROTRUST_TZ_LOG)
+#ifdef CONFIG_MICROTRUST_TZ_LOG
 	struct tz_log_state *s;
+	unsigned long flags;
 
 	s = g_tz_log_state;
 #endif
@@ -221,7 +219,7 @@ int teei_log_fn(void *work)
 				continue;
 		}
 
-#if IS_ENABLED(CONFIG_MICROTRUST_TZ_LOG)
+#ifdef CONFIG_MICROTRUST_TZ_LOG
 		msleep(20);
 		tz_driver_dump_logs(s);
 #endif
@@ -445,12 +443,7 @@ int tz_log_probe(struct platform_device *pdev)
 		IMSG_ERROR("failed to register panic notifier\n");
 		goto error_panic_notifier;
 	}
-	result = platform_device_add_data(pdev, s, sizeof(struct tz_log_state));
-
-	if (result != 0) {
-		IMSG_ERROR("failed to add device data\n");
-		goto error_panic_notifier;
-	}
+	platform_device_add_data(pdev, s, sizeof(struct tz_log_state));
 
 #ifdef ENABLED_TEEI_BOOT_LOG
 	tz_log_debugfs_init();

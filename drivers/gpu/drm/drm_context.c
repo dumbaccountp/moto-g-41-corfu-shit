@@ -28,13 +28,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <linux/slab.h>
-#include <linux/uaccess.h>
-
-#include <drm/drm_drv.h>
-#include <drm/drm_file.h>
-#include <drm/drm_print.h>
-
+#include <drm/drmP.h>
 #include "drm_legacy.h"
 
 struct drm_ctx_list {
@@ -47,7 +41,7 @@ struct drm_ctx_list {
 /** \name Context bitmap support */
 /*@{*/
 
-/*
+/**
  * Free a handle from the context bitmap.
  *
  * \param dev DRM device.
@@ -68,7 +62,7 @@ void drm_legacy_ctxbitmap_free(struct drm_device * dev, int ctx_handle)
 	mutex_unlock(&dev->struct_mutex);
 }
 
-/*
+/**
  * Context bitmap allocation.
  *
  * \param dev DRM device.
@@ -88,7 +82,7 @@ static int drm_legacy_ctxbitmap_next(struct drm_device * dev)
 	return ret;
 }
 
-/*
+/**
  * Context bitmap initialization.
  *
  * \param dev DRM device.
@@ -104,7 +98,7 @@ void drm_legacy_ctxbitmap_init(struct drm_device * dev)
 	idr_init(&dev->ctx_idr);
 }
 
-/*
+/**
  * Context bitmap cleanup.
  *
  * \param dev DRM device.
@@ -163,7 +157,7 @@ void drm_legacy_ctxbitmap_flush(struct drm_device *dev, struct drm_file *file)
 /** \name Per Context SAREA Support */
 /*@{*/
 
-/*
+/**
  * Get per-context SAREA.
  *
  * \param inode device inode.
@@ -184,7 +178,7 @@ int drm_legacy_getsareactx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	mutex_lock(&dev->struct_mutex);
 
@@ -211,7 +205,7 @@ int drm_legacy_getsareactx(struct drm_device *dev, void *data,
 	return 0;
 }
 
-/*
+/**
  * Set per-context SAREA.
  *
  * \param inode device inode.
@@ -232,7 +226,7 @@ int drm_legacy_setsareactx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	mutex_lock(&dev->struct_mutex);
 	list_for_each_entry(r_list, &dev->maplist, head) {
@@ -263,7 +257,7 @@ int drm_legacy_setsareactx(struct drm_device *dev, void *data,
 /** \name The actual DRM context handling routines */
 /*@{*/
 
-/*
+/**
  * Switch context.
  *
  * \param dev DRM device.
@@ -290,7 +284,7 @@ static int drm_context_switch(struct drm_device * dev, int old, int new)
 	return 0;
 }
 
-/*
+/**
  * Complete context switch.
  *
  * \param dev DRM device.
@@ -318,7 +312,7 @@ static int drm_context_switch_complete(struct drm_device *dev,
 	return 0;
 }
 
-/*
+/**
  * Reserve contexts.
  *
  * \param inode device inode.
@@ -336,7 +330,7 @@ int drm_legacy_resctx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	if (res->count >= DRM_RESERVED_CONTEXTS) {
 		memset(&ctx, 0, sizeof(ctx));
@@ -351,7 +345,7 @@ int drm_legacy_resctx(struct drm_device *dev, void *data,
 	return 0;
 }
 
-/*
+/**
  * Add context.
  *
  * \param inode device inode.
@@ -371,7 +365,7 @@ int drm_legacy_addctx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	tmp_handle = drm_legacy_ctxbitmap_next(dev);
 	if (tmp_handle == DRM_KERNEL_CONTEXT) {
@@ -404,7 +398,7 @@ int drm_legacy_addctx(struct drm_device *dev, void *data,
 	return 0;
 }
 
-/*
+/**
  * Get context.
  *
  * \param inode device inode.
@@ -420,7 +414,7 @@ int drm_legacy_getctx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	/* This is 0, because we don't handle any context flags */
 	ctx->flags = 0;
@@ -428,7 +422,7 @@ int drm_legacy_getctx(struct drm_device *dev, void *data,
 	return 0;
 }
 
-/*
+/**
  * Switch context.
  *
  * \param inode device inode.
@@ -446,13 +440,13 @@ int drm_legacy_switchctx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	DRM_DEBUG("%d\n", ctx->handle);
 	return drm_context_switch(dev, dev->last_context, ctx->handle);
 }
 
-/*
+/**
  * New context.
  *
  * \param inode device inode.
@@ -470,7 +464,7 @@ int drm_legacy_newctx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	DRM_DEBUG("%d\n", ctx->handle);
 	drm_context_switch_complete(dev, file_priv, ctx->handle);
@@ -478,7 +472,7 @@ int drm_legacy_newctx(struct drm_device *dev, void *data,
 	return 0;
 }
 
-/*
+/**
  * Remove context.
  *
  * \param inode device inode.
@@ -496,7 +490,7 @@ int drm_legacy_rmctx(struct drm_device *dev, void *data,
 
 	if (!drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) &&
 	    !drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	DRM_DEBUG("%d\n", ctx->handle);
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {

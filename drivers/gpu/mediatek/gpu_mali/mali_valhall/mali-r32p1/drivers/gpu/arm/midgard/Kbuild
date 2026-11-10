@@ -67,15 +67,13 @@ endif
 #
 
 # *** MTK ***
-$(info *GPU [mtk-Kbuild] src = $(src))
-$(info *GPU [mtk-Kbuild] srctree = $(srctree))
 include $(src)/Kbuild-mtk-custom-env
 include $(src)/platform/mtk_platform_common/Kbuild
 ccflags-y += -I$(src)/include
 subdir-ccflags-y += -I$(src)/include
 
 # Driver version string which is returned to userspace via an ioctl
-MALI_RELEASE_NAME ?= '"r32p1-00bet2"'
+MALI_RELEASE_NAME ?= '"r32p1-00bet5"'
 # Set up defaults if not defined by build system
 ifeq ($(CONFIG_MALI_DEBUG), y)
     MALI_UNIT_TEST = 1
@@ -86,11 +84,15 @@ else
 endif
 MALI_COVERAGE ?= 0
 
-CONFIG_MALI_PLATFORM_NAME ?= "devicetree"
-
+#CONFIG_MALI_PLATFORM_NAME ?= "devicetree"
+# *** MTK ***
+CONFIG_MALI_PLATFORM_NAME ?= $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME)
 # Kconfig passes in the name with quotes for in-tree builds - remove them.
 MALI_PLATFORM_DIR := $(shell echo $(CONFIG_MALI_PLATFORM_NAME))
-include $(src)/platform/$(MALI_PLATFORM_DIR)/Kbuild
+ifeq ($(CONFIG_MTK_TRUSTED_MEMORY_SUBSYSTEM), y)
+    include $(srctree)/drivers/misc/mediatek/trusted_mem/Makefile.include
+    ccflags-y += -I$(srctree)/drivers/staging/android/mtk_ion
+endif
 
 ifeq ($(CONFIG_MALI_CSF_SUPPORT),y)
     MALI_JIT_PRESSURE_LIMIT_BASE = 0
@@ -127,7 +129,7 @@ ccflags-y += \
     -DMALI_JIT_PRESSURE_LIMIT_BASE=$(MALI_JIT_PRESSURE_LIMIT_BASE) \
     -DMALI_INCREMENTAL_RENDERING=$(MALI_INCREMENTAL_RENDERING) \
     -DMALI_KBASE_BUILD \
-#    -DMALI_PLATFORM_DIR=$(MALI_PLATFORM_DIR)
+    -DMALI_PLATFORM_DIR=$(MALI_PLATFORM_DIR)
 
 
 ifeq ($(KBUILD_EXTMOD),)
@@ -151,27 +153,11 @@ subdir-ccflags-y += $(ccflags-y)
 #
 # Kernel Modules
 #
-#obj-$(CONFIG_MALI_MIDGARD) += mali_kbase.o
-
-# MTK: Tell the Linux build system from which .o file to create the kernel module
-# LD1.0
-ifneq ($(CONFIG_MTK_GPU_VERSION),"")
 obj-$(CONFIG_MALI_MIDGARD) += mali_kbase.o
-# LD2.0
-else ifneq ($(wildcard $(src)/platform/$(MTK_PLATFORM)),)
-obj-$(CONFIG_MALI_MIDGARD) += mali_kbase_$(MTK_PLATFORM).o
-mali_kbase_$(MTK_PLATFORM)-y := mali_kbase.o
-endif
-
-ifeq ($(CONFIG_MTK_TRUSTED_MEMORY_SUBSYSTEM), y)
-    include $(srctree)/drivers/misc/mediatek/trusted_mem/Makefile.include
-    ccflags-y += -I$(srctree)/drivers/staging/android/ion
-endif
-
 obj-$(CONFIG_MALI_ARBITRATION) += arbitration/
 obj-$(CONFIG_MALI_KUTF)    += tests/
 
-mali_kbase-y += \
+mali_kbase-y := \
     mali_kbase_cache_policy.o \
     mali_kbase_ccswe.o \
     mali_kbase_mem.o \
@@ -195,8 +181,8 @@ mali_kbase-y += \
     mali_kbase_core_linux.o \
     mali_kbase_mem_profile_debugfs.o \
     mali_kbase_disjoint_events.o \
-    mali_kbase_debug_mem_view.o \
     mali_kbase_gator_api.o \
+    mali_kbase_debug_mem_view.o \
     mali_kbase_smc.o \
     mali_kbase_mem_pool.o \
     mali_kbase_mem_pool_debugfs.o \
@@ -256,7 +242,7 @@ INCLUDE_SUBDIR = \
     $(src)/tl/Kbuild \
     $(src)/gpu/Kbuild \
     $(src)/thirdparty/Kbuild \
-#    $(src)/platform/$(MALI_PLATFORM_DIR)/Kbuild
+    $(src)/platform/$(MALI_PLATFORM_DIR)/Kbuild
 
 ifeq ($(CONFIG_MALI_CSF_SUPPORT),y)
     INCLUDE_SUBDIR += $(src)/csf/Kbuild

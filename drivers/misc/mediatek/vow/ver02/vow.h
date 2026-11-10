@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * vow.h  --  VoW platform driver definition
- *
  * Copyright (c) 2020 MediaTek Inc.
- * Author: Michael Hsiao <michael.hsiao@mediatek.com>
  */
 
 #ifndef __VOW_H__
@@ -20,18 +17,18 @@
 #define DEBUG_VOWDRV 1
 
 #if DEBUG_VOWDRV
-#define VOWDRV_DEBUG(format, args...) pr_info(format, ##args)
+#define VOWDRV_DEBUG(format, args...) pr_debug(format, ##args)
 #else
 #define VOWDRV_DEBUG(format, args...)
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_VOW_GVA_SUPPORT)
+#ifdef CONFIG_MTK_VOW_GVA_SUPPORT
 #define VOW_GOOGLE_MODEL 1
 #else
 #define VOW_GOOGLE_MODEL 0
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_VOW_AMAZON_SUPPORT)
+#ifdef CONFIG_MTK_VOW_AMAZON_SUPPORT
 #define VOW_AMAZON_MODEL 1
 #else
 #define VOW_AMAZON_MODEL 0
@@ -48,9 +45,9 @@
 #define VOW_VOICE_RECORD_THRESHOLD     2560 /* 80ms */
 #define VOW_VOICE_RECORD_BIG_THRESHOLD 8320 /* 260ms */
 #define VOW_IPI_SEND_CNT_TIMEOUT       50 /* 50 loop */
-/* UBM_V1:0xA000, UBM_V2:0xDC00, UBM_V3: 2*0x11000, UBM_V4: 2*0x16800  */
+/* UBM_V1:0xA000, UBM_V2:0xDC00, UBM_V3: 2*0x11000 */
 #define VOW_MODEL_SIZE_THRES           0x2800
-#define VOW_MODEL_SIZE                 0x16800
+#define VOW_MODEL_SIZE                 0x11000
 #define VOW_VOICEDATA_OFFSET           (VOW_MODEL_SIZE * MAX_VOW_SPEAKER_MODEL)
 #define VOW_VOICEDATA_SIZE             0x12500 /* 74880, need over 2.3sec */
 /* IPI return value definition */
@@ -68,8 +65,8 @@
 #define VOW_MAX_MIC_NUM	(2)
 
 /* length limitation sync by audio hal */
-#if IS_ENABLED(CONFIG_DUAL_CH_TRANSFER)
-#define VOW_VBUF_LENGTH      (0x12E80 * VOW_MAX_MIC_NUM)  /*(0x12480 + 0x0A00) * VOW_MAX_MIC_NUM*/
+#if defined DUAL_CH_TRANSFER
+#define VOW_VBUF_LENGTH      (0x12E80 * VOW_MAX_MIC_NUM)  /* (0x12480 + 0x0A00) * 2 */
 #else
 #define VOW_VBUF_LENGTH      (0x12E80)  /* 0x12480 + 0x0A00 */
 #endif
@@ -96,7 +93,7 @@
 
 #define VOW_ENGINE_INFO_LENGTH_BYTE    64
 
-#if IS_ENABLED(CONFIG_DUAL_CH_TRANSFER)
+#if defined DUAL_CH_TRANSFER
 #define VOW_RECOGDATA_OFFSET          (VOW_VOICEDATA_OFFSET + VOW_MAX_MIC_NUM * VOW_VOICEDATA_SIZE)
 #else
 #define VOW_RECOGDATA_OFFSET          (VOW_VOICEDATA_OFFSET + VOW_VOICEDATA_SIZE)
@@ -132,7 +129,7 @@
 #endif
 #define VOW_BARGEIN_IRQ_MAX_NUM       32
 
-#define KERNEL_VOW_DRV_VER "2.1.4"
+#define KERNEL_VOW_DRV_VER              "2.1.0"
 #define DEFAULT_GOOGLE_ENGINE_VER       2147483647
 
 struct dump_package_t {
@@ -201,10 +198,7 @@ enum vow_ipi_msgid_t {
 	IPIMSG_VOW_ALEXA_ENGINE_VER = 25,
 	IPIMSG_VOW_GOOGLE_ENGINE_VER = 26,
 	IPIMSG_VOW_GOOGLE_ARCH = 27,
-	IPIMSG_VOW_SET_CUSTOM_MODEL = 28,
-	IPIMSG_VOW_HAL_REBOOT = 29,
-	IPIMSG_VOW_FLUSH = 30,
-	IPIMSG_VOW_PMIC_EFUSE_VER = 31
+	IPIMSG_VOW_SET_CUSTOM_MODEL = 28
 };
 
 enum vow_eint_status_t {
@@ -293,12 +287,6 @@ enum {
 	VOW_ENABLE_SINGLE_REF_MIC = 0
 };
 
-enum {
-	VOW_PMIC_6366_E1 = 0,
-	VOW_PMIC_6366_E2 = 1,
-	VOW_PMIC_6366_NONE
-};
-
 /*****************************************************************************
  * VOW Structure Define
  *****************************************************************************/
@@ -316,7 +304,7 @@ struct vow_eint_data_struct_t {
 };
 
 
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 
 struct vow_speaker_model_t {
 	void *model_ptr;
@@ -386,7 +374,7 @@ struct vow_payloaddump_info_kernel_t {
 	compat_size_t max_payloaddump_size;
 };
 
-#else  /* #if IS_ENABLED(CONFIG_COMPAT) */
+#else  /* #ifdef CONFIG_COMPAT */
 
 struct vow_speaker_model_t {
 	void *model_ptr;
@@ -428,7 +416,7 @@ struct vow_payloaddump_info_t {
 	long max_payloaddump_size;
 };
 
-#endif  /* #if IS_ENABLED(CONFIG_COMPAT) */
+#endif  /* #ifdef CONFIG_COMPAT */
 
 enum ipi_type_flag_t {
 	RECOG_OK_IDX = 0,

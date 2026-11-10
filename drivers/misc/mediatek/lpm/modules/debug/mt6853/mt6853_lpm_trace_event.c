@@ -6,7 +6,7 @@
 #include <linux/of_address.h>
 #include <linux/io.h>
 
-#include <lpm_trace_event/lpm_trace_event.h>
+#include <mtk_lpm_trace_event/mtk_lpm_trace_event.h>
 #include <mtk_spm_sysfs.h>
 #include <mt6853_spm_reg.h>
 
@@ -25,9 +25,6 @@ static void spm_resource_req_timer_fn(struct timer_list *data)
 	u32 md = 0, conn = 0, scp = 0, adsp = 0;
 	u32 ufs = 0, msdc = 0, disp = 0, apu = 0;
 	u32 spm = 0;
-
-	if (!spm_base)
-		return;
 
 	req_sta_0 = plat_mmio_read(SRC_REQ_STA_0);
 	if (req_sta_0 & 0xFFF)
@@ -55,12 +52,6 @@ static void spm_resource_req_timer_fn(struct timer_list *data)
 	if (src_req & 0x19B)
 		spm = 1;
 
-	trace_SPM__resource_req_0(
-		md, conn,
-		scp, adsp,
-		ufs, msdc,
-		disp, apu,
-		spm);
 
 	spm_resource_req_timer.expires = jiffies +
 		msecs_to_jiffies(spm_resource_req_timer_ms);
@@ -72,15 +63,12 @@ static void spm_resource_req_timer_en(u32 enable, u32 timer_ms)
 	if (enable) {
 		if (spm_resource_req_timer_is_enabled)
 			return;
-
 		timer_setup(&spm_resource_req_timer,
 			spm_resource_req_timer_fn, 0);
-
 		spm_resource_req_timer_ms = timer_ms;
 		spm_resource_req_timer.expires = jiffies +
 			msecs_to_jiffies(spm_resource_req_timer_ms);
 		add_timer(&spm_resource_req_timer);
-
 		spm_resource_req_timer_is_enabled = true;
 	} else if (spm_resource_req_timer_is_enabled) {
 		del_timer(&spm_resource_req_timer);
@@ -126,6 +114,12 @@ static const struct mtk_lp_sysfs_op spm_resource_req_timer_enable_fops = {
 	.fs_write = set_spm_resource_req_timer_enable,
 };
 
+bool spm_is_md1_sleep(void)
+{
+	return !(plat_mmio_read(SRC_REQ_STA_0) & 0x3F);
+}
+EXPORT_SYMBOL(spm_is_md1_sleep);
+
 int __init mt6853_lpm_trace_init(void)
 {
 	struct device_node *node = NULL;
@@ -143,8 +137,5 @@ int __init mt6853_lpm_trace_init(void)
 
 	return 0;
 }
-
-void __exit mt6853_lpm_trace_deinit(void)
-{
-}
+late_initcall_sync(mt6853_lpm_trace_init);
 

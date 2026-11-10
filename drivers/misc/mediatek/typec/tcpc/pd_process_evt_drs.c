@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
+
 #include "inc/pd_core.h"
 #include "inc/tcpci_event.h"
 #include "inc/pd_process_evt.h"
-
-#if CONFIG_USB_PD_DR_SWAP
 
 /* PD Control MSG reactions */
 
@@ -91,4 +90,3 @@ bool pd_process_event_drs(struct pd_port *pd_port, struct pd_event *pd_event)
 		return false;
 	}
 }
-#endif	/* CONFIG_USB_PD_DR_SWAP */

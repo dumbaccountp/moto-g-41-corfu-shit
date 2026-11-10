@@ -11,29 +11,17 @@ struct task_struct;
 /* for sysctl */
 extern int print_fatal_signals;
 
-static inline void copy_siginfo(kernel_siginfo_t *to,
-				const kernel_siginfo_t *from)
+static inline void copy_siginfo(struct siginfo *to, const struct siginfo *from)
 {
 	memcpy(to, from, sizeof(*to));
 }
 
-static inline void clear_siginfo(kernel_siginfo_t *info)
+static inline void clear_siginfo(struct siginfo *info)
 {
 	memset(info, 0, sizeof(*info));
 }
 
-#define SI_EXPANSION_SIZE (sizeof(struct siginfo) - sizeof(struct kernel_siginfo))
-
-static inline void copy_siginfo_to_external(siginfo_t *to,
-					    const kernel_siginfo_t *from)
-{
-	memcpy(to, from, sizeof(*from));
-	memset(((char *)to) + sizeof(struct kernel_siginfo), 0,
-		SI_EXPANSION_SIZE);
-}
-
-int copy_siginfo_to_user(siginfo_t __user *to, const kernel_siginfo_t *from);
-int copy_siginfo_from_user(kernel_siginfo_t *to, const siginfo_t __user *from);
+int copy_siginfo_to_user(struct siginfo __user *to, const struct siginfo *from);
 
 enum siginfo_layout {
 	SIL_KILL,
@@ -137,11 +125,9 @@ static inline void name(sigset_t *r, const sigset_t *a, const sigset_t *b) \
 		b3 = b->sig[3]; b2 = b->sig[2];				\
 		r->sig[3] = op(a3, b3);					\
 		r->sig[2] = op(a2, b2);					\
-		fallthrough;						\
 	case 2:								\
 		a1 = a->sig[1]; b1 = b->sig[1];				\
 		r->sig[1] = op(a1, b1);					\
-		fallthrough;						\
 	case 1:								\
 		a0 = a->sig[0]; b0 = b->sig[0];				\
 		r->sig[0] = op(a0, b0);					\
@@ -171,9 +157,7 @@ static inline void name(sigset_t *set)					\
 	switch (_NSIG_WORDS) {						\
 	case 4:	set->sig[3] = op(set->sig[3]);				\
 		set->sig[2] = op(set->sig[2]);				\
-		fallthrough;						\
 	case 2:	set->sig[1] = op(set->sig[1]);				\
-		fallthrough;						\
 	case 1:	set->sig[0] = op(set->sig[0]);				\
 		    break;						\
 	default:							\
@@ -194,7 +178,6 @@ static inline void sigemptyset(sigset_t *set)
 		memset(set, 0, sizeof(sigset_t));
 		break;
 	case 2: set->sig[1] = 0;
-		fallthrough;
 	case 1:	set->sig[0] = 0;
 		break;
 	}
@@ -207,7 +190,6 @@ static inline void sigfillset(sigset_t *set)
 		memset(set, -1, sizeof(sigset_t));
 		break;
 	case 2: set->sig[1] = -1;
-		fallthrough;
 	case 1:	set->sig[0] = -1;
 		break;
 	}
@@ -238,7 +220,6 @@ static inline void siginitset(sigset_t *set, unsigned long mask)
 		memset(&set->sig[1], 0, sizeof(long)*(_NSIG_WORDS-1));
 		break;
 	case 2: set->sig[1] = 0;
-		break;
 	case 1: ;
 	}
 }
@@ -251,7 +232,6 @@ static inline void siginitsetinv(sigset_t *set, unsigned long mask)
 		memset(&set->sig[1], -1, sizeof(long)*(_NSIG_WORDS-1));
 		break;
 	case 2: set->sig[1] = -1;
-		break;
 	case 1: ;
 	}
 }
@@ -277,11 +257,11 @@ struct pt_regs;
 enum pid_type;
 
 extern int next_signal(struct sigpending *pending, sigset_t *mask);
-extern int do_send_sig_info(int sig, struct kernel_siginfo *info,
+extern int do_send_sig_info(int sig, struct siginfo *info,
 				struct task_struct *p, enum pid_type type);
-extern int group_send_sig_info(int sig, struct kernel_siginfo *info,
+extern int group_send_sig_info(int sig, struct siginfo *info,
 			       struct task_struct *p, enum pid_type type);
-extern int __group_send_sig_info(int, struct kernel_siginfo *, struct task_struct *);
+extern int __group_send_sig_info(int, struct siginfo *, struct task_struct *);
 extern int sigprocmask(int, sigset_t *, sigset_t *);
 extern void set_current_blocked(sigset_t *);
 extern void __set_current_blocked(const sigset_t *);
@@ -411,7 +391,7 @@ extern bool unhandled_signal(struct task_struct *tsk, int sig);
 #endif
 
 #define siginmask(sig, mask) \
-	((sig) > 0 && (sig) < SIGRTMIN && (rt_sigmask(sig) & (mask)))
+	((sig) < SIGRTMIN && (rt_sigmask(sig) & (mask)))
 
 #define SIG_KERNEL_ONLY_MASK (\
 	rt_sigmask(SIGKILL)   |  rt_sigmask(SIGSTOP))
@@ -454,12 +434,12 @@ void signals_init(void);
 int restore_altstack(const stack_t __user *);
 int __save_altstack(stack_t __user *, unsigned long);
 
-#define unsafe_save_altstack(uss, sp, label) do { \
+#define save_altstack_ex(uss, sp) do { \
 	stack_t __user *__uss = uss; \
 	struct task_struct *t = current; \
-	unsafe_put_user((void __user *)t->sas_ss_sp, &__uss->ss_sp, label); \
-	unsafe_put_user(t->sas_ss_flags, &__uss->ss_flags, label); \
-	unsafe_put_user(t->sas_ss_size, &__uss->ss_size, label); \
+	put_user_ex((void __user *)t->sas_ss_sp, &__uss->ss_sp); \
+	put_user_ex(t->sas_ss_flags, &__uss->ss_flags); \
+	put_user_ex(t->sas_ss_size, &__uss->ss_size); \
 	if (t->sas_ss_flags & SS_AUTODISARM) \
 		sas_ss_reset(t); \
 } while (0);
@@ -467,20 +447,6 @@ int __save_altstack(stack_t __user *, unsigned long);
 #ifdef CONFIG_PROC_FS
 struct seq_file;
 extern void render_sigset_t(struct seq_file *, const char *, sigset_t *);
-#endif
-
-#ifndef arch_untagged_si_addr
-/*
- * Given a fault address and a signal and si_code which correspond to the
- * _sigfault union member, returns the address that must appear in si_addr if
- * the signal handler does not have SA_EXPOSE_TAGBITS enabled in sa_flags.
- */
-static inline void __user *arch_untagged_si_addr(void __user *addr,
-						 unsigned long sig,
-						 unsigned long si_code)
-{
-	return addr;
-}
 #endif
 
 #endif /* _LINUX_SIGNAL_H */

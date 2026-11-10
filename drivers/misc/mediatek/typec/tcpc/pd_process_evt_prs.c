@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #include "inc/pd_core.h"
@@ -8,9 +8,7 @@
 #include "inc/pd_process_evt.h"
 #include "inc/pd_dpm_core.h"
 
-#if CONFIG_USB_PD_PR_SWAP
-
-#if CONFIG_USB_PD_PR_SWAP_ERROR_RECOVERY
+#ifdef CONFIG_USB_PD_PR_SWAP_ERROR_RECOVERY
 #define PE_PRS_SNK_HARD_RESET	PE_ERROR_RECOVERY
 #define PE_PRS_SRC_HARD_RESET	PE_ERROR_RECOVERY
 #else
@@ -61,7 +59,7 @@ DECL_PE_STATE_REACTION(PD_DPM_MSG_NAK);
 /* HW Event reactions */
 
 DECL_PE_STATE_TRANSITION(PD_HW_VBUS_PRESENT) = {
-#if CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP
+#ifdef CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP
 	{ PE_PRS_SRC_SNK_WAIT_SOURCE_ON, PE_SNK_STARTUP },
 #endif /* CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP */
 };
@@ -75,7 +73,7 @@ DECL_PE_STATE_REACTION(PD_HW_TX_FAILED);
 
 DECL_PE_STATE_TRANSITION(PD_HW_VBUS_SAFE0V) = {
 	{ PE_PRS_SRC_SNK_TRANSITION_TO_OFF, PE_PRS_SRC_SNK_ASSERT_RD },
-#if CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP
+#ifdef CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP
 	{ PE_PRS_SNK_SRC_TRANSITION_TO_OFF, PE_PRS_SNK_SRC_ASSERT_RP },
 #endif /* CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP */
 };
@@ -103,7 +101,7 @@ static inline bool pd_process_ctrl_msg_ps_rdy(
 	struct pd_port *pd_port, struct pd_event *pd_event)
 {
 	switch (pd_port->pe_state_curr) {
-#if CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP
+#ifdef CONFIG_USB_PD_VBUS_DETECTION_DURING_PR_SWAP
 	case PE_PRS_SRC_SNK_WAIT_SOURCE_ON:
 		pd_enable_vbus_valid_detection(pd_port, true);
 		return false;
@@ -169,7 +167,6 @@ static inline bool pd_process_hw_msg(
 		return PE_MAKE_STATE_TRANSIT(PD_HW_VBUS_PRESENT);
 
 	case PD_HW_TX_FAILED:
-	case PD_HW_TX_DISCARD:
 		return PE_MAKE_STATE_TRANSIT(PD_HW_TX_FAILED);
 
 	case PD_HW_VBUS_SAFE0V:
@@ -229,5 +226,3 @@ bool pd_process_event_prs(struct pd_port *pd_port, struct pd_event *pd_event)
 		return false;
 	}
 }
-#endif	/* CONFIG_USB_PD_PR_SWAP */
-

@@ -5,11 +5,10 @@
 #include <linux/device.h>
 #include <linux/wait.h>
 #include <linux/module.h>
-#include <linux/power_supply.h>
 #include <linux/sched/clock.h> /* local_clock() */
 #include <linux/kthread.h>
 #include <linux/kernel.h>
-
+//#include <mt-plat/mtk_battery.h> fixme
 #include "ccci_auxadc.h"
 
 #include "ccci_config.h"
@@ -18,8 +17,6 @@
 #include "ccci_bm.h"
 #include "port_sysmsg.h"
 #include "ccci_swtp.h"
-#include "fsm/ccci_fsm_internal.h"
-
 #define MAX_QUEUE_LENGTH 16
 
 struct md_rf_notify_struct {
@@ -29,8 +26,10 @@ struct md_rf_notify_struct {
 };
 
 #define MD_RF_NOTIFY(bit, func, name) \
-extern void func(unsigned int para0, unsigned int para1);
-
+	__weak void func(unsigned int para0, unsigned int para1) \
+	{ \
+		pr_debug("[ccci1/SYS]weak %s", __func__); \
+	}
 #include "mdrf_notify_list.h"
 
 #undef MD_RF_NOTIFY
@@ -127,7 +126,6 @@ int register_ccci_sys_call_back(int md_id, unsigned int id,
 
 	return ret;
 }
-EXPORT_SYMBOL(register_ccci_sys_call_back);
 
 void exec_ccci_sys_call_back(int md_id, int cb_id, int data)
 {
@@ -167,34 +165,17 @@ void exec_ccci_sys_call_back(int md_id, int cb_id, int data)
 			cb_id);
 }
 
-static int battery_get_bat_voltage(void)
+signed int __weak battery_get_bat_voltage(void)
 {
-	union power_supply_propval prop;
-	struct power_supply *psy;
-	int ret;
-
-	psy = power_supply_get_by_name("battery");
-	if (psy == NULL) {
-		CCCI_ERROR_LOG(-1, SYS, "%s can't get battery node\n",
-			__func__);
-		return 0;
-	}
-	ret = power_supply_get_property(psy,
-		POWER_SUPPLY_PROP_VOLTAGE_NOW, &prop);
-	if (ret < 0) {
-		CCCI_ERROR_LOG(-1, SYS, "%s get battery fail\n",
-			__func__);
-		return 0;
-	}
-
-	return prop.intval;
+	pr_debug("[ccci/dummy] %s is not supported!\n", __func__);
+	return 0;
 }
 
 static int sys_msg_send_battery(struct port_t *port)
 {
 	int data;
 
-	data = battery_get_bat_voltage()/1000;
+	data = (int)battery_get_bat_voltage();
 	CCCI_REPEAT_LOG(port->md_id, SYS, "get bat voltage %d\n", data);
 	port_send_msg_to_md(port, MD_GET_BATTERY_INFO, data, 1);
 	return 0;
@@ -230,9 +211,11 @@ static void sys_msg_handler(struct port_t *port, struct sk_buff *skb)
 		port_sys_echo_test_l1core(port, ccci_h->reserved);
 		break;
 #endif
+#ifdef CONFIG_MTK_SIM_LOCK_POWER_ON_WRITE_PROTECT
 	case SIM_LOCK_RANDOM_PATTERN:
 		fsm_monitor_send_message(md_id, CCCI_MD_MSG_RANDOM_PATTERN, 0);
 		break;
+#endif
 #ifdef FEATURE_SCP_CCCI_SUPPORT
 	case CCISM_SHM_INIT_ACK:
 		/* Fall through */
@@ -241,16 +224,14 @@ static void sys_msg_handler(struct port_t *port, struct sk_buff *skb)
 		/* Fall through */
 	case MD_TX_POWER:
 		/* Fall through */
-	case MD_RF_MAX_TEMPERATURE_SUB6:
+	case MD_RF_TEMPERATURE:
 		/* Fall through */
-	case MD_RF_ALL_TEMPERATURE_MMW:
+	case MD_RF_TEMPERATURE_3G:
 		/* Fall through */
 	case MD_SW_MD1_TX_POWER_REQ:
 		/* Fall through */
 	case MD_DISPLAY_DYNAMIC_MIPI:
 		/* Fall through */
-	case MD_NR_BAND_ACTIVATE_INFO:
-		fallthrough;
 	case LWA_CONTROL_MSG:
 		exec_ccci_sys_call_back(md_id, ccci_h->data[1],
 			ccci_h->reserved);
@@ -263,9 +244,16 @@ static void sys_msg_handler(struct port_t *port, struct sk_buff *skb)
 		break;
 	};
 	ccci_free_skb(skb);
+
 	ts_nsec = sched_clock();
-	CCCI_HISTORY_LOG(md_id, SYS, "cost: %lu us\n",
-			(unsigned long)((ts_nsec - ref) / 1000));
+#ifdef __LP64__
+	rem_nsec = (unsigned long)((ts_nsec - ref) / 1000);
+#else
+	ts_nsec = ts_nsec - ref;
+	rem_nsec = do_div(ts_nsec, 1000LL);
+#endif
+
+	CCCI_HISTORY_LOG(md_id, SYS, "cost: %lu us\n", rem_nsec);
 }
 
 static int port_sys_init(struct port_t *port)

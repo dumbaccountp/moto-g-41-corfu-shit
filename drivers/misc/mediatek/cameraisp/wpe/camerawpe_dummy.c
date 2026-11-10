@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (c) 2015 MediaTek Inc.
  */
 

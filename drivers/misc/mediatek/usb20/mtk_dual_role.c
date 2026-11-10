@@ -11,7 +11,7 @@
 #include "musb_core.h"
 #include "mtk_musb.h"
 
-#if IS_ENABLED(CONFIG_DUAL_ROLE_USB_INTF)
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
 static enum dual_role_property mt_dual_role_props[] = {
 	DUAL_ROLE_PROP_MODE,
 	DUAL_ROLE_PROP_PR,

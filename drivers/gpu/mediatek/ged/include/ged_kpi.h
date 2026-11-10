@@ -36,9 +36,6 @@ unsigned int ged_kpi_get_cur_avg_response_time(void);
 unsigned int ged_kpi_get_cur_avg_gpu_remained_time(void);
 unsigned int ged_kpi_get_cur_avg_cpu_remained_time(void);
 unsigned int ged_kpi_get_cur_avg_gpu_freq(void);
-unsigned int ged_kpi_get_fw_idle(void);
-
-
 void ged_kpi_get_latest_perf_state(long long *t_cpu_remained,
 		long long *t_gpu_remained,
 		long *t_cpu_target,
@@ -49,23 +46,29 @@ void ged_kpi_system_exit(void);
 bool ged_kpi_set_cpu_remained_time(long long t_cpu_remained,
 		int QedBuffer_length);
 bool ged_kpi_set_gpu_dvfs_hint(int t_gpu_target, int t_gpu_cur);
+void ged_kpi_set_game_hint(int mode);
 unsigned int ged_kpi_enabled(void);
 void ged_kpi_set_target_FPS(u64 ulID, int target_FPS);
 void ged_kpi_set_target_FPS_margin(u64 ulID, int target_FPS,
-		int target_FPS_margin, int eara_fps_margin, int cpu_time);
-void ged_kpi_set_fw_idle(unsigned int time);
-
+	int target_FPS_margin, int cpu_time);
+#ifdef GED_ENABLE_TIMER_BASED_DVFS_MARGIN
 GED_ERROR ged_kpi_timer_based_pick_riskyBQ(int *pT_gpu_real, int *pT_gpu_pipe,
 	int *pT_gpu_target, unsigned long long *pullWnd);
-
-/* For Gift Usage */
+#endif
 GED_ERROR ged_kpi_query_dvfs_freq_pred(int *gpu_freq_cur
 	, int *gpu_freq_max, int *gpu_freq_pred);
 GED_ERROR ged_kpi_query_gpu_dvfs_info(struct GED_BRIDGE_OUT_QUERY_GPU_DVFS_INFO *out);
 GED_ERROR ged_kpi_set_gift_status(int mode);
 GED_ERROR ged_kpi_set_gift_target_pid(int pid);
 
+extern int linear_real_boost(int linear_boost);
+#ifdef GED_KPI_CPU_INFO
+extern unsigned int sched_get_cpu_load(int cpu);
+extern unsigned long cpufreq_scale_freq_capacity(struct sched_domain *sd
+					, int cpu);
+extern unsigned long arch_scale_get_max_freq(int cpu);
+#endif
+#ifdef GED_ENABLE_FB_DVFS
 extern spinlock_t gsGpuUtilLock;
-
-// extern unsigned int g_gpufreqv2;
+#endif
 #endif

@@ -1,27 +1,29 @@
-# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (C) 2015 MediaTek Inc.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+
 subdir-ccflags-y += -Wformat
+ifeq ($(CONFIG_MACH_MT6781), y)
+MTK_PLATFORM := mt6781
+obj-y += $(MTK_PLATFORM)/
+else
+obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+endif
 
-# common include path
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/adsp/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/adsp/include
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/slbc
-
-# target object
-obj-${CONFIG_MTK_AUDIODSP_SUPPORT} += adsp.o
-obj-${CONFIG_MTK_ADSP_V1} += v1/
-obj-${CONFIG_MTK_ADSP_V2} += v2/
-
-adsp-objs += adsp_core.o
-adsp-objs += adsp_fs.o
-adsp-objs += adsp_semaphore.o
-adsp-objs += adsp_logger.o
-adsp-objs += adsp_feature_table.o
-adsp-objs += adsp_timesync.o
-adsp-objs += adsp_awake.o
-adsp-objs += adsp_reserved_mem.o
-adsp-objs += adsp_platform.o
-adsp-objs += adsp_mbox.o
-adsp-objs += adsp_platform_driver.o
-adsp-objs += adsp_excep.o
+ifeq ($(CONFIG_MACH_MT6785), y)
+MTK_ADSP_HW_VER := 0
+else ifeq ($(CONFIG_MACH_MT6781), y)
+MTK_ADSP_HW_VER := 0
+else
+MTK_ADSP_HW_VER := 1
+endif
+subdir-ccflags-y += -DMTK_ADSP_HW_VER=$(MTK_ADSP_HW_VER)

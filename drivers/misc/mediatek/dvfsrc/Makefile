@@ -1,14 +1,20 @@
-ifeq ($(CONFIG_MTK_GCOV_KERNEL),y)
-GCOV_PROFILE := y
-endif
-
 ccflags-y += \
 	-I$(srctree)/drivers/misc/mediatek/sspm/ \
 	-I$(srctree)/drivers/misc/mediatek/include/mt-plat/ \
+	-I$(srctree)/drivers/misc/mediatek/dramc/$(MTK_PLATFORM) \
 
-obj-$(CONFIG_MTK_DVFSRC_HELPER) += mtk-dvfsrc-helper.o
-mtk-dvfsrc-helper-objs += dvfsrc-helper.o dvfsrc-debug-v3.o dvfsrc-sysfs.o
-mtk-dvfsrc-helper-$(CONFIG_MTK_DVFSRC_MET) += dvfsrc-met.o
-mtk-dvfsrc-helper-$(CONFIG_MTK_DVFSRC_MET_MT6873) += dvfsrc-met-v6873.o
-mtk-dvfsrc-helper-${CONFIG_MTK_DVFSRC_MET_MT6873} += dvfsrc-met-v6983.o
+mtk-dvfsrc-help-objs += dvfsrc.o dvfsrc-common.o dvfsrc-ipi.o
+mtk-dvfsrc-debug-objs += dvfsrc-debug.o dvfsrc-debug-v79.o dvfsrc-debug-v61.o dvfsrc-sysfs.o
+mtk-dvfsrc-met-objs += dvfsrc-met.o dvfsrc-met-v79.o dvfsrc-met-v61.o
 
+obj-$(CONFIG_MTK_DVFSRC) += mtk-dvfsrc-help.o
+obj-$(CONFIG_MTK_DVFSRC) += mtk-dvfsrc-debug.o
+obj-$(CONFIG_MTK_DVFSRC) += mtk-dvfsrc-met.o
+obj-$(CONFIG_MTK_DVFSRC) += dvfsrc-boost.o
+
+ifneq ($(CONFIG_MACH_MT6761),)
+obj-$(CONFIG_MTK_DVFSRC) += dvfsrc-opp-mt6761.o
+endif
+ifneq ($(CONFIG_MACH_MT6765),)
+obj-$(CONFIG_MTK_DVFSRC) += dvfsrc-opp-mt6765.o
+endif

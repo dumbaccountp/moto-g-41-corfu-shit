@@ -6,10 +6,8 @@
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
-#include <linux/slab.h>
 #include <linux/tracepoint.h>
 #include <linux/uaccess.h>
-#include <mt-plat/mrdump.h>
 #include <mt-plat/mtk_pidmap.h>
 
 /*
@@ -25,7 +23,7 @@
  * handling flow, e.g., hwt or hw reboot.
  */
 
-static char *mtk_pidmap;
+static char mtk_pidmap[PIDMAP_AEE_BUF_SIZE];
 static int  mtk_pidmap_proc_dump_mode;
 static int  mtk_pidmap_max_pid;
 static char mtk_pidmap_proc_cmd_buf[PIDMAP_PROC_CMD_BUF_SIZE];
@@ -47,7 +45,7 @@ struct tracepoints_table {
  *
  * task: current task
  */
-static void mtk_pidmap_update(struct task_struct *task, const char *task_comm)
+static void mtk_pidmap_update(struct task_struct *task)
 {
 	char *name;
 	int len;
@@ -67,7 +65,7 @@ static void mtk_pidmap_update(struct task_struct *task, const char *task_comm)
 	name = mtk_pidmap + ((pid - 1) * PIDMAP_ENTRY_SIZE);
 
 	/* copy task name */
-	memcpy(name, task_comm, PIDMAP_TASKNAME_SIZE);
+	memcpy(name, task->comm, PIDMAP_TASKNAME_SIZE);
 	*(name + PIDMAP_TASKNAME_SIZE) = '\0';
 
 	/* clear garbage tail chars to help parsers */
@@ -87,13 +85,13 @@ static void mtk_pidmap_update(struct task_struct *task, const char *task_comm)
 static void probe_task_rename(void *data, struct task_struct *task,
 			      const char *comm)
 {
-	mtk_pidmap_update(task, comm);
+	mtk_pidmap_update(task);
 }
 
 static void probe_task_newtask(void *data, struct task_struct *task,
 			       unsigned long clone_flags)
 {
-	mtk_pidmap_update(task, task->comm);
+	mtk_pidmap_update(task);
 }
 
 static struct tracepoints_table interests[] = {
@@ -131,13 +129,9 @@ static void mtk_pidmap_deinit(void)
 	}
 }
 
-static int mtk_pidmap_init_map(void)
+static void mtk_pidmap_init_map(void)
 {
 	int i;
-
-	mtk_pidmap = kzalloc(PIDMAP_AEE_BUF_SIZE, GFP_KERNEL);
-	if (!mtk_pidmap)
-		return -ENOMEM;
 
 	/* Install the tracepoints */
 	for_each_kernel_tracepoint(lookup_tracepoints, NULL);
@@ -147,7 +141,7 @@ static int mtk_pidmap_init_map(void)
 			pr_info("Error: %s not found\n", interests[i].name);
 			/* Unload previously loaded */
 			mtk_pidmap_deinit();
-			return -EINVAL;
+			return;
 		}
 
 		tracepoint_probe_register(interests[i].tp, interests[i].func,
@@ -161,8 +155,6 @@ static int mtk_pidmap_init_map(void)
 	 */
 	mtk_pidmap_max_pid =
 		PIDMAP_AEE_BUF_SIZE / PIDMAP_ENTRY_SIZE;
-
-	return 0;
 }
 
 static void mtk_pidmap_seq_dump_readable(char **buff, unsigned long *size,
@@ -251,6 +243,18 @@ static int mtk_pidmap_seq_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
+void get_pidmap_aee_buffer(unsigned long *vaddr, unsigned long *size)
+{
+	/* retrun start location */
+	if (vaddr)
+		*vaddr = (unsigned long)mtk_pidmap;
+
+	/* return valid buffer size */
+	if (size)
+		*size = PIDMAP_AEE_BUF_SIZE;
+}
+EXPORT_SYMBOL(get_pidmap_aee_buffer);
+
 static ssize_t mtk_pidmap_proc_write(struct file *file, const char *buf,
 	size_t count, loff_t *data)
 {
@@ -273,7 +277,7 @@ static ssize_t mtk_pidmap_proc_write(struct file *file, const char *buf,
 		mtk_pidmap_proc_dump_mode = PIDMAP_PROC_DUMP_READABLE;
 		pr_info("[pidmap] dump mode: readable\n");
 	} else if (mtk_pidmap_proc_cmd_buf[0] == '2') {
-		memset(mtk_pidmap, 0, PIDMAP_AEE_BUF_SIZE);
+		memset(mtk_pidmap, 0, sizeof(mtk_pidmap));
 		pr_info("[pidmap] reset pidmap\n");
 	} else
 		goto err;
@@ -292,12 +296,12 @@ static int mtk_pidmap_proc_open(struct inode *inode, struct file *file)
 	return single_open(file, mtk_pidmap_seq_show, inode->i_private);
 }
 
-static const struct proc_ops mtk_pidmap_proc_fops = {
-	.proc_open = mtk_pidmap_proc_open,
-	.proc_write = mtk_pidmap_proc_write,
-	.proc_read = seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = single_release,
+static const struct file_operations mtk_pidmap_proc_fops = {
+	.open = mtk_pidmap_proc_open,
+	.write = mtk_pidmap_proc_write,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
 };
 
 static int mtk_pidmap_proc_init(void)
@@ -322,19 +326,10 @@ static int mtk_pidmap_proc_init(void)
 
 static int __init mtk_pidmap_init(void)
 {
-	int ret;
+	mtk_pidmap_init_map();
+	mtk_pidmap_proc_init();
 
-	ret = mtk_pidmap_init_map();
-	if (ret)
-		return ret;
-
-	ret = mtk_pidmap_proc_init();
-	(void)mrdump_mini_add_extra_file(
-			(unsigned long)mtk_pidmap,
-			__pa_nodebug(mtk_pidmap),
-			PIDMAP_AEE_BUF_SIZE, "PIDMAP");
-
-	return ret;
+	return 0;
 }
 
 static void __exit mtk_pidmap_exit(void)
@@ -347,7 +342,6 @@ static void __exit mtk_pidmap_exit(void)
  * list of kernel threads. Need to find out solution.
  */
 early_initcall(mtk_pidmap_init);
-module_exit(mtk_pidmap_exit);
 
 MODULE_AUTHOR("Stanley Chu <stanley.chu@mediatek.com>");
 MODULE_LICENSE("GPL");

@@ -154,8 +154,7 @@ static int toprgu_register_reset_controller(struct platform_device *pdev,
 	mtk_wdt->rcdev.of_node = pdev->dev.of_node;
 	ret = devm_reset_controller_register(&pdev->dev, &mtk_wdt->rcdev);
 	if (ret != 0)
-		dev_err(&pdev->dev,
-			"couldn't register wdt reset controller: %d\n", ret);
+		pr_info("couldn't register wdt reset controller: %d\n", ret);
 	return ret;
 }
 
@@ -307,6 +306,7 @@ static int mtk_wdt_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct mtk_wdt_dev *mtk_wdt;
+	struct resource *res;
 	const struct mtk_wdt_data *wdt_data;
 	int err;
 
@@ -316,7 +316,8 @@ static int mtk_wdt_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, mtk_wdt);
 
-	mtk_wdt->wdt_base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	mtk_wdt->wdt_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(mtk_wdt->wdt_base))
 		return PTR_ERR(mtk_wdt->wdt_base);
 

@@ -319,10 +319,8 @@ static int share_mem_send_config(void)
 	struct share_mem_usage *usage = NULL;
 	struct sensor_comm_ctrl *ctrl = NULL;
 	struct sensor_comm_share_mem *comm_shm = NULL;
-	uint32_t ctrl_size = 0;
 
-	ctrl_size = ipi_comm_size(sizeof(*ctrl) + sizeof(*comm_shm));
-	ctrl = kzalloc(ctrl_size, GFP_KERNEL);
+	ctrl = kzalloc(sizeof(*ctrl) + sizeof(*comm_shm), GFP_KERNEL);
 	if (!ctrl)
 		return -ENOMEM;
 
@@ -347,7 +345,8 @@ static int share_mem_send_config(void)
 		}
 		if (index == ARRAY_SIZE(comm_shm->base_info) ||
 		    (i == (ARRAY_SIZE(shm_usage_table) - 1) && index)) {
-			ret = sensor_comm_ctrl_send(ctrl, ctrl_size);
+			ret = sensor_comm_ctrl_send(ctrl,
+				sizeof(*ctrl) + ctrl->length);
 			if (ret < 0)
 				break;
 			index = 0;

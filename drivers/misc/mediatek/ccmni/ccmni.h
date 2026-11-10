@@ -53,7 +53,6 @@
 #define  SIOPUSHPENDING       (SIOCDEVPRIVATE + 4)
 
 
-
 #define  IS_CCMNI_LAN(dev)      \
 	(strncmp(dev->name, "ccmni-lan", 9) == 0)
 #define  CCMNI_TX_PRINT_F	(0x1 << 0)
@@ -136,7 +135,7 @@ struct ccmni_instance {
 	unsigned long      rx_met_bytes;
 	unsigned long      tx_met_bytes;
 #endif
-	struct timespec64 flush_time;
+	struct timespec    flush_time;
 	void               *priv_data;
 
 	/* For queue packet before ready */

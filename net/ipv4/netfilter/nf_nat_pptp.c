@@ -1,9 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * nf_nat_pptp.c
  *
  * NAT support for PPTP (Point to Point Tunneling Protocol).
- * PPTP is a protocol for creating virtual private networks.
+ * PPTP is a a protocol for creating virtual private networks.
  * It is a specification defined by Microsoft and some vendors
  * working with Microsoft.  PPTP is built on top of a modified
  * version of the Internet Generic Routing Encapsulation Protocol.
@@ -38,7 +37,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Harald Welte <laforge@gnumonks.org>");
 MODULE_DESCRIPTION("Netfilter NAT helper module for PPTP");
-MODULE_ALIAS_NF_NAT_HELPER("pptp");
+MODULE_ALIAS("ip_nat_pptp");
 
 static void pptp_nat_expected(struct nf_conn *ct,
 			      struct nf_conntrack_expect *exp)
@@ -167,7 +166,7 @@ pptp_outbound_pkt(struct sk_buff *skb,
 	default:
 		pr_debug("unknown outbound packet 0x%04x:%s\n", msg,
 			 pptp_msg_name(msg));
-		fallthrough;
+		/* fall through */
 	case PPTP_SET_LINK_INFO:
 		/* only need to NAT in case PAC is behind NAT box */
 	case PPTP_START_SESSION_REQUEST:
@@ -268,7 +267,7 @@ pptp_inbound_pkt(struct sk_buff *skb,
 		break;
 	default:
 		pr_debug("unknown inbound packet %s\n", pptp_msg_name(msg));
-		fallthrough;
+		/* fall through */
 	case PPTP_START_SESSION_REQUEST:
 	case PPTP_START_SESSION_REPLY:
 	case PPTP_STOP_SESSION_REQUEST:
@@ -297,6 +296,8 @@ pptp_inbound_pkt(struct sk_buff *skb,
 
 static int __init nf_nat_helper_pptp_init(void)
 {
+	nf_nat_need_gre();
+
 	BUG_ON(nf_nat_pptp_hook_outbound != NULL);
 	RCU_INIT_POINTER(nf_nat_pptp_hook_outbound, pptp_outbound_pkt);
 

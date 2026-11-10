@@ -153,6 +153,7 @@ static const struct snd_kcontrol_new mtk_adda_dl_ch1_mix[] = {
 	SOC_DAPM_SINGLE_AUTODISABLE("DL4_CH1", AFE_CONN3_1, I_DL4_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL5_CH1", AFE_CONN3_1, I_DL5_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL6_CH1", AFE_CONN3_1, I_DL6_CH1, 1, 0),
+	SOC_DAPM_SINGLE_AUTODISABLE("DL7_CH1", AFE_CONN3_1, I_DL7_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL8_CH1", AFE_CONN3_1, I_DL8_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH3", AFE_CONN3,
 				    I_ADDA_UL_CH3, 1, 0),
@@ -183,6 +184,7 @@ static const struct snd_kcontrol_new mtk_adda_dl_ch2_mix[] = {
 	SOC_DAPM_SINGLE_AUTODISABLE("DL4_CH2", AFE_CONN4_1, I_DL4_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL5_CH2", AFE_CONN4_1, I_DL5_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL6_CH2", AFE_CONN4_1, I_DL6_CH2, 1, 0),
+	SOC_DAPM_SINGLE_AUTODISABLE("DL7_CH2", AFE_CONN4_1, I_DL7_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL8_CH2", AFE_CONN4_1, I_DL8_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH3", AFE_CONN4,
 				    I_ADDA_UL_CH3, 1, 0),
@@ -470,16 +472,18 @@ static int mtk_adda_mtkaif_cfg_event(struct snd_soc_dapm_widget *w,
 			if (strcmp(w->name, "ADDA_MTKAIF_CFG") == 0 &&
 			    (afe_priv->mtkaif_chosen_phase[0] < 0 ||
 			     afe_priv->mtkaif_chosen_phase[1] < 0)) {
+				AUDIO_AEE("adda mtkaif calib fail");
 				dev_warn(afe->dev,
-					 "%s(), adda mtkaif calib fail, mtkaif_chosen_phase[0/1]:%d/%d\n",
+					 "%s(), mtkaif_chosen_phase[0/1]:%d/%d\n",
 					 __func__,
 					 afe_priv->mtkaif_chosen_phase[0],
 					 afe_priv->mtkaif_chosen_phase[1]);
 				break;
 			} else if (strcmp(w->name, "ADDA6_MTKAIF_CFG") == 0 &&
 				   afe_priv->mtkaif_chosen_phase[2] < 0) {
+				AUDIO_AEE("adda6 mtkaif calib fail");
 				dev_warn(afe->dev,
-					 "%s(), adda6 mtkaif calib fail, mtkaif_chosen_phase[2]:%d\n",
+					 "%s(), mtkaif_chosen_phase[2]:%d\n",
 					 __func__,
 					 afe_priv->mtkaif_chosen_phase[2]);
 				break;
@@ -1094,8 +1098,7 @@ static int mtk_afe_dac_hires_connect(struct snd_soc_dapm_widget *source,
 	adda_priv = get_adda_priv_by_name(afe, w->name);
 
 	if (!adda_priv) {
-		dev_err(afe->dev, "%s(), error, adda_priv == NULL\n",
-		       __func__);
+		AUDIO_AEE("adda_priv == NULL");
 		return 0;
 	}
 
@@ -1113,8 +1116,7 @@ static int mtk_afe_adc_hires_connect(struct snd_soc_dapm_widget *source,
 	adda_priv = get_adda_priv_by_name(afe, w->name);
 
 	if (!adda_priv) {
-		dev_err(afe->dev, "%s(), error, adda_priv == NULL\n",
-		       __func__);
+		AUDIO_AEE("adda_priv == NULL");
 		return 0;
 	}
 
@@ -1133,6 +1135,8 @@ static const struct snd_soc_dapm_route mtk_dai_adda_routes[] = {
 	{"ADDA_DL_CH1", "DL6_CH1", "DL6"},
 	{"ADDA_DL_CH2", "DL6_CH2", "DL6"},
 
+	{"ADDA_DL_CH1", "DL7_CH1", "DL7"},
+	{"ADDA_DL_CH2", "DL7_CH2", "DL7"},
 	{"ADDA_DL_CH1", "DL8_CH1", "DL8"},
 	{"ADDA_DL_CH2", "DL8_CH2", "DL8"},
 
@@ -1273,8 +1277,7 @@ static int mtk_dai_adda_hw_params(struct snd_pcm_substream *substream,
 		 rate);
 
 	if (!adda_priv) {
-		dev_err(afe->dev, "%s(), error, adda_priv == NULL\n",
-		       __func__);
+		AUDIO_AEE("adda_priv == NULL");
 		return -EINVAL;
 	}
 

@@ -3,7 +3,11 @@
  * Copyright (C) 2019 MediaTek Inc.
  * Author Terry Chang <terry.chang@mediatek.com>
  */
+#include <linux/atomic.h>
 #include <linux/clk.h>
+#include <linux/debugfs.h>
+#include <linux/delay.h>
+#include <linux/fs.h>
 #include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/input.h>
@@ -11,6 +15,7 @@
 #include <linux/io.h>
 #include <linux/ioctl.h>
 #include <linux/kernel.h>
+#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -19,6 +24,12 @@
 #include <linux/platform_device.h>
 #include <linux/pm_wakeup.h>
 #include <linux/regmap.h>
+#include <linux/timer.h>
+#include <linux/workqueue.h>
+
+#if defined(CONFIG_WT_GOOGLE_KEY)
+#include <linux/of_gpio.h>
+#endif
 
 #define KPD_NAME	"mtk-kpd"
 
@@ -29,8 +40,12 @@
 #define KP_MEM4			(0x0010)
 #define KP_MEM5			(0x0014)
 #define KP_DEBOUNCE		(0x0018)
-#define KP_SEL			(0X0020)
+#define KP_SEL			(0x0020)
 #define KP_EN			(0x0024)
+
+#define KP_COL0_SEL		(1 << 10)
+#define KP_COL1_SEL		(1 << 11)
+#define KP_COL2_SEL		(1 << 12)
 
 #define KPD_DEBOUNCE_MASK	((1U << 14) - 1)
 #define KPD_DOUBLE_KEY_MASK	(1U << 0)
@@ -47,11 +62,15 @@ struct mtk_keypad {
 	void __iomem *base;
 	unsigned int irqnr;
 	u32 key_debounce;
-	u32 use_extend_type;
 	u32 hw_map_num;
 	u32 hw_init_map[KPD_NUM_KEYS];
 	u16 keymap_state[KPD_NUM_MEMS];
 };
+
+/* for keymap handling */
+static void kpd_keymap_handler(unsigned long data);
+
+static int kpd_pdrv_probe(struct platform_device *pdev);
 
 static void kpd_get_keymap_state(void __iomem *kp_base, u16 state[])
 {
@@ -60,22 +79,8 @@ static void kpd_get_keymap_state(void __iomem *kp_base, u16 state[])
 	state[2] = readw(kp_base + KP_MEM3);
 	state[3] = readw(kp_base + KP_MEM4);
 	state[4] = readw(kp_base + KP_MEM5);
-}
-
-static void kpd_double_key_enable(void __iomem *kp_base, int en)
-{
-	u16 tmp;
-
-	tmp = *(u16*)KP_SEL;
-	if (en)
-		writew((u16)(tmp | KPD_DOUBLE_KEY_MASK), kp_base + KP_SEL);
-	else
-		writew((u16)(tmp & ~KPD_DOUBLE_KEY_MASK), kp_base + KP_SEL);
-}
-
-static void enable_kpd(void __iomem *kp_base, int en)
-{
-	writew((u16)(en), kp_base + KP_EN);
+	pr_debug("kpd register = %x %x %x %x %x\n",
+		state[0], state[1], state[2], state[3], state[4]);
 }
 
 static void kpd_keymap_handler(unsigned long data)
@@ -108,7 +113,7 @@ static void kpd_keymap_handler(unsigned long data)
 
 			/* bit is 1: not pressed, 0: pressed */
 			pressed = (new_state[i] & mask) == 0U;
-			pr_info("(%s) HW keycode = %d\n",
+			pr_debug("(%s) HW keycode = %d\n",
 				(pressed) ? "pressed" : "released",
 					hw_keycode);
 
@@ -117,7 +122,7 @@ static void kpd_keymap_handler(unsigned long data)
 				continue;
 			input_report_key(keypad->input_dev, keycode, pressed);
 			input_sync(keypad->input_dev);
-			pr_info("report Linux keycode = %d\n", keycode);
+			pr_debug("report Linux keycode = %d\n", keycode);
 		}
 	}
 
@@ -140,38 +145,31 @@ static int kpd_get_dts_info(struct mtk_keypad *keypad,
 {
 	int ret;
 
-	ret = of_property_read_u32(node, "mediatek,key-debounce-ms",
+	ret = of_property_read_u32(node, "mediatek,kpd-key-debounce",
 		&keypad->key_debounce);
 	if (ret) {
-		pr_err("read mediatek,key-debounce-ms error.\n");
+		pr_debug("read mediatek,key-debounce-ms error.\n");
 		return ret;
 	}
 
-	ret = of_property_read_u32(node, "mediatek, use-extend-type",
-		&keypad->use_extend_type);
-	if (ret) {
-		pr_err("read mediatek,use-extend-type error.\n");
-		keypad->use_extend_type = 0;
-	}
-
-	ret = of_property_read_u32(node, "mediatek,hw-map-num",
+	ret = of_property_read_u32(node, "mediatek,kpd-hw-map-num",
 		&keypad->hw_map_num);
 	if (ret) {
-		pr_err("read mediatek,hw-map-num error.\n");
+		pr_debug("read mediatek,hw-map-num error.\n");
 		return ret;
 	}
 
 	if (keypad->hw_map_num > KPD_NUM_KEYS) {
-		pr_err("hw-map-num error, it cannot bigger than %d.\n",
+		pr_debug("hw-map-num error, it cannot bigger than %d.\n",
 			KPD_NUM_KEYS);
 		return -EINVAL;
 	}
 
-	ret = of_property_read_u32_array(node, "mediatek,hw-init-map",
+	ret = of_property_read_u32_array(node, "mediatek,kpd-hw-init-map",
 		keypad->hw_init_map, keypad->hw_map_num);
 
 	if (ret) {
-		pr_err("hw-init-map was not defined in dts.\n");
+		pr_debug("hw-init-map was not defined in dts.\n");
 		return ret;
 	}
 
@@ -180,51 +178,138 @@ static int kpd_get_dts_info(struct mtk_keypad *keypad,
 	return 0;
 }
 
+static int kpd_gpio_init(struct device *dev)
+{
+	struct pinctrl *keypad_pinctrl;
+	struct pinctrl_state *kpd_default;
+
+	keypad_pinctrl = devm_pinctrl_get(dev);
+	if (IS_ERR(keypad_pinctrl)) {
+		pr_debug("Cannot find keypad_pinctrl!\n");
+
+		return (int)PTR_ERR(keypad_pinctrl);
+	}
+
+	kpd_default = pinctrl_lookup_state(keypad_pinctrl, "default");
+	if (IS_ERR(kpd_default)) {
+		pr_debug("Cannot find ecall_state!\n");
+
+		return (int)PTR_ERR(kpd_default);
+	}
+
+	return pinctrl_select_state(keypad_pinctrl,
+				kpd_default);
+}
+
+#if defined(CONFIG_WT_GOOGLE_KEY)
+static int kpd_gpio_google_key_eint_state;
+static int kpd_gpio_google_key_irq;
+static struct tasklet_struct kpd_gpio_google_key_tasklet;
+
+static void kpd_gpio_google_key_hal(unsigned long data)
+{
+	struct mtk_keypad *keypad = (struct mtk_keypad *)data;
+
+	if (kpd_gpio_google_key_eint_state == 0) {
+		irq_set_irq_type(kpd_gpio_google_key_irq, IRQ_TYPE_LEVEL_HIGH);
+		kpd_gpio_google_key_eint_state = 1;
+	} else {
+		irq_set_irq_type(kpd_gpio_google_key_irq, IRQ_TYPE_LEVEL_LOW);
+		kpd_gpio_google_key_eint_state = 0;
+	}
+
+	pr_info("kpd_gpio_google_key_hal state = %d\n",kpd_gpio_google_key_eint_state);
+
+	input_report_key(keypad->input_dev, KEY_SEARCH, kpd_gpio_google_key_eint_state);
+	input_sync(keypad->input_dev);
+	enable_irq(kpd_gpio_google_key_irq);
+}
+
+static irqreturn_t kpd_gpio_google_key_eint_handler(int irq, void *dev_id)
+{
+	disable_irq_nosync(kpd_gpio_google_key_irq);
+	tasklet_schedule(&kpd_gpio_google_key_tasklet);
+	return IRQ_HANDLED;
+}
+
+void kpd_gpio_google_eint_register(void)
+{
+	int ints[2] = {0, 0};
+	int ret;
+	struct device_node *node;
+
+	node = of_find_compatible_node(NULL, NULL, "mediatek, key_google_key-eint");
+	if (!node)
+		pr_notice("can't find compatible google key node\n");
+	else {
+		ints[0]=of_get_named_gpio(node, "deb-gpios", 0);
+		of_property_read_u32(node, "debounce", &ints[1]);
+		gpio_set_debounce(ints[0], ints[1]);
+		kpd_gpio_google_key_irq = irq_of_parse_and_map(node, 0);
+
+		ret = request_irq(kpd_gpio_google_key_irq, kpd_gpio_google_key_eint_handler,
+				  IRQF_TRIGGER_NONE, "kpd_gpio_google_key_eint", NULL);
+		if (ret)
+			pr_notice("GOOGLE KEY EINT IRQ LINE NOT AVAILABLE\n");
+	}
+}
+#endif /* CONFIG_WT_GOOGLE_KEY */
+
 static int kpd_pdrv_probe(struct platform_device *pdev)
 {
 	struct mtk_keypad *keypad;
 	struct resource *res;
 	int i;
-	int ret;
+	int err;
 
 	keypad = devm_kzalloc(&pdev->dev, sizeof(*keypad), GFP_KERNEL);
 	if (!keypad)
 		return -ENOMEM;
 
 	keypad->clk = devm_clk_get(&pdev->dev, "kpd");
-	if (IS_ERR(keypad->clk))
-		return PTR_ERR(keypad->clk);
+	if (IS_ERR(keypad->clk)) {
+		pr_debug("get kpd-clk fail: %d\n", (int)PTR_ERR(keypad->clk));
+		return (int)PTR_ERR(keypad->clk);
+	}
 
-	ret = clk_prepare_enable(keypad->clk);
-	if (ret) {
-		pr_err("cannot prepare/enable keypad clock\n");
-		return ret;
+	err = clk_prepare_enable(keypad->clk);
+	if (err) {
+		pr_debug("kpd-clk prepare enable failed.\n");
+		return err;
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
-		ret = -ENODEV;
+		err = -ENODEV;
 		goto err_unprepare_clk;
 	}
 
 	keypad->base = devm_ioremap(&pdev->dev, res->start,
 			resource_size(res));
 	if (!keypad->base) {
-		pr_err("KP iomap failed\n");
-		ret = -EBUSY;
+		pr_debug("KP iomap failed\n");
+		err = -EBUSY;
 		goto err_unprepare_clk;
 	}
 
 	keypad->irqnr = irq_of_parse_and_map(pdev->dev.of_node, 0);
 	if (!keypad->irqnr) {
-		pr_err("KP get irqnr failed\n");
-		ret = -ENODEV;
+		pr_debug("KP get irqnr failed\n");
+		err = -ENODEV;
 		goto err_unprepare_clk;
 	}
 
-	ret = kpd_get_dts_info(keypad, pdev->dev.of_node);
-	if (ret) {
-		pr_err("get dts info failed.\n");
+	pr_info("kp base: 0x%p, addr:0x%p,  kp irq: %d\n",
+			keypad->base, &keypad->base, keypad->irqnr);
+	err = kpd_gpio_init(&pdev->dev);
+	if (err) {
+		pr_debug("gpio init failed\n");
+		goto err_unprepare_clk;
+	}
+
+	err = kpd_get_dts_info(keypad, pdev->dev.of_node);
+	if (err) {
+		pr_debug("get dts info failed.\n");
 		goto err_unprepare_clk;
 	}
 
@@ -232,8 +317,8 @@ static int kpd_pdrv_probe(struct platform_device *pdev)
 
 	keypad->input_dev = devm_input_allocate_device(&pdev->dev);
 	if (!keypad->input_dev) {
-		pr_err("input allocate device fail.\n");
-		ret = -ENOMEM;
+		pr_notice("input allocate device fail.\n");
+		err = -ENOMEM;
 		goto err_unprepare_clk;
 	}
 
@@ -243,10 +328,9 @@ static int kpd_pdrv_probe(struct platform_device *pdev)
 
 	__set_bit(EV_KEY, keypad->input_dev->evbit);
 
-	if (!keypad->use_extend_type) {
-		for (i = 17; i < KPD_NUM_KEYS; i += 9)
-			keypad->hw_init_map[i] = 0;
-	}
+#if defined(CONFIG_WT_GOOGLE_KEY)
+	__set_bit(KEY_SEARCH, keypad->input_dev->keybit);
+#endif
 
 	for (i = 0; i < KPD_NUM_KEYS; i++) {
 		if (keypad->hw_init_map[i])
@@ -254,12 +338,9 @@ static int kpd_pdrv_probe(struct platform_device *pdev)
 				keypad->input_dev->keybit);
 	}
 
-	if (keypad->use_extend_type)
-		kpd_double_key_enable(keypad->base, 1);
-
-	ret = input_register_device(keypad->input_dev);
-	if (ret) {
-		pr_err("register input device failed (%d)\n", ret);
+	err = input_register_device(keypad->input_dev);
+	if (err) {
+		pr_notice("register input device failed (%d)\n", err);
 		goto err_unprepare_clk;
 	}
 
@@ -267,29 +348,33 @@ static int kpd_pdrv_probe(struct platform_device *pdev)
 
 	keypad->suspend_lock = wakeup_source_register(NULL, "kpd wakelock");
 	if (!keypad->suspend_lock) {
-		pr_err("wakeup source init failed.\n");
+		pr_notice("wakeup source init failed.\n");
 		goto err_unregister_device;
 	}
 
 	tasklet_init(&keypad->tasklet, kpd_keymap_handler,
 					(unsigned long)keypad);
 
+#if defined(CONFIG_WT_GOOGLE_KEY)
+	tasklet_init(&kpd_gpio_google_key_tasklet, kpd_gpio_google_key_hal, (unsigned long)keypad);
+#endif
+
 	writew((u16)(keypad->key_debounce & KPD_DEBOUNCE_MASK),
 			keypad->base + KP_DEBOUNCE);
 
 	/* register IRQ */
-	ret = request_irq(keypad->irqnr, kpd_irq_handler, IRQF_TRIGGER_NONE,
+	err = request_irq(keypad->irqnr, kpd_irq_handler, IRQF_TRIGGER_NONE,
 			KPD_NAME, keypad);
-	if (ret) {
-		pr_err("register IRQ failed (%d)\n", ret);
+	if (err) {
+		pr_notice("register IRQ failed (%d)\n", err);
 		goto err_irq;
 	}
 
-	ret = enable_irq_wake(keypad->irqnr);
-	if (ret < 0)
-		pr_err("irq %d enable irq wake fail\n", keypad->irqnr);
+#if defined(CONFIG_WT_GOOGLE_KEY)
+	kpd_gpio_google_eint_register();
+#endif
 
-	platform_set_drvdata(pdev,keypad);
+	pr_info("kpd_probe OK.\n");
 
 	return 0;
 
@@ -302,8 +387,9 @@ err_unregister_device:
 err_unprepare_clk:
 	clk_disable_unprepare(keypad->clk);
 
-	return ret;
+	return err;
 }
+
 
 static int kpd_pdrv_remove(struct platform_device *pdev)
 {
@@ -317,40 +403,21 @@ static int kpd_pdrv_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int kpd_pdrv_suspend(struct platform_device *pdev, pm_message_t state)
-{
- 	struct mtk_keypad *keypad = platform_get_drvdata(pdev);
-
-	enable_kpd(keypad->base, 0);
-
-	return 0;
-}
-
-static int kpd_pdrv_resume(struct platform_device *pdev)
-{
-	struct mtk_keypad *keypad = platform_get_drvdata(pdev);
-
-	enable_kpd(keypad->base, 1);
-
-	return 0;
-}
-
 static const struct of_device_id kpd_of_match[] = {
 	{.compatible = "mediatek,mt6779-keypad"},
 	{.compatible = "mediatek,kp"},
-	{}
+	{},
 };
 
 static struct platform_driver kpd_pdrv = {
 	.probe = kpd_pdrv_probe,
 	.remove = kpd_pdrv_remove,
-	.suspend = kpd_pdrv_suspend,
-	.resume = kpd_pdrv_resume,
 	.driver = {
 		   .name = KPD_NAME,
 		   .of_match_table = kpd_of_match,
-	},
+		   },
 };
+
 module_platform_driver(kpd_pdrv);
 
 MODULE_AUTHOR("Mediatek Corporation");

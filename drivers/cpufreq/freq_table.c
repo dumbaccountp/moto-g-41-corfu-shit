@@ -1,15 +1,18 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/cpufreq/freq_table.c
  *
  * Copyright (C) 2002 - 2003 Dominik Brodowski
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/cpufreq.h>
 #include <linux/module.h>
-#include <trace/hooks/cpufreq.h>
 
 /*********************************************************************
  *                     FREQUENCY TABLE HELPERS                       *
@@ -52,15 +55,8 @@ int cpufreq_frequency_table_cpuinfo(struct cpufreq_policy *policy,
 			max_freq = freq;
 	}
 
-	trace_android_vh_freq_table_limits(policy, min_freq, max_freq);
 	policy->min = policy->cpuinfo.min_freq = min_freq;
-	policy->max = max_freq;
-	/*
-	 * If the driver has set its own cpuinfo.max_freq above max_freq, leave
-	 * it as is.
-	 */
-	if (policy->cpuinfo.max_freq < max_freq)
-		policy->max = policy->cpuinfo.max_freq = max_freq;
+	policy->max = policy->cpuinfo.max_freq = max_freq;
 
 	if (policy->min == ~0)
 		return -EINVAL;
@@ -68,7 +64,7 @@ int cpufreq_frequency_table_cpuinfo(struct cpufreq_policy *policy,
 		return 0;
 }
 
-int cpufreq_frequency_table_verify(struct cpufreq_policy_data *policy,
+int cpufreq_frequency_table_verify(struct cpufreq_policy *policy,
 				   struct cpufreq_frequency_table *table)
 {
 	struct cpufreq_frequency_table *pos;
@@ -108,7 +104,7 @@ EXPORT_SYMBOL_GPL(cpufreq_frequency_table_verify);
  * Generic routine to verify policy & frequency table, requires driver to set
  * policy->freq_table prior to it.
  */
-int cpufreq_generic_frequency_table_verify(struct cpufreq_policy_data *policy)
+int cpufreq_generic_frequency_table_verify(struct cpufreq_policy *policy)
 {
 	if (!policy->freq_table)
 		return -ENODEV;
@@ -229,7 +225,7 @@ int cpufreq_frequency_table_get_index(struct cpufreq_policy *policy,
 }
 EXPORT_SYMBOL_GPL(cpufreq_frequency_table_get_index);
 
-/*
+/**
  * show_available_freqs - show available frequencies for the specified CPU
  */
 static ssize_t show_available_freqs(struct cpufreq_policy *policy, char *buf,
@@ -268,7 +264,7 @@ static ssize_t show_available_freqs(struct cpufreq_policy *policy, char *buf,
 struct freq_attr cpufreq_freq_attr_##_name##_freqs =     \
 __ATTR_RO(_name##_frequencies)
 
-/*
+/**
  * show_scaling_available_frequencies - show available normal frequencies for
  * the specified CPU
  */
@@ -280,7 +276,7 @@ static ssize_t scaling_available_frequencies_show(struct cpufreq_policy *policy,
 cpufreq_attr_available_freq(scaling_available);
 EXPORT_SYMBOL_GPL(cpufreq_freq_attr_scaling_available_freqs);
 
-/*
+/**
  * show_available_boost_freqs - show available boost frequencies for
  * the specified CPU
  */
@@ -294,6 +290,9 @@ EXPORT_SYMBOL_GPL(cpufreq_freq_attr_scaling_boost_freqs);
 
 struct freq_attr *cpufreq_generic_attr[] = {
 	&cpufreq_freq_attr_scaling_available_freqs,
+#ifdef CONFIG_CPU_FREQ_BOOST_SW
+	&cpufreq_freq_attr_scaling_boost_freqs,
+#endif
 	NULL,
 };
 EXPORT_SYMBOL_GPL(cpufreq_generic_attr);

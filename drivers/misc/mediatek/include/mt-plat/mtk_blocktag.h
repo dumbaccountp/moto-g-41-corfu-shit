@@ -1,18 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2020 MediaTek Inc.
+ * Copyright (C) 2019 MediaTek Inc.
  */
 
 #ifndef _MTK_BLOCKTAG_H
 #define _MTK_BLOCKTAG_H
 
 #include <linux/blk_types.h>
-#include <linux/mmc/core.h>
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
-#include "ufshcd.h"
 
-#if IS_ENABLED(CONFIG_MTK_BLOCK_IO_TRACER)
+#if defined(CONFIG_MTK_BLOCK_TAG)
 
 /*
  * MTK_BTAG_FEATURE_MICTX_IOSTAT
@@ -28,7 +26,6 @@
 #define BLOCKTAG_PIDLOG_ENTRIES 50
 #define BLOCKTAG_NAME_LEN      16
 #define BLOCKTAG_PRINT_LEN     4096
-#define STORAGE_BOOT_DEV_NUM 2
 
 #define BTAG_RT(btag)     (btag ? &btag->rt : NULL)
 #define BTAG_CTX(btag)    (btag ? btag->ctx.priv : NULL)
@@ -50,7 +47,7 @@ enum {
 	PIDLOG_MODE_MM_MARK_DIRTY   = 3
 };
 
-enum mtk_btag_storage_type {
+enum {
 	BTAG_STORAGE_EMBEDDED = 0,
 	BTAG_STORAGE_EXTERNAL
 };
@@ -60,6 +57,7 @@ enum {
 	BTAG_STORAGE_MMC     = 1,
 	BTAG_STORAGE_UNKNOWN = 2
 };
+
 
 struct mtk_btag_workload {
 	__u64 period;  /* period time (ns) */
@@ -125,21 +123,15 @@ struct mtk_btag_mictx_struct {
 	__u64 idle_begin;
 	__u64 idle_begin_top;
 	__u64 idle_total;
-	__u64 idle_total_top;
 	__u64 weighted_qd;
-
-	/* peeking window */
-	__u64 pwd_begin;
-	__u32 pwd_top_r_pages;
-	__u32 pwd_top_w_pages;
-
+	__u32 top_r_pages;
+	__u32 top_w_pages;
 	__u16 q_depth;
 	__u16 q_depth_top;
 	spinlock_t lock;
 	bool enabled;
 	bool boosted;
 	bool earaio_enabled;
-	bool earaio_allowed;
 	bool uevt_req;
 	bool uevt_state;
 	struct workqueue_struct *uevt_workq;
@@ -207,7 +199,6 @@ struct mtk_btag_vops {
 			    struct seq_file *seq);
 	void    (*mictx_eval_wqd)(struct mtk_btag_mictx_struct *mctx,
 				  u64 t_cur);
-	bool	boot_device[STORAGE_BOOT_DEV_NUM];
 	bool	earaio_enabled;
 };
 
@@ -252,12 +243,15 @@ void mtk_btag_free(struct mtk_blocktag *btag);
 
 struct mtk_btag_trace *mtk_btag_curr_trace(struct mtk_btag_ringtrace *rt);
 struct mtk_btag_trace *mtk_btag_next_trace(struct mtk_btag_ringtrace *rt);
-void mtk_btag_commit_req(struct request *rq, bool is_sd);
-int mtk_btag_pidlog_add_mmc(struct request_queue *q, short pid,
-	__u32 len, int rw, bool is_sd);
+
+int mtk_btag_pidlog_add_mmc(struct request_queue *q, pid_t pid, __u32 len,
+	int rw);
+#ifdef CONFIG_MTK_UFS_BLOCK_IO_LOG
 int mtk_btag_pidlog_add_ufs(struct request_queue *q, short pid, __u32 len,
 	int rw);
-void mtk_btag_get_aee_buffer(unsigned long *vaddr, unsigned long *size);
+#else
+#define mtk_btag_pidlog_add_ufs(...)
+#endif
 void mtk_btag_pidlog_insert(struct mtk_btag_pidlogger *pidlog, pid_t pid,
 __u32 len, int rw);
 void mtk_mq_btag_pidlog_insert(struct mtk_btag_pidlogger *pidlog, pid_t pid,
@@ -291,29 +285,10 @@ void mtk_btag_mictx_eval_req(
 	unsigned int rw, __u32 cnt, __u32 size, bool top);
 int mtk_btag_mictx_get_data(
 	struct mtk_btag_mictx_iostat_struct *iostat);
-void mtk_btag_mictx_update(struct mtk_blocktag *btag, __u32 q_depth);
-
-int ufs_mtk_biolog_init(bool qos_allowed, bool boot_device);
-int ufs_mtk_biolog_exit(void);
-
-void ufs_mtk_biolog_send_command(unsigned int task_id,
-				 struct scsi_cmnd *cmd);
-void ufs_mtk_biolog_transfer_req_compl(unsigned int taski_id,
-				       unsigned long req_mask);
-void ufs_mtk_biolog_check(unsigned long req_mask);
-void ufs_mtk_biolog_clk_gating(bool gated);
+void mtk_btag_mictx_update_ctx(struct mtk_blocktag *btag, __u32 q_depth);
 
 void rs_index_init(struct mtk_blocktag *btag,
 		   struct proc_dir_entry *parent);
-void mmc_mtk_biolog_send_command(unsigned int task_id,
-				 struct mmc_request *mrq);
-void mmc_mtk_biolog_transfer_req_compl(struct mmc_host *mmc,
-		unsigned int task_id, unsigned long req_mask);
-void mmc_mtk_biolog_check(struct mmc_host *mmc, unsigned long req_mask);
-int mmc_mtk_biolog_init(struct mmc_host *mmc);
-int mmc_mtk_biolog_exit(void);
-void set_mmc_perf_mode(struct mmc_host *mmc, bool boost);
-void mmc_mtk_biolog_clk_gating(bool gated);
 
 #else
 
@@ -327,24 +302,10 @@ void mmc_mtk_biolog_clk_gating(bool gated);
 #define mtk_btag_mictx_eval_tp(...)
 #define mtk_btag_mictx_eval_req(...)
 #define mtk_btag_mictx_get_data(...)
-#define mtk_btag_mictx_update(...)
-
-#define ufs_mtk_biolog_init(...)
-#define ufs_mtk_biolog_exit(...)
-#define ufs_mtk_biolog_send_command(...)
-#define ufs_mtk_biolog_transfer_req_compl(...)
-#define ufs_mtk_biolog_check(...)
-#define ufs_mtk_biolog_clk_gating(...)
+#define mtk_btag_mictx_update_ctx(...)
 
 #define rs_index_init(...)
 
-#define mmc_mtk_biolog_send_command(...)
-#define mmc_mtk_biolog_transfer_req_compl(...)
-#define mmc_mtk_biolog_check(...)
-#define mmc_mtk_biolog_init(...)
-#define mmc_mtk_biolog_exit(...)
-#define set_mmc_perf_mode(...)
-#define mmc_mtk_biolog_clk_gating(...)
 #endif
 
 #endif

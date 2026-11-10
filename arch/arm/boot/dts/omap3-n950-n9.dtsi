@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * omap3-n950-n9.dtsi - Device Tree file for Nokia N950 & N9 (common stuff)
  *
  * Written by: Aaro Koskinen <aaro.koskinen@iki.fi>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include "omap36xx.dtsi"
@@ -11,6 +14,13 @@
 	cpus {
 		cpu@0 {
 			cpu0-supply = <&vcc>;
+			operating-points = <
+				/* kHz    uV */
+				300000  1012500
+				600000  1200000
+				800000  1325000
+				1000000	1375000
+			>;
 		};
 	};
 
@@ -34,6 +44,7 @@
 		regulator-name = "VWLAN";
 		gpio = <&gpio2 3 GPIO_ACTIVE_HIGH>; /* gpio 35 */
 		enable-active-high;
+		regulator-boot-off;
 	};
 
 	leds {
@@ -341,11 +352,6 @@
 	status = "disabled";
 };
 
-/* RNG not directly accessible on N950/N9. */
-&rng_target {
-	status = "disabled";
-};
-
 &usb_otg_hs {
 	interface-type = <0>;
 	usb-phy = <&usb2_phy>;
@@ -493,12 +499,4 @@
 		clocks = <&vctcxo>;
 		clock-names = "sysclk";
 	};
-};
-
-&aes1_target {
-	status = "disabled";
-};
-
-&aes2_target {
-	status = "disabled";
 };

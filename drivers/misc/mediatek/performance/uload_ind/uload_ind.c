@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
-
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
 #include <linux/cpumask.h>
@@ -10,10 +9,7 @@
 #include "load_track.h"
 #include "uload_ind.h"
 
-#define CREATE_TRACE_POINTS
-#include "trace_uload_ind.h"
-
-#if IS_ENABLED(CONFIG_CPU_FREQ)
+#ifdef CONFIG_CPU_FREQ
 #include <linux/cpufreq.h>
 #endif
 
@@ -24,10 +20,6 @@
 #include <linux/slab.h>
 #include <linux/miscdevice.h>   /* for misc_register, and SYNTH_MINOR */
 #include <linux/proc_fs.h>
-
-#include <linux/preempt.h>
-#include <linux/trace_events.h>
-#include <linux/kernel.h>
 
 #define REG_SUCCESS (0)
 #define REG_FAIL (-1)
@@ -43,7 +35,7 @@ static int specify_overThrhld; /*specify cpus threshold value for sent uevent*/
 static int under_threshold; /*threshold value for sent uevent*/
 static bool uevent_enable; /*sent uevent switch*/
 static int curr_cpu_loading; /*cat curr cpu loading node*/
-static int specify_cpus; /*specify cpus*/
+static int specify_cpus; /*specify cpus' scope, for example 10 means from cpu0 to cpu1*/
 static int nr_cpus;/*cpu numbers*/
 static int state;
 
@@ -85,7 +77,7 @@ static void init_cpu_loading_value(void)
 	polling_sec = 10;
 	polling_ms = 10000;
 	over_threshold = 85;
-	specify_overThrhld = 85;
+	specify_overThrhld = 100;
 	specify_cpus = 0;
 	nr_cpus = num_possible_cpus();
 	under_threshold = 20;
@@ -96,33 +88,12 @@ static void init_cpu_loading_value(void)
 	cl_unlock(__func__);
 }
 
-void perfmgr_trace_printk(char *module, char *string)
-{
-	preempt_disable();
-	trace_cpu_loading(module, string);
-	preempt_enable();
-}
-
-void perfmgr_trace_log(char *module, const char *fmt, ...)
-{
-	char log[256];
-	va_list args;
-	int len;
-
-	va_start(args, fmt);
-	len = vsnprintf(log, sizeof(log), fmt, args);
-
-	if (unlikely(len == 256))
-		log[255] = '\0';
-	va_end(args);
-	trace_cpu_loading(module, log);
-}
-
 static bool sentuevent(const char *src)
 {
 	int ret;
 	char *envp[2];
-	char event_string[32];
+	int string_size = 15;
+	char  event_string[string_size];
 
 	envp[0] = event_string;
 	envp[1] = NULL;
@@ -130,13 +101,12 @@ static bool sentuevent(const char *src)
 
 	/*send uevent*/
 	if (uevent_enable) {
-		strlcpy(event_string, src, 32);
+		strlcpy(event_string, src, string_size);
 		if (event_string[0] == '\0') { /*string is null*/
 
 			perfmgr_trace_printk("cpu_loading", "string is null");
 			return false;
 		}
-
 		ret = kobject_uevent_env(
 				&cpu_loading_object.this_device->kobj,
 				KOBJ_CHANGE, envp);
@@ -146,7 +116,6 @@ static bool sentuevent(const char *src)
 
 			return false;
 		}
-
 		show_debug("sent uevent success:%s", src);
 
 		perfmgr_trace_log("cpu_loading",
@@ -158,6 +127,7 @@ static bool sentuevent(const char *src)
 /*update info*/
 static void calculat_loading_callback(int mask_loading, int loading)
 {
+
 	cl_lock(__func__);
 
 	show_debug("update cpu_loading");
@@ -167,7 +137,6 @@ static void calculat_loading_callback(int mask_loading, int loading)
 
 	show_debug("loading:%d mask_loading:%d curr_cpu_loading:%d previous state:%d\n",
 			loading, mask_loading, curr_cpu_loading, state);
-
 	if (loading > over_threshold) {
 		state = ULOAD_STATE_HIGH;
 		sentuevent("over=1");
@@ -179,6 +148,7 @@ static void calculat_loading_callback(int mask_loading, int loading)
 		}
 	} else {
 		state = ULOAD_STATE_LOW;
+		sentuevent("lower=2");
 	}
 
 	show_debug("current state:%d\n", state);
@@ -195,15 +165,14 @@ static void start_calculate_loading(void)
 	poll_ms = polling_ms;
 
 	cl_unlock(__func__);
-
 	if (specify_cpus != 0) {
 		cpumask_clear(&specify_cpu_mask);
 
 		start = specify_cpus%10;
 		end = specify_cpus/10;
-
 		for (i = start; i <= end; i++)
 			cpumask_set_cpu(i, &specify_cpu_mask);
+
 		ret_reg = reg_loading_tracking(calculat_loading_callback, poll_ms,
 				&specify_cpu_mask);
 	} else {
@@ -238,13 +207,6 @@ static void stop_calculate_loading(void)
 	perfmgr_trace_log("cpu_loading", "ret_unreg:%d\n", ret_unreg);
 }
 
-static int perfmgr_proc_open(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-
-	return 0;
-}
-
 static ssize_t perfmgr_poltime_secs_proc_write(struct file *filp,
 		const char __user *ubuf, size_t cnt, loff_t *pos)
 {
@@ -274,21 +236,13 @@ static ssize_t perfmgr_poltime_secs_proc_write(struct file *filp,
 	return cnt;
 }
 
-static ssize_t perfmgr_poltime_secs_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_poltime_secs_proc_show(struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", polling_sec);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	if (m)
+		seq_printf(m, "%d\n", polling_sec);
+	cl_unlock(__func__);
+	return 0;
 }
 
 static ssize_t perfmgr_poltime_nsecs_proc_write(struct file *filp,
@@ -309,21 +263,11 @@ static ssize_t perfmgr_poltime_nsecs_proc_write(struct file *filp,
 	return cnt;
 }
 
-static ssize_t perfmgr_poltime_nsecs_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_poltime_nsecs_proc_show(struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", 0);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	if (m)
+		seq_printf(m, "%d\n", 0);
+	return 0;
 }
 
 static ssize_t perfmgr_onoff_proc_write(struct file *filp,
@@ -355,38 +299,22 @@ static ssize_t perfmgr_onoff_proc_write(struct file *filp,
 	return cnt;
 }
 
-static ssize_t perfmgr_onoff_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_onoff_proc_show(struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", onoff);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	if (m)
+		seq_printf(m, "%d\n", onoff);
+	cl_unlock(__func__);
+	return 0;
 }
 
-static ssize_t perfmgr_underThrhld_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_underThrhld_proc_show(
+		struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", under_threshold);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	seq_printf(m, "%d\n", under_threshold);
+	cl_unlock(__func__);
+	return 0;
 }
 
 static ssize_t perfmgr_underThrhld_proc_write(
@@ -420,21 +348,13 @@ static ssize_t perfmgr_underThrhld_proc_write(
 	return cnt;
 }
 
-static ssize_t perfmgr_overThrhld_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_overThrhld_proc_show(
+		struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", over_threshold);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	seq_printf(m, "%d\n", over_threshold);
+	cl_unlock(__func__);
+	return 0;
 }
 
 static ssize_t perfmgr_overThrhld_proc_write(
@@ -466,21 +386,12 @@ static ssize_t perfmgr_overThrhld_proc_write(
 	return cnt;
 }
 
-static ssize_t perfmgr_specify_cpus_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_specify_cpus_proc_show(struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", specify_cpus);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	seq_printf(m, "%d\n", specify_cpus);
+	cl_unlock(__func__);
+	return 0;
 }
 
 static ssize_t perfmgr_specify_cpus_proc_write(
@@ -494,7 +405,7 @@ static ssize_t perfmgr_specify_cpus_proc_write(
 	if (ret != 0)
 		return ret;
 
-	if (val < 0 || val > 76543210)
+	if (val < 10 || val > 65)
 		return -EINVAL;
 
 	cl_lock(__func__);
@@ -511,21 +422,12 @@ static ssize_t perfmgr_specify_cpus_proc_write(
 
 }
 
-static ssize_t perfmgr_specify_overThrhld_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_specify_overThrhld_proc_show(struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", specify_overThrhld);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	seq_printf(m, "%d\n", specify_overThrhld);
+	cl_unlock(__func__);
+	return 0;
 }
 
 static ssize_t perfmgr_specify_overThrhld_proc_write(
@@ -556,21 +458,13 @@ static ssize_t perfmgr_specify_overThrhld_proc_write(
 
 }
 
-static ssize_t perfmgr_uevent_enable_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_uevent_enable_proc_show(
+		struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", uevent_enable);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	seq_printf(m, "%d\n", uevent_enable);
+	cl_unlock(__func__);
+	return 0;
 }
 
 static ssize_t perfmgr_uevent_enable_proc_write(
@@ -602,38 +496,22 @@ static ssize_t perfmgr_uevent_enable_proc_write(
 
 }
 
-static ssize_t perfmgr_curr_cpu_loading_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_curr_cpu_loading_proc_show(struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
-
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", curr_cpu_loading);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	seq_printf(m, "%d\n", curr_cpu_loading);
+	cl_unlock(__func__);
+	return 0;
 }
 
-static ssize_t perfmgr_debug_enable_proc_show(struct file *file,
-		char __user *ubuf, size_t count, loff_t *ppos)
+static int perfmgr_debug_enable_proc_show(
+		struct seq_file *m, void *v)
 {
-	int n = 0;
-	char buffer[512];
 
-	if (*ppos != 0)
-		goto out;
-
-	n = scnprintf(buffer, 512, "%u", debug_enable);
-out:
-	if (n < 0)
-		return -EINVAL;
-
-	return simple_read_from_buffer(ubuf, count, ppos, buffer, n);
+	cl_lock(__func__);
+	seq_printf(m, "%d\n", debug_enable);
+	cl_unlock(__func__);
+	return 0;
 }
 
 static ssize_t perfmgr_debug_enable_proc_write(
@@ -678,9 +556,9 @@ static int init_cpu_loading_kobj(void)
 	/* dev init */
 
 	cpu_loading_object.name = "cpu_loading";
-	cpu_loading_object.minor = MISC_DYNAMIC_MINOR;
 	ret = misc_register(&cpu_loading_object);
 	if (ret) {
+		ret = -ENODEV;
 		pr_debug("misc_register error:%d\n", ret);
 		return ret;
 	}
@@ -698,16 +576,15 @@ static int init_cpu_loading_kobj(void)
 
 }
 
-static int __init uload_init(void)
+int init_uload_ind(struct proc_dir_entry *parent)
 {
 	struct proc_dir_entry *lt_dir = NULL;
-	struct proc_dir_entry *parent = NULL;
 	int ret;
 	size_t i;
 
 	struct pentry {
 		const char *name;
-		const struct proc_ops *fops;
+		const struct file_operations *fops;
 	};
 
 	const struct pentry entries[] = {
@@ -748,11 +625,3 @@ static int __init uload_init(void)
 	return 0;
 }
 
-static void __exit uload_exit(void){}
-
-module_init(uload_init);
-module_exit(uload_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("MediaTek ULOAD_IND");
-MODULE_AUTHOR("MediaTek Inc.");

@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * mtu3_debugfs.c - debugfs interface
- *
  * Copyright (C) 2019 MediaTek Inc.
- *
- * Author: Chunfeng Yun <chunfeng.yun@mediatek.com>
+ * Author Chunfeng Yun <chunfeng.yun@mediatek.com>
  */
 
 #include <linux/uaccess.h>
@@ -127,7 +124,7 @@ static void mtu3_debugfs_regset(struct mtu3 *mtu, void __iomem *base,
 	struct debugfs_regset32 *regset;
 	struct mtu3_regset *mregs;
 
-	mregs = devm_kzalloc(mtu->dev, sizeof(*mregs), GFP_KERNEL);
+	mregs = devm_kzalloc(mtu->dev, sizeof(*regset), GFP_KERNEL);
 	if (!mregs)
 		return;
 
@@ -276,7 +273,7 @@ static const struct file_operations mtu3_ep_fops = {
 	.release = single_release,
 };
 
-static const struct debugfs_reg32 mtu3_prb_regs[] = {
+static struct debugfs_reg32 mtu3_prb_regs[] = {
 	dump_prb_reg("enable", U3D_SSUSB_PRB_CTRL0),
 	dump_prb_reg("byte-sell", U3D_SSUSB_PRB_CTRL1),
 	dump_prb_reg("byte-selh", U3D_SSUSB_PRB_CTRL2),
@@ -321,7 +318,6 @@ static ssize_t mtu3_probe_write(struct file *file, const char __user *ubuf,
 	u32 val;
 	int i;
 
-	memset(buf, 0x00, sizeof(buf));
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
 
@@ -350,7 +346,7 @@ static const struct file_operations mtu3_probe_fops = {
 static void mtu3_debugfs_create_prb_files(struct mtu3 *mtu)
 {
 	struct ssusb_mtk *ssusb = mtu->ssusb;
-	const struct debugfs_reg32 *regs;
+	struct debugfs_reg32 *regs;
 	struct dentry *dir_prb;
 	int i;
 
@@ -450,7 +446,6 @@ static ssize_t ssusb_mode_write(struct file *file, const char __user *ubuf,
 	struct ssusb_mtk *ssusb = sf->private;
 	char buf[16];
 
-	memset(buf, 0x00, sizeof(buf));
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
 
@@ -499,7 +494,6 @@ static ssize_t ssusb_vbus_write(struct file *file, const char __user *ubuf,
 	char buf[16];
 	bool enable;
 
-	memset(buf, 0x00, sizeof(buf));
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
 

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
-#if IS_ENABLED(CONFIG_USB_POWER_DELIVERY)
 #include <linux/delay.h>
 
 #include "inc/tcpci.h"
@@ -11,7 +10,9 @@
 #include "inc/pd_dpm_core.h"
 #include "pd_dpm_prv.h"
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_POWER_DELIVERY
+#ifdef CONFIG_USB_PD_ALT_MODE
+
 /* Display Port DFP_U / UFP_U */
 
 
@@ -71,7 +72,7 @@ static inline bool dp_update_dp_connected_both(struct pd_port *pd_port,
 }
 
 /* DP : DFP_U */
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 #if DP_DBG_ENABLE
 static const char * const dp_dfp_u_state_name[] = {
 	"dp_dfp_u_none",
@@ -105,7 +106,7 @@ bool dp_dfp_u_notify_pe_startup(
 	if (!(pd_port->id_vdos[0] & PD_IDH_MODAL_SUPPORT))
 		return true;
 
-	if (pd_port->dpm_caps & DPM_CAP_ATTEMPT_ENTER_DP_MODE)
+	if (pd_port->dpm_caps & DPM_CAP_ATTEMP_ENTER_DP_MODE)
 		dp_dfp_u_set_state(pd_port, DP_DFP_U_DISCOVER_ID);
 
 	return true;
@@ -439,7 +440,7 @@ bool dp_dfp_u_notify_enter_mode(struct pd_port *pd_port,
 	dp_data->local_status = pd_port->dp_first_connected;
 	dp_dfp_u_set_state(pd_port, DP_DFP_U_STATUS_UPDATE);
 
-#if CONFIG_USB_PD_DBG_DP_DFP_D_AUTO_UPDATE
+#ifdef CONFIG_USB_PD_DBG_DP_DFP_D_AUTO_UPDATE
 	/*
 	 * For Real Product,
 	 * DFP_U should not send status_update until USB status is changed
@@ -652,7 +653,7 @@ bool dp_dfp_u_notify_dp_status_update(struct pd_port *pd_port, bool ack)
 
 static inline void dp_ufp_u_auto_update(struct pd_port *pd_port)
 {
-#if CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_UPDATE
+#ifdef CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_UPDATE
 	struct dp_data *dp_data = pd_get_dp_data(pd_port);
 
 	if (dp_data->dfp_u_state == DP_DFP_U_OPERATION)
@@ -865,7 +866,7 @@ bool dp_ufp_u_is_valid_dp_config(struct pd_port *pd_port, uint32_t dp_config)
 
 static inline void dp_ufp_u_auto_attention(struct pd_port *pd_port)
 {
-#if CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_ATTENTION
+#ifdef CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_ATTENTION
 	struct dp_data *dp_data = pd_get_dp_data(pd_port);
 
 	pd_port->mode_svid = USB_SID_DISPLAYPORT;
@@ -948,7 +949,7 @@ void pd_dpm_ufp_send_dp_attention(struct pd_port *pd_port)
 
 /* ---- DFP : DP Only ---- */
 
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 
 void pd_dpm_dfp_send_dp_status_update(struct pd_port *pd_port)
 {
@@ -994,7 +995,7 @@ bool dp_reset_state(struct pd_port *pd_port, struct svdm_svid_data *svid_data)
 #define DEFAULT_DP_FIRST_CONNECTED		(DPSTS_DFP_D_CONNECTED)
 #define DEFAULT_DP_SECOND_CONNECTED		(DPSTS_DFP_D_CONNECTED)
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 static const struct {
 	const char *prop_name;
 	uint32_t mode;

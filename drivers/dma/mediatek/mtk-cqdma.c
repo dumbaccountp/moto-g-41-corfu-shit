@@ -1,11 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2018-2019 MediaTek Inc.
+/* SPDX-License-Identifier: GPL-2.0 */
 
 /*
- * Driver for MediaTek Command-Queue DMA Controller
- *
- * Author: Shun-Chih Yu <shun-chih.yu@mediatek.com>
- *
+ * Copyright (c) 2018-2019 MediaTek Inc.
  */
 
 #include <linux/bitops.h>
@@ -358,9 +354,9 @@ static struct mtk_cqdma_vdesc
 	return ret;
 }
 
-static void mtk_cqdma_tasklet_cb(struct tasklet_struct *t)
+static void mtk_cqdma_tasklet_cb(unsigned long data)
 {
-	struct mtk_cqdma_pchan *pc = from_tasklet(pc, t, tasklet);
+	struct mtk_cqdma_pchan *pc = (struct mtk_cqdma_pchan *)data;
 	struct mtk_cqdma_vdesc *cvd = NULL;
 	unsigned long flags;
 
@@ -743,7 +739,10 @@ static void mtk_cqdma_hw_deinit(struct mtk_cqdma_device *cqdma)
 }
 
 static const struct of_device_id mtk_cqdma_match[] = {
+	{ .compatible = "mediatek,cqdma" },
 	{ .compatible = "mediatek,mt6765-cqdma" },
+	{ .compatible = "mediatek,mt6893-cqdma" },
+	{ .compatible = "mediatek,mt6877-cqdma" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mtk_cqdma_match);
@@ -806,15 +805,19 @@ static int mtk_cqdma_probe(struct platform_device *pdev)
 		cqdma->dma_channels = MTK_CQDMA_NR_PCHANS;
 	}
 
-	if (pdev->dev.of_node && of_property_read_u32(pdev->dev.of_node,
-						      "dma-channel-mask",
-						      &cqdma->dma_mask)) {
-		dev_info(&pdev->dev,
-			"Using 0 as missing dma-channel-mask property\n");
-	} else {
-		err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(cqdma->dma_mask));
-		if (err)
-			return err;
+	if (pdev->dev.of_node)
+		err = of_property_read_u32(pdev->dev.of_node,
+					   "dma-channel-mask",
+					   &cqdma->dma_mask);
+	if (err) {
+		dev_warn(&pdev->dev,
+			 "Using 0 as missing dma-channel-mask property\n");
+		cqdma->dma_mask = 0;
+	}
+
+	if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(cqdma->dma_mask))) {
+		dev_warn(&pdev->dev, "DMA set mask failed\n");
+		return -EINVAL;
 	}
 
 	cqdma->pc = devm_kcalloc(&pdev->dev, cqdma->dma_channels,
@@ -832,18 +835,23 @@ static int mtk_cqdma_probe(struct platform_device *pdev)
 		INIT_LIST_HEAD(&cqdma->pc[i]->queue);
 		spin_lock_init(&cqdma->pc[i]->lock);
 		refcount_set(&cqdma->pc[i]->refcnt, 0);
-		cqdma->pc[i]->base = devm_platform_ioremap_resource(pdev, i);
+		res = platform_get_resource(pdev, IORESOURCE_MEM, i);
+		if (!res) {
+			dev_err(&pdev->dev, "No mem resource for %s\n",
+				dev_name(&pdev->dev));
+			return -EINVAL;
+		}
+		cqdma->pc[i]->base = devm_ioremap_resource(&pdev->dev, res);
 		if (IS_ERR(cqdma->pc[i]->base))
 			return PTR_ERR(cqdma->pc[i]->base);
 
 		/* allocate IRQ resource */
-		res = platform_get_resource(pdev, IORESOURCE_IRQ, i);
-		if (!res) {
+		cqdma->pc[i]->irq = platform_get_irq(pdev, i);
+		if (!cqdma->pc[i]->irq) {
 			dev_err(&pdev->dev, "No irq resource for %s\n",
 				dev_name(&pdev->dev));
 			return -EINVAL;
 		}
-		cqdma->pc[i]->irq = res->start;
 
 		err = devm_request_irq(&pdev->dev, cqdma->pc[i]->irq,
 				       mtk_cqdma_irq, 0, dev_name(&pdev->dev),
@@ -891,7 +899,8 @@ static int mtk_cqdma_probe(struct platform_device *pdev)
 
 	/* initialize tasklet for each PC */
 	for (i = 0; i < cqdma->dma_channels; ++i)
-		tasklet_setup(&cqdma->pc[i]->tasklet, mtk_cqdma_tasklet_cb);
+		tasklet_init(&cqdma->pc[i]->tasklet, mtk_cqdma_tasklet_cb,
+			     (unsigned long)cqdma->pc[i]);
 
 	dev_info(&pdev->dev, "MediaTek CQDMA driver registered\n");
 

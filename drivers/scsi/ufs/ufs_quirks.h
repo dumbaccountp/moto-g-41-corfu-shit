@@ -13,10 +13,9 @@
 #define UFS_ANY_MODEL  "ANY_MODEL"
 
 #define UFS_VENDOR_MICRON      0x12C
+#define UFS_VENDOR_TOSHIBA     0x198
 #define UFS_VENDOR_SAMSUNG     0x1CE
 #define UFS_VENDOR_SKHYNIX     0x1AD
-#define UFS_VENDOR_TOSHIBA     0x198
-#define UFS_VENDOR_WDC         0x145
 
 /**
  * ufs_dev_fix - ufs device quirk info
@@ -103,13 +102,6 @@ struct ufs_dev_fix {
 #define UFS_DEVICE_QUIRK_HOST_VS_DEBUGSAVECONFIGTIME	(1 << 9)
 
 /*
- * Some pre-3.1 UFS devices can support extended features by upgrading
- * the firmware. Enable this quirk to make UFS core driver probe and enable
- * supported features on such devices.
- */
-#define UFS_DEVICE_QUIRK_SUPPORT_EXTENDED_FEATURES (1 << 10)
-
-/*
  * Some UFS devices require delay after VCC power rail is turned-off.
  * Enable this quirk to introduce 5ms delays after VCC power-off during
  * suspend flow.
@@ -117,9 +109,25 @@ struct ufs_dev_fix {
 #define UFS_DEVICE_QUIRK_DELAY_AFTER_LPM        (1 << 11)
 
 /*
- * Some UFS devices require L2P entry should be swapped before being sent to the
- * UFS device for HPB READ command.
+ * MTK PATCH
+ * Some UFS device need 5ms delay in VCC off. In order to wait VCC discharged
+ * to 0V. Some device may have issue when VCC is not discharged to 0V
+ * and power up.
  */
-#define UFS_DEVICE_QUIRK_SWAP_L2P_ENTRY_FOR_HPB_READ (1 << 12)
+#define UFS_DEVICE_QUIRK_VCC_OFF_DELAY	(1 << 29)
+
+/*
+ * MTK PATCH
+ * Some UFS memory device needs limited RPMB max rw size otherwise
+ * device issue, for example, device hang, may happen in some scenarios.
+ */
+#define UFS_DEVICE_QUIRK_LIMITED_RPMB_MAX_RW_SIZE	(1 << 30)
+
+/*
+ * MTK PATCH
+ * Some UFS device writebooster cannot flush.
+ * To fix this problem, Toggle fWriteBoosterEn instead.
+ */
+#define UFS_DEVICE_QUIRK_WRITE_BOOSETER_FLUSH	(1 << 31)
 
 #endif /* UFS_QUIRKS_H_ */

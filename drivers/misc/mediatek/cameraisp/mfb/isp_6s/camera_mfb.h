@@ -305,7 +305,7 @@ struct MFB_MSSConfig {
 	struct mss_dma dmas[TPIPE_NUM_PER_FRAME];
 	unsigned int update_dma_en[TPIPE_NUM_PER_FRAME];
 	unsigned int tpipe_used;
-	unsigned long qos;
+	uint64_t qos;
 };
 
 struct MFB_MSFConfig {
@@ -317,7 +317,7 @@ struct MFB_MSFConfig {
 	unsigned int MFBDMT_TDRI_OFST[TPIPE_NUM_PER_FRAME];
 	unsigned int MFBDMT_TDRI_XSIZE[TPIPE_NUM_PER_FRAME];
 	unsigned int tpipe_used;
-	unsigned long qos;
+	uint64_t qos;
 };
 
 /******************************************************************************
@@ -342,8 +342,8 @@ enum MFB_CMD_ENUM {
 	MFB_CMD_MSF_ENQUE_REQ,	/* MSF Enque Request */
 	MFB_CMD_MSS_DEQUE_REQ,	/* MSS Deque Request */
 	MFB_CMD_MSF_DEQUE_REQ,	/* MSF Deque Request */
-	MFB_CMD_MAP,	/* MFB MAP */
-	MFB_CMD_UNMAP,	/* MFB UNMAP */
+	MFB_CMD_MAP,
+	MFB_CMD_UNMAP,
 	MFB_CMD_TOTAL,
 };
 
@@ -404,17 +404,13 @@ struct compat_MFB_REG_IO_STRUCT {
 struct compat_MFB_MSSRequest {
 	unsigned int m_ReqNum;
 	compat_uptr_t m_pMssConfig;
+	enum exec_mode exec;
 };
 
 struct compat_MFB_MSFRequest {
 	unsigned int m_ReqNum;
 	compat_uptr_t m_pMsfConfig;
-};
-
-struct MFB_MapTable {
-	unsigned int buf_fd;
-	unsigned int buf_offset;
-	unsigned int buf_pa;
+	enum exec_mode exec;
 };
 
 #endif
@@ -453,10 +449,6 @@ struct MFB_MapTable {
 #define MFB_MSF_DEQUE_REQ \
 	_IOWR(MFB_MAGIC, MFB_CMD_MSF_DEQUE_REQ, struct MFB_MSFRequest)
 
-#define MFB_MAP \
-	_IOWR(MFB_MAGIC, MFB_CMD_MAP, struct MFB_MapTable)
-#define MFB_UNMAP \
-	_IOWR(MFB_MAGIC, MFB_CMD_UNMAP, struct MFB_MapTable)
 
 #ifdef CONFIG_COMPAT
 #define COMPAT_MFB_MSS_WRITE_REGISTER \

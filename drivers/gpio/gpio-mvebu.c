@@ -38,7 +38,6 @@
 #include <linux/err.h>
 #include <linux/gpio/driver.h>
 #include <linux/gpio/consumer.h>
-#include <linux/gpio/machine.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/irq.h>
@@ -46,6 +45,7 @@
 #include <linux/irqdomain.h>
 #include <linux/mfd/syscon.h>
 #include <linux/of_device.h>
+#include <linux/of_irq.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pwm.h>
@@ -376,19 +376,6 @@ static int mvebu_gpio_direction_output(struct gpio_chip *chip, unsigned int pin,
 	return 0;
 }
 
-static int mvebu_gpio_get_direction(struct gpio_chip *chip, unsigned int pin)
-{
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
-	u32 u;
-
-	regmap_read(mvchip->regs, GPIO_IO_CONF_OFF + mvchip->offset, &u);
-
-	if (u & BIT(pin))
-		return GPIO_LINE_DIRECTION_IN;
-
-	return GPIO_LINE_DIRECTION_OUT;
-}
-
 static int mvebu_gpio_to_irq(struct gpio_chip *chip, unsigned int pin)
 {
 	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
@@ -431,7 +418,6 @@ static void mvebu_gpio_edge_irq_unmask(struct irq_data *d)
 	u32 mask = d->mask;
 
 	irq_gc_lock(gc);
-	mvebu_gpio_write_edge_cause(mvchip, ~mask);
 	ct->mask_cache_priv |= mask;
 	mvebu_gpio_write_edge_mask(mvchip, ct->mask_cache_priv);
 	irq_gc_unlock(gc);
@@ -622,11 +608,15 @@ static int mvebu_pwm_request(struct pwm_chip *chip, struct pwm_device *pwm)
 		ret = -EBUSY;
 	} else {
 		desc = gpiochip_request_own_desc(&mvchip->chip,
-						 pwm->hwpwm, "mvebu-pwm",
-						 GPIO_ACTIVE_HIGH,
-						 GPIOD_OUT_LOW);
+						 pwm->hwpwm, "mvebu-pwm");
 		if (IS_ERR(desc)) {
 			ret = PTR_ERR(desc);
+			goto out;
+		}
+
+		ret = gpiod_direction_output(desc, 0);
+		if (ret) {
+			gpiochip_free_own_desc(desc);
 			goto out;
 		}
 
@@ -692,16 +682,13 @@ static void mvebu_pwm_get_state(struct pwm_chip *chip,
 }
 
 static int mvebu_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
-			   const struct pwm_state *state)
+			   struct pwm_state *state)
 {
 	struct mvebu_pwm *mvpwm = to_mvebu_pwm(chip);
 	struct mvebu_gpio_chip *mvchip = mvpwm->mvchip;
 	unsigned long long val;
 	unsigned long flags;
 	unsigned int on, off;
-
-	if (state->polarity != PWM_POLARITY_NORMAL)
-		return -EINVAL;
 
 	val = (unsigned long long) mvpwm->clk_rate * state->duty_cycle;
 	do_div(val, NSEC_PER_SEC);
@@ -774,6 +761,7 @@ static int mvebu_pwm_probe(struct platform_device *pdev,
 {
 	struct device *dev = &pdev->dev;
 	struct mvebu_pwm *mvpwm;
+	struct resource *res;
 	u32 set;
 
 	if (!of_device_is_compatible(mvchip->chip.of_node,
@@ -786,7 +774,8 @@ static int mvebu_pwm_probe(struct platform_device *pdev,
 	 * for the first two GPIO chips. So if the resource is missing
 	 * we can't treat it as an error.
 	 */
-	if (!platform_get_resource_byname(pdev, IORESOURCE_MEM, "pwm"))
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pwm");
+	if (!res)
 		return 0;
 
 	if (IS_ERR(mvchip->clk))
@@ -811,7 +800,7 @@ static int mvebu_pwm_probe(struct platform_device *pdev,
 	mvchip->mvpwm = mvpwm;
 	mvpwm->mvchip = mvchip;
 
-	mvpwm->membase = devm_platform_ioremap_resource_byname(pdev, "pwm");
+	mvpwm->membase = devm_ioremap_resource(dev, res);
 	if (IS_ERR(mvpwm->membase))
 		return PTR_ERR(mvpwm->membase);
 
@@ -844,7 +833,6 @@ static void mvebu_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
 	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
 	u32 out, io_conf, blink, in_pol, data_in, cause, edg_msk, lvl_msk;
-	const char *label;
 	int i;
 
 	regmap_read(mvchip->regs, GPIO_OUT_OFF + mvchip->offset, &out);
@@ -856,9 +844,14 @@ static void mvebu_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	edg_msk	= mvebu_gpio_read_edge_mask(mvchip);
 	lvl_msk	= mvebu_gpio_read_level_mask(mvchip);
 
-	for_each_requested_gpio(chip, i, label) {
+	for (i = 0; i < chip->ngpio; i++) {
+		const char *label;
 		u32 msk;
 		bool is_out;
+
+		label = gpiochip_is_requested(chip, i);
+		if (!label)
+			continue;
 
 		msk = BIT(i);
 		is_out = !(io_conf & msk);
@@ -1030,9 +1023,11 @@ static const struct regmap_config mvebu_gpio_regmap_config = {
 static int mvebu_gpio_probe_raw(struct platform_device *pdev,
 				struct mvebu_gpio_chip *mvchip)
 {
+	struct resource *res;
 	void __iomem *base;
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -1052,7 +1047,8 @@ static int mvebu_gpio_probe_raw(struct platform_device *pdev,
 	 * per-CPU registers
 	 */
 	if (mvchip->soc_variant == MVEBU_GPIO_SOC_VARIANT_ARMADAXP) {
-		base = devm_platform_ioremap_resource(pdev, 1);
+		res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+		base = devm_ioremap_resource(&pdev->dev, res);
 		if (IS_ERR(base))
 			return PTR_ERR(base);
 
@@ -1099,11 +1095,7 @@ static int mvebu_gpio_probe(struct platform_device *pdev)
 		soc_variant = MVEBU_GPIO_SOC_VARIANT_ORION;
 
 	/* Some gpio controllers do not provide irq support */
-	err = platform_irq_count(pdev);
-	if (err < 0)
-		return err;
-
-	have_irqs = err != 0;
+	have_irqs = of_irq_count(np) != 0;
 
 	mvchip = devm_kzalloc(&pdev->dev, sizeof(struct mvebu_gpio_chip),
 			      GFP_KERNEL);
@@ -1133,7 +1125,6 @@ static int mvebu_gpio_probe(struct platform_device *pdev)
 	mvchip->chip.parent = &pdev->dev;
 	mvchip->chip.request = gpiochip_generic_request;
 	mvchip->chip.free = gpiochip_generic_free;
-	mvchip->chip.get_direction = mvebu_gpio_get_direction;
 	mvchip->chip.direction_input = mvebu_gpio_direction_input;
 	mvchip->chip.get = mvebu_gpio_get;
 	mvchip->chip.direction_output = mvebu_gpio_direction_output;
@@ -1252,7 +1243,7 @@ static int mvebu_gpio_probe(struct platform_device *pdev)
 	 * pins.
 	 */
 	for (i = 0; i < 4; i++) {
-		int irq = platform_get_irq_optional(pdev, i);
+		int irq = platform_get_irq(pdev, i);
 
 		if (irq < 0)
 			continue;

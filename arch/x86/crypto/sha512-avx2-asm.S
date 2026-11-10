@@ -49,6 +49,7 @@
 # This code schedules 1 blocks at a time, with 4 lanes per block
 ########################################################################
 
+#ifdef CONFIG_AS_AVX2
 #include <linux/linkage.h>
 
 .text
@@ -569,7 +570,7 @@ frame_size = frame_GPRSAVE + GPRSAVE_SIZE
 # of SHA512 message blocks.
 # "blocks" is the message length in SHA512 blocks
 ########################################################################
-SYM_FUNC_START(sha512_transform_rorx)
+ENTRY(sha512_transform_rorx)
 	# Allocate Stack Space
 	mov	%rsp, %rax
 	sub	$frame_size, %rsp
@@ -681,8 +682,8 @@ done_hash:
 
 	# Restore Stack Pointer
 	mov	frame_RSPSAVE(%rsp), %rsp
-	RET
-SYM_FUNC_END(sha512_transform_rorx)
+	ret
+ENDPROC(sha512_transform_rorx)
 
 ########################################################################
 ### Binary Data
@@ -748,3 +749,5 @@ PSHUFFLE_BYTE_FLIP_MASK:
 MASK_YMM_LO:
 	.octa 0x00000000000000000000000000000000
 	.octa 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+
+#endif

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2020 MediaTek Inc.
+ * Copyright (C) 2019 MediaTek Inc.
  */
 
 #include <asm/page.h>
@@ -14,7 +14,9 @@
 #include <linux/platform_device.h>
 #include <linux/arm-smccc.h>
 #include <linux/soc/mediatek/mtk_sip_svc.h>
+#include <memory/mediatek/emi.h>
 #include <devmpu.h>
+#include <devmpu_emi.h>
 
 #if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
 #include <mt-plat/aee.h>
@@ -113,6 +115,20 @@ static int devmpu_vio_get(struct devmpu_vio_stat *vio, bool do_clear)
 	return 0;
 }
 
+void devmpu_vio_clear(unsigned int emi_id)
+{
+	struct arm_smccc_res smc_res;
+
+	/* clear hyp violation status */
+	arm_smccc_smc(MTK_SIP_KERNEL_DEVMPU_VIO_CLR,
+			emi_id, 0, 0, 0, 0, 0, 0, &smc_res);
+
+	if (smc_res.a0) {
+		pr_err("%s:%d failed to clear violation, ret=0x%lx\n",
+				__func__, __LINE__, smc_res.a0);
+	}
+}
+
 static int devmpu_rw_perm_get(uint64_t pa, size_t *rd_perm, size_t *wr_perm)
 {
 	struct arm_smccc_res res;
@@ -149,7 +165,7 @@ static int devmpu_rw_perm_get(uint64_t pa, size_t *rd_perm, size_t *wr_perm)
 }
 
 int devmpu_print_violation(uint64_t vio_addr, uint32_t vio_id,
-		uint32_t vio_domain, uint32_t vio_rw)
+		uint32_t vio_domain, uint32_t vio_rw, bool from_emimpu)
 {
 	size_t ret;
 	struct devmpu_context *devmpu_ctx;
@@ -170,25 +186,29 @@ int devmpu_print_violation(uint64_t vio_addr, uint32_t vio_id,
 	devmpu_ctx = &devmpu_ctx_ary[DEVMPU_DEFAULT_CTX];
 
 	/* overwrite violation info. with the DeviceMPU native one */
-	ret = devmpu_vio_get(&vio, true);
-	if (ret) {
-		pr_err("%s:%d failed to get DeviceMPU violation\n",
-				__func__, __LINE__);
-		return -1;
+	if (!from_emimpu) {
+		ret = devmpu_vio_get(&vio, true);
+		if (ret) {
+			pr_err("%s:%d failed to get DeviceMPU violation\n",
+					__func__, __LINE__);
+			return -1;
+		}
+
+		vio_id = vio.id;
+		vio_addr = vio.addr;
+		vio_domain = vio.domain;
+
+		/*
+		 * use 0b01/0b10 to specify write/read violation
+		 * to be consistent with EMI MPU violation handling
+		 */
+		vio_rw = (vio.is_write) ? 1 : 2;
+
+#ifdef CONFIG_MTK_ENABLE_GENIEZONE
+		if (vio_rw == 2 && vio_domain == 0)
+			return 0;
+#endif
 	}
-
-	vio_id = vio.id;
-	vio_addr = vio.addr;
-	vio_domain = vio.domain;
-
-	/*
-	 * use 0b01/0b10 to specify write/read violation
-	 */
-	vio_rw = (vio.is_write) ? 1 : 2;
-
-	/* filter read violation */
-	if (vio_rw == 2 && vio_domain == 0)
-		return 0;
 
 	vio_addr += devmpu_ctx->prot_base;
 
@@ -222,8 +242,10 @@ int devmpu_print_violation(uint64_t vio_addr, uint32_t vio_id,
 			(vio_addr / devmpu_ctx->page_size) % 4);
 	}
 
-	pr_info("%s transaction\n",
-			(vio.is_ns) ? "non-secure" : "secure");
+	if (!from_emimpu) {
+		pr_info("%s transaction\n",
+				(vio.is_ns) ? "non-secure" : "secure");
+	}
 
 #if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
 	pr_info("trigger aee exception\n");
@@ -240,7 +262,6 @@ int devmpu_print_violation(uint64_t vio_addr, uint32_t vio_id,
 }
 EXPORT_SYMBOL(devmpu_print_violation);
 
-#if IS_ENABLED(CONFIG_MTK_DEVMPU_DEBUG)
 /* sysfs */
 static int devmpu_dump_perm(void)
 {
@@ -347,33 +368,11 @@ static int devmpu_check_violation(void)
 	if (prop_addr && prop_size) {
 		pr_info("Check if DevMPU violation is at 0x%x\n", prop_addr);
 		reg_base = ioremap((phys_addr_t)prop_addr, prop_size);
-		if (!reg_base)
-			return -EIO;
-
 		pr_info("Read from 0x%pK\n", reg_base);
-
-		prop_value = readq(reg_base);
-		pr_info("%s:%d value 0x%llx\n", __func__, __LINE__, prop_value);
-
-		if (prop_value) {
-			pr_info("%s:%d EMI didn't protect READ and check HP mode\n",
-				__func__, __LINE__);
-			BUG();
-		}
-
+		prop_value = *(uint64_t *)reg_base;
+		pr_info("value 0x%llx\n", prop_value);
 		pr_info("Write to 0x%pK\n", reg_base);
-		writeq(prop_value | 0x5AA5AA55, reg_base);
-
-		prop_value = readq(reg_base);
-		pr_info("%s:%d value 0x%llx\n", __func__, __LINE__, prop_value);
-
-		if (prop_value) {
-			pr_info("%s:%d EMI didn't protect WRITE and check HP mode\n",
-				__func__, __LINE__);
-			BUG();
-		}
-
-		iounmap(reg_base);
+		*(uint64_t *)reg_base = prop_value;
 	}
 
 	return 0;
@@ -411,11 +410,10 @@ static ssize_t devmpu_config_store(struct device_driver *driver,
 	return count;
 }
 static DRIVER_ATTR_RW(devmpu_config);
-#endif
 
 static irqreturn_t devmpu_irq_handler(int irq, void *dev_id)
 {
-	devmpu_print_violation(0, 0, 0, 0);
+	devmpu_print_violation(0, 0, 0, 0, false);
 	return IRQ_HANDLED;
 }
 
@@ -470,6 +468,13 @@ static int devmpu_probe(struct platform_device *pdev)
 	}
 
 	virq = irq_of_parse_and_map(dn, 0);
+	rc = request_irq(virq, (irq_handler_t)devmpu_irq_handler,
+			IRQF_TRIGGER_NONE, "devmpu", NULL);
+	if (rc) {
+		pr_err("%s:%d failed to request irq, rc=%d\n",
+				__func__, __LINE__, rc);
+		return -EPERM;
+	}
 
 	if ((probe_cnt + 1) > DEVMPU_MAX_CTX) {
 		pr_err("%s:%d failed to create context\n",
@@ -495,13 +500,14 @@ static int devmpu_probe(struct platform_device *pdev)
 
 	probe_cnt++;
 
-	rc = request_irq(virq, (irq_handler_t)devmpu_irq_handler,
-			IRQF_TRIGGER_NONE, "devmpu", NULL);
+#ifdef CONFIG_MTK_DEVMPU_EMI
+	rc = devmpu_regist_emi();
 	if (rc) {
-		pr_err("%s:%d failed to request irq, rc=%d\n",
+		pr_err("%s:%d failed to request EMI callback, rc=%d\n",
 				__func__, __LINE__, rc);
-		return -EPERM;
+		return -EINVAL;
 	}
+#endif
 
 	return 0;
 }
@@ -532,7 +538,7 @@ static int __init devmpu_init(void)
 				__func__, __LINE__, ret);
 	}
 
-#if IS_ENABLED(CONFIG_MTK_DEVMPU_DEBUG)
+#if !defined(USER_BUILD_KERNEL)
 	ret = driver_create_file(&devmpu_drv.driver,
 			&driver_attr_devmpu_config);
 	if (ret) {
@@ -544,7 +550,18 @@ static int __init devmpu_init(void)
 	return ret;
 }
 
+static void __exit devmpu_exit(void)
+{
+#if !defined(USER_BUILD_KERNEL)
+	driver_remove_file(&devmpu_drv.driver,
+			&driver_attr_devmpu_config);
+#endif
+
+	platform_driver_unregister(&devmpu_drv);
+}
+
 postcore_initcall(devmpu_init);
+module_exit(devmpu_exit);
 
 MODULE_DESCRIPTION("Mediatek Device MPU Driver");
 MODULE_AUTHOR("Calvin Liao <calvin.liao@mediatek.com>");

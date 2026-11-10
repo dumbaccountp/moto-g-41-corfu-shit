@@ -1,8 +1,12 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ChaCha 256-bit cipher algorithm, x64 AVX2 functions
  *
  * Copyright (C) 2015 Martin Willi
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 
 #include <linux/linkage.h>
@@ -34,7 +38,7 @@ CTR4BL:	.octa 0x00000000000000000000000000000002
 
 .text
 
-SYM_FUNC_START(chacha_2block_xor_avx2)
+ENTRY(chacha_2block_xor_avx2)
 	# %rdi: Input state matrix, s
 	# %rsi: up to 2 data blocks output, o
 	# %rdx: up to 2 data blocks input, i
@@ -193,7 +197,7 @@ SYM_FUNC_START(chacha_2block_xor_avx2)
 
 .Ldone2:
 	vzeroupper
-	RET
+	ret
 
 .Lxorpart2:
 	# xor remaining bytes from partial register into output
@@ -224,9 +228,9 @@ SYM_FUNC_START(chacha_2block_xor_avx2)
 	lea		-8(%r10),%rsp
 	jmp		.Ldone2
 
-SYM_FUNC_END(chacha_2block_xor_avx2)
+ENDPROC(chacha_2block_xor_avx2)
 
-SYM_FUNC_START(chacha_4block_xor_avx2)
+ENTRY(chacha_4block_xor_avx2)
 	# %rdi: Input state matrix, s
 	# %rsi: up to 4 data blocks output, o
 	# %rdx: up to 4 data blocks input, i
@@ -498,7 +502,7 @@ SYM_FUNC_START(chacha_4block_xor_avx2)
 
 .Ldone4:
 	vzeroupper
-	RET
+	ret
 
 .Lxorpart4:
 	# xor remaining bytes from partial register into output
@@ -529,9 +533,9 @@ SYM_FUNC_START(chacha_4block_xor_avx2)
 	lea		-8(%r10),%rsp
 	jmp		.Ldone4
 
-SYM_FUNC_END(chacha_4block_xor_avx2)
+ENDPROC(chacha_4block_xor_avx2)
 
-SYM_FUNC_START(chacha_8block_xor_avx2)
+ENTRY(chacha_8block_xor_avx2)
 	# %rdi: Input state matrix, s
 	# %rsi: up to 8 data blocks output, o
 	# %rdx: up to 8 data blocks input, i
@@ -992,7 +996,7 @@ SYM_FUNC_START(chacha_8block_xor_avx2)
 .Ldone8:
 	vzeroupper
 	lea		-8(%r10),%rsp
-	RET
+	ret
 
 .Lxorpart8:
 	# xor remaining bytes from partial register into output
@@ -1018,4 +1022,4 @@ SYM_FUNC_START(chacha_8block_xor_avx2)
 
 	jmp		.Ldone8
 
-SYM_FUNC_END(chacha_8block_xor_avx2)
+ENDPROC(chacha_8block_xor_avx2)

@@ -6,7 +6,6 @@
 #include <linux/bitfield.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/pci.h>
 #include <linux/of_address.h>
 #include <linux/of_pci.h>
 #include <linux/pci-acpi.h>
@@ -404,7 +403,7 @@ static int thunder_pem_acpi_init(struct pci_config_window *cfg)
 	return thunder_pem_init(dev, cfg, res_pem);
 }
 
-const struct pci_ecam_ops thunder_pem_ecam_ops = {
+struct pci_ecam_ops thunder_pem_ecam_ops = {
 	.bus_shift	= 24,
 	.init		= thunder_pem_acpi_init,
 	.pci_ops	= {
@@ -441,7 +440,7 @@ static int thunder_pem_platform_init(struct pci_config_window *cfg)
 	return thunder_pem_init(dev, cfg, res_pem);
 }
 
-static const struct pci_ecam_ops pci_thunder_pem_ops = {
+static struct pci_ecam_ops pci_thunder_pem_ops = {
 	.bus_shift	= 24,
 	.init		= thunder_pem_platform_init,
 	.pci_ops	= {
@@ -452,12 +451,14 @@ static const struct pci_ecam_ops pci_thunder_pem_ops = {
 };
 
 static const struct of_device_id thunder_pem_of_match[] = {
-	{
-		.compatible = "cavium,pci-host-thunder-pem",
-		.data = &pci_thunder_pem_ops,
-	},
+	{ .compatible = "cavium,pci-host-thunder-pem" },
 	{ },
 };
+
+static int thunder_pem_probe(struct platform_device *pdev)
+{
+	return pci_host_common_probe(pdev, &pci_thunder_pem_ops);
+}
 
 static struct platform_driver thunder_pem_driver = {
 	.driver = {
@@ -465,7 +466,7 @@ static struct platform_driver thunder_pem_driver = {
 		.of_match_table = thunder_pem_of_match,
 		.suppress_bind_attrs = true,
 	},
-	.probe = pci_host_common_probe,
+	.probe = thunder_pem_probe,
 };
 builtin_platform_driver(thunder_pem_driver);
 

@@ -1,57 +1,31 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 MediaTek Inc.
  * Author: James Liao <jamesjj.liao@mediatek.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
-#include <linux/notifier.h>
-#include <linux/of.h>
-#include <linux/of_address.h>
+#include <linux/clkdev.h>
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/slab.h>
-#include <linux/delay.h>
-#include <linux/clkdev.h>
 #include <linux/mfd/syscon.h>
-#include <linux/device.h>
 #include <linux/module.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/of_device.h>
+#include <linux/slab.h>
 
 #include "clk-mtk.h"
 #include "clk-gate.h"
-
-static ATOMIC_NOTIFIER_HEAD(mtk_clk_notifier_list);
-
-int register_mtk_clk_notifier(struct notifier_block *nb)
-{
-	return atomic_notifier_chain_register(&mtk_clk_notifier_list, nb);
-}
-EXPORT_SYMBOL_GPL(register_mtk_clk_notifier);
-
-int unregister_mtk_clk_notifier(struct notifier_block *nb)
-{
-	return atomic_notifier_chain_unregister(&mtk_clk_notifier_list, nb);
-}
-EXPORT_SYMBOL_GPL(unregister_mtk_clk_notifier);
-
-int mtk_clk_notify(struct regmap *regmap, struct regmap *hwv_regmap,
-		const char *name, u32 ofs, u32 id, u32 shift, int event_type)
-{
-	struct clk_event_data clke;
-
-	clke.event_type = event_type;
-	clke.regmap = regmap;
-	clke.hwv_regmap = hwv_regmap;
-	clke.name = name;
-	clke.ofs = ofs;
-	clke.id = id;
-	clke.shift = shift;
-
-	atomic_notifier_call_chain(&mtk_clk_notifier_list, 0, &clke);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(mtk_clk_notify);
+#include "clk-fixup-div.h"
 
 struct clk_onecell_data *mtk_alloc_clk_data(unsigned int clk_num)
 {
@@ -78,6 +52,34 @@ err_out:
 	return NULL;
 }
 EXPORT_SYMBOL(mtk_alloc_clk_data);
+void mtk_clk_register_fixup_dividers(const struct mtk_clk_divider *mcds,
+			int num, void __iomem *base, spinlock_t *lock,
+				struct clk_onecell_data *clk_data)
+{
+	struct clk *clk;
+	int i;
+
+	for (i = 0; i < num; i++) {
+		const struct mtk_clk_divider *mcd = &mcds[i];
+
+		if (clk_data && !IS_ERR_OR_NULL(clk_data->clks[mcd->id]))
+			continue;
+
+		clk = mtk_clk_fixup_divider(mcd->name, mcd->parent_name,
+			mcd->flags, base + mcd->div_reg,
+			base + mcd->div_reg_fixup, mcd->div_shift,
+			mcd->div_width, mcd->clk_divider_flags, lock);
+
+		if (IS_ERR(clk)) {
+			pr_err("Failed to register clk %s: %ld\n",
+				mcd->name, PTR_ERR(clk));
+			continue;
+		}
+
+		if (clk_data)
+			clk_data->clks[mcd->id] = clk;
+	}
+}
 
 void mtk_clk_register_fixed_clks(const struct mtk_fixed_clk *clks,
 		int num, struct clk_onecell_data *clk_data)
@@ -133,14 +135,42 @@ void mtk_clk_register_factors(const struct mtk_fixed_factor *clks,
 }
 EXPORT_SYMBOL(mtk_clk_register_factors);
 
-int mtk_clk_register_gates_with_dev(struct device_node *node,
-		const struct mtk_gate *clks,
-		int num, struct clk_onecell_data *clk_data,
-		struct device *dev)
+#if defined(CONFIG_MACH_MT6739)
+void __init mtk_clk_register_factors_pdn(
+	const struct mtk_fixed_factor_pdn *clks,
+	int num, struct clk_onecell_data *clk_data, void __iomem *base)
 {
 	int i;
 	struct clk *clk;
-	struct regmap *regmap, *hw_voter_regmap;
+
+	for (i = 0; i < num; i++) {
+		const struct mtk_fixed_factor_pdn *ff = &clks[i];
+
+		clk = mtk_clk_register_fixed_factor_pdn(NULL, ff->name,
+			ff->parent_name,
+			CLK_SET_RATE_PARENT, ff->mult, ff->div,
+			ff->shift, ff->pd_reg, base);
+
+		if (IS_ERR(clk)) {
+			pr_debug("Failed to register clk %s: %ld\n",
+					ff->name, PTR_ERR(clk));
+			continue;
+		}
+
+		if (clk_data)
+			clk_data->clks[ff->id] = clk;
+	}
+}
+#endif
+
+int mtk_clk_register_gates(struct device_node *node,
+		const struct mtk_gate *clks,
+		int num, struct clk_onecell_data *clk_data)
+{
+	int i;
+	struct clk *clk;
+	struct regmap *regmap;
+	struct regmap *pwr_regmap;
 
 	if (!clk_data)
 		return -ENOMEM;
@@ -152,9 +182,9 @@ int mtk_clk_register_gates_with_dev(struct device_node *node,
 		return PTR_ERR(regmap);
 	}
 
-	hw_voter_regmap = syscon_regmap_lookup_by_phandle(node, "hw-voter-regmap");
-	if (IS_ERR(hw_voter_regmap))
-		hw_voter_regmap = NULL;
+	pwr_regmap = syscon_regmap_lookup_by_phandle(node, "pwr-regmap");
+	if (IS_ERR(pwr_regmap))
+		pwr_regmap = NULL;
 
 	for (i = 0; i < num; i++) {
 		const struct mtk_gate *gate = &clks[i];
@@ -162,24 +192,16 @@ int mtk_clk_register_gates_with_dev(struct device_node *node,
 		if (!IS_ERR_OR_NULL(clk_data->clks[gate->id]))
 			continue;
 
-		if (hw_voter_regmap && gate->flags & CLK_USE_HW_VOTER)
-			clk = mtk_clk_register_gate_hwv(gate->name, gate->parent_name,
-					regmap,
-					hw_voter_regmap,
-					gate->regs->set_ofs,
-					gate->regs->clr_ofs,
-					gate->regs->sta_ofs,
-					gate->hwv_regs->set_ofs,
-					gate->hwv_regs->clr_ofs,
-					gate->hwv_regs->sta_ofs,
-					gate->shift, gate->ops, gate->flags, dev);
-		else
-			clk = mtk_clk_register_gate(gate->name, gate->parent_name,
-					regmap,
-					gate->regs->set_ofs,
-					gate->regs->clr_ofs,
-					gate->regs->sta_ofs,
-					gate->shift, gate->ops, gate->flags, dev);
+		clk = mtk_clk_register_gate(gate->name, gate->parent_name,
+				regmap,
+				gate->regs->set_ofs,
+				gate->regs->clr_ofs,
+				gate->regs->sta_ofs,
+				gate->shift,
+				gate->ops,
+				gate->flags,
+				gate->pwr_stat,
+				pwr_regmap);
 
 		if (IS_ERR(clk)) {
 			pr_err("Failed to register clk %s: %ld\n",
@@ -191,15 +213,6 @@ int mtk_clk_register_gates_with_dev(struct device_node *node,
 	}
 
 	return 0;
-}
-EXPORT_SYMBOL(mtk_clk_register_gates_with_dev);
-
-int mtk_clk_register_gates(struct device_node *node,
-		const struct mtk_gate *clks,
-		int num, struct clk_onecell_data *clk_data)
-{
-	return mtk_clk_register_gates_with_dev(node,
-		clks, num, clk_data, NULL);
 }
 EXPORT_SYMBOL(mtk_clk_register_gates);
 

@@ -26,6 +26,7 @@
 #include <linux/usb/composite.h>
 #include "viatel_rawbulk.h"
 
+
 #define C2K_TTY_USB_SKIP
 #ifdef C2K_USB_UT
 #include <linux/random.h>
@@ -565,7 +566,7 @@ static struct _function_init_stuff {
 	bool autoreconn;
 	bool pushable;
 } _init_params[] = {
-#if IS_ENABLED(CONFIG_EVDO_DT_VIA_SUPPORT)
+#ifdef CONFIG_EVDO_DT_VIA_SUPPORT
 	{
 	"rawbulk-modem", "data", "Modem Port", 32, 32, 4096, 4096, true, false}
 	, {
@@ -706,11 +707,10 @@ static struct attribute_group legacy_sysfs_group = {
 struct kobject *legacy_sysfs_stuff;
 #endif				/* SUPPORT_LEGACY_CONTROL */
 
-static int __init rawbulk_init(void)
+static int __init init(void)
 {
 	int n;
 	int rc = 0;
-	int ret = 0;
 
 	C2K_NOTE("rawbulk functions go!!!\n");
 	rawbulk_class = class_create(THIS_MODULE, "usb_rawbulk");
@@ -748,19 +748,9 @@ static int __init rawbulk_init(void)
 	}
 #endif				/* SUPPORT_LEGACY_CONTROL */
 
-	ret = rawbulk_transfer_init();
-	if (ret)
-		return ret;
-
 	return 0;
 }
-module_init(rawbulk_init);
-
-static __exit void rawbulk_exit(void)
-{
-	rawbulk_transfer_exit();
-}
-module_exit(rawbulk_exit);
+module_init(init);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);

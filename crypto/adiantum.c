@@ -32,13 +32,14 @@
 
 #include <crypto/b128ops.h>
 #include <crypto/chacha.h>
-#include <crypto/internal/cipher.h>
 #include <crypto/internal/hash.h>
 #include <crypto/internal/poly1305.h>
 #include <crypto/internal/skcipher.h>
 #include <crypto/nhpoly1305.h>
 #include <crypto/scatterwalk.h>
 #include <linux/module.h>
+
+#include "internal.h"
 
 /*
  * Size of right-hand part of input data, in bytes; also the size of the block
@@ -63,7 +64,7 @@
 
 struct adiantum_instance_ctx {
 	struct crypto_skcipher_spawn streamcipher_spawn;
-	struct crypto_cipher_spawn blockcipher_spawn;
+	struct crypto_spawn blockcipher_spawn;
 	struct crypto_shash_spawn hash_spawn;
 };
 
@@ -134,6 +135,9 @@ static int adiantum_setkey(struct crypto_skcipher *tfm, const u8 *key,
 				  crypto_skcipher_get_flags(tfm) &
 				  CRYPTO_TFM_REQ_MASK);
 	err = crypto_skcipher_setkey(tctx->streamcipher, key, keylen);
+	crypto_skcipher_set_flags(tfm,
+				crypto_skcipher_get_flags(tctx->streamcipher) &
+				CRYPTO_TFM_RES_MASK);
 	if (err)
 		return err;
 
@@ -163,6 +167,9 @@ static int adiantum_setkey(struct crypto_skcipher *tfm, const u8 *key,
 				CRYPTO_TFM_REQ_MASK);
 	err = crypto_cipher_setkey(tctx->blockcipher, keyp,
 				   BLOCKCIPHER_KEY_SIZE);
+	crypto_skcipher_set_flags(tfm,
+				  crypto_cipher_get_flags(tctx->blockcipher) &
+				  CRYPTO_TFM_RES_MASK);
 	if (err)
 		goto out;
 	keyp += BLOCKCIPHER_KEY_SIZE;
@@ -175,10 +182,12 @@ static int adiantum_setkey(struct crypto_skcipher *tfm, const u8 *key,
 	crypto_shash_set_flags(tctx->hash, crypto_skcipher_get_flags(tfm) &
 					   CRYPTO_TFM_REQ_MASK);
 	err = crypto_shash_setkey(tctx->hash, keyp, NHPOLY1305_KEY_SIZE);
+	crypto_skcipher_set_flags(tfm, crypto_shash_get_flags(tctx->hash) &
+				       CRYPTO_TFM_RES_MASK);
 	keyp += NHPOLY1305_KEY_SIZE;
 	WARN_ON(keyp != &data->derived_keys[ARRAY_SIZE(data->derived_keys)]);
 out:
-	kfree_sensitive(data);
+	kzfree(data);
 	return err;
 }
 
@@ -257,6 +266,7 @@ static int adiantum_hash_message(struct skcipher_request *req,
 	int err;
 
 	hash_desc->tfm = tctx->hash;
+	hash_desc->flags = 0;
 
 	err = crypto_shash_init(hash_desc);
 	if (err)
@@ -427,10 +437,10 @@ static int adiantum_init_tfm(struct crypto_skcipher *tfm)
 
 	BUILD_BUG_ON(offsetofend(struct adiantum_request_ctx, u) !=
 		     sizeof(struct adiantum_request_ctx));
-	subreq_size = max(sizeof_field(struct adiantum_request_ctx,
+	subreq_size = max(FIELD_SIZEOF(struct adiantum_request_ctx,
 				       u.hash_desc) +
 			  crypto_shash_descsize(hash),
-			  sizeof_field(struct adiantum_request_ctx,
+			  FIELD_SIZEOF(struct adiantum_request_ctx,
 				       u.streamcipher_req) +
 			  crypto_skcipher_reqsize(streamcipher));
 
@@ -460,7 +470,7 @@ static void adiantum_free_instance(struct skcipher_instance *inst)
 	struct adiantum_instance_ctx *ictx = skcipher_instance_ctx(inst);
 
 	crypto_drop_skcipher(&ictx->streamcipher_spawn);
-	crypto_drop_cipher(&ictx->blockcipher_spawn);
+	crypto_drop_spawn(&ictx->blockcipher_spawn);
 	crypto_drop_shash(&ictx->hash_spawn);
 	kfree(inst);
 }
@@ -491,18 +501,38 @@ static bool adiantum_supported_algorithms(struct skcipher_alg *streamcipher_alg,
 
 static int adiantum_create(struct crypto_template *tmpl, struct rtattr **tb)
 {
-	u32 mask;
+	struct crypto_attr_type *algt;
+	const char *streamcipher_name;
+	const char *blockcipher_name;
 	const char *nhpoly1305_name;
 	struct skcipher_instance *inst;
 	struct adiantum_instance_ctx *ictx;
 	struct skcipher_alg *streamcipher_alg;
 	struct crypto_alg *blockcipher_alg;
+	struct crypto_alg *_hash_alg;
 	struct shash_alg *hash_alg;
 	int err;
 
-	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_SKCIPHER, &mask);
-	if (err)
-		return err;
+	algt = crypto_get_attr_type(tb);
+	if (IS_ERR(algt))
+		return PTR_ERR(algt);
+
+	if ((algt->type ^ CRYPTO_ALG_TYPE_SKCIPHER) & algt->mask)
+		return -EINVAL;
+
+	streamcipher_name = crypto_attr_alg_name(tb[1]);
+	if (IS_ERR(streamcipher_name))
+		return PTR_ERR(streamcipher_name);
+
+	blockcipher_name = crypto_attr_alg_name(tb[2]);
+	if (IS_ERR(blockcipher_name))
+		return PTR_ERR(blockcipher_name);
+
+	nhpoly1305_name = crypto_attr_alg_name(tb[3]);
+	if (nhpoly1305_name == ERR_PTR(-ENOENT))
+		nhpoly1305_name = "nhpoly1305";
+	if (IS_ERR(nhpoly1305_name))
+		return PTR_ERR(nhpoly1305_name);
 
 	inst = kzalloc(sizeof(*inst) + sizeof(*ictx), GFP_KERNEL);
 	if (!inst)
@@ -510,31 +540,37 @@ static int adiantum_create(struct crypto_template *tmpl, struct rtattr **tb)
 	ictx = skcipher_instance_ctx(inst);
 
 	/* Stream cipher, e.g. "xchacha12" */
-	err = crypto_grab_skcipher(&ictx->streamcipher_spawn,
-				   skcipher_crypto_instance(inst),
-				   crypto_attr_alg_name(tb[1]), 0, mask);
+	crypto_set_skcipher_spawn(&ictx->streamcipher_spawn,
+				  skcipher_crypto_instance(inst));
+	err = crypto_grab_skcipher(&ictx->streamcipher_spawn, streamcipher_name,
+				   0, crypto_requires_sync(algt->type,
+							   algt->mask));
 	if (err)
-		goto err_free_inst;
+		goto out_free_inst;
 	streamcipher_alg = crypto_spawn_skcipher_alg(&ictx->streamcipher_spawn);
 
 	/* Block cipher, e.g. "aes" */
-	err = crypto_grab_cipher(&ictx->blockcipher_spawn,
-				 skcipher_crypto_instance(inst),
-				 crypto_attr_alg_name(tb[2]), 0, mask);
+	crypto_set_spawn(&ictx->blockcipher_spawn,
+			 skcipher_crypto_instance(inst));
+	err = crypto_grab_spawn(&ictx->blockcipher_spawn, blockcipher_name,
+				CRYPTO_ALG_TYPE_CIPHER, CRYPTO_ALG_TYPE_MASK);
 	if (err)
-		goto err_free_inst;
-	blockcipher_alg = crypto_spawn_cipher_alg(&ictx->blockcipher_spawn);
+		goto out_drop_streamcipher;
+	blockcipher_alg = ictx->blockcipher_spawn.alg;
 
 	/* NHPoly1305 ε-∆U hash function */
-	nhpoly1305_name = crypto_attr_alg_name(tb[3]);
-	if (nhpoly1305_name == ERR_PTR(-ENOENT))
-		nhpoly1305_name = "nhpoly1305";
-	err = crypto_grab_shash(&ictx->hash_spawn,
-				skcipher_crypto_instance(inst),
-				nhpoly1305_name, 0, mask);
+	_hash_alg = crypto_alg_mod_lookup(nhpoly1305_name,
+					  CRYPTO_ALG_TYPE_SHASH,
+					  CRYPTO_ALG_TYPE_MASK);
+	if (IS_ERR(_hash_alg)) {
+		err = PTR_ERR(_hash_alg);
+		goto out_drop_blockcipher;
+	}
+	hash_alg = __crypto_shash_alg(_hash_alg);
+	err = crypto_init_shash_spawn(&ictx->hash_spawn, hash_alg,
+				      skcipher_crypto_instance(inst));
 	if (err)
-		goto err_free_inst;
-	hash_alg = crypto_spawn_shash_alg(&ictx->hash_spawn);
+		goto out_put_hash;
 
 	/* Check the set of algorithms */
 	if (!adiantum_supported_algorithms(streamcipher_alg, blockcipher_alg,
@@ -543,7 +579,7 @@ static int adiantum_create(struct crypto_template *tmpl, struct rtattr **tb)
 			streamcipher_alg->base.cra_name,
 			blockcipher_alg->cra_name, hash_alg->base.cra_name);
 		err = -EINVAL;
-		goto err_free_inst;
+		goto out_drop_hash;
 	}
 
 	/* Instance fields */
@@ -552,14 +588,16 @@ static int adiantum_create(struct crypto_template *tmpl, struct rtattr **tb)
 	if (snprintf(inst->alg.base.cra_name, CRYPTO_MAX_ALG_NAME,
 		     "adiantum(%s,%s)", streamcipher_alg->base.cra_name,
 		     blockcipher_alg->cra_name) >= CRYPTO_MAX_ALG_NAME)
-		goto err_free_inst;
+		goto out_drop_hash;
 	if (snprintf(inst->alg.base.cra_driver_name, CRYPTO_MAX_ALG_NAME,
 		     "adiantum(%s,%s,%s)",
 		     streamcipher_alg->base.cra_driver_name,
 		     blockcipher_alg->cra_driver_name,
 		     hash_alg->base.cra_driver_name) >= CRYPTO_MAX_ALG_NAME)
-		goto err_free_inst;
+		goto out_drop_hash;
 
+	inst->alg.base.cra_flags = streamcipher_alg->base.cra_flags &
+				   CRYPTO_ALG_ASYNC;
 	inst->alg.base.cra_blocksize = BLOCKCIPHER_BLOCK_SIZE;
 	inst->alg.base.cra_ctxsize = sizeof(struct adiantum_tfm_ctx);
 	inst->alg.base.cra_alignmask = streamcipher_alg->base.cra_alignmask |
@@ -586,10 +624,22 @@ static int adiantum_create(struct crypto_template *tmpl, struct rtattr **tb)
 	inst->free = adiantum_free_instance;
 
 	err = skcipher_register_instance(tmpl, inst);
-	if (err) {
-err_free_inst:
-		adiantum_free_instance(inst);
-	}
+	if (err)
+		goto out_drop_hash;
+
+	crypto_mod_put(_hash_alg);
+	return 0;
+
+out_drop_hash:
+	crypto_drop_shash(&ictx->hash_spawn);
+out_put_hash:
+	crypto_mod_put(_hash_alg);
+out_drop_blockcipher:
+	crypto_drop_spawn(&ictx->blockcipher_spawn);
+out_drop_streamcipher:
+	crypto_drop_skcipher(&ictx->streamcipher_spawn);
+out_free_inst:
+	kfree(inst);
 	return err;
 }
 
@@ -610,11 +660,10 @@ static void __exit adiantum_module_exit(void)
 	crypto_unregister_template(&adiantum_tmpl);
 }
 
-subsys_initcall(adiantum_module_init);
+module_init(adiantum_module_init);
 module_exit(adiantum_module_exit);
 
 MODULE_DESCRIPTION("Adiantum length-preserving encryption mode");
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Eric Biggers <ebiggers@google.com>");
 MODULE_ALIAS_CRYPTO("adiantum");
-MODULE_IMPORT_NS(CRYPTO_INTERNAL);

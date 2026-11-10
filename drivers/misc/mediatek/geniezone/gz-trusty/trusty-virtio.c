@@ -42,7 +42,6 @@
 #include <linux/virtio_ring.h>
 #include <linux/atomic.h>
 #include <linux/mod_devicetable.h>
-#include <linux/slab.h>
 #include <linux/cpu.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>

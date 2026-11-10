@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * vhost transport for vsock
  *
  * Copyright (C) 2013-2015 Red Hat, Inc.
  * Author: Asias He <asias@redhat.com>
  *         Stefan Hajnoczi <stefanha@redhat.com>
+ *
+ * This work is licensed under the terms of the GNU GPL, version 2.
  */
 #include <linux/miscdevice.h>
 #include <linux/atomic.h>
@@ -34,14 +35,14 @@ enum {
 };
 
 /* Used to track all the vhost_vsock instances on the system. */
-static DEFINE_MUTEX(vhost_vsock_mutex);
+static DEFINE_SPINLOCK(vhost_vsock_lock);
 static DEFINE_READ_MOSTLY_HASHTABLE(vhost_vsock_hash, 8);
 
 struct vhost_vsock {
 	struct vhost_dev dev;
 	struct vhost_virtqueue vqs[2];
 
-	/* Link to global vhost_vsock_hash, writes use vhost_vsock_mutex */
+	/* Link to global vhost_vsock_hash, writes use vhost_vsock_lock */
 	struct hlist_node hash;
 
 	struct vhost_work send_pkt_work;
@@ -58,7 +59,7 @@ static u32 vhost_transport_get_local_cid(void)
 	return VHOST_VSOCK_DEFAULT_HOST_CID;
 }
 
-/* Callers that dereference the return value must hold vhost_vsock_mutex or the
+/* Callers that dereference the return value must hold vhost_vsock_lock or the
  * RCU read lock.
  */
 static struct vhost_vsock *vhost_vsock_get(u32 guest_cid)
@@ -91,7 +92,7 @@ vhost_transport_do_send_pkt(struct vhost_vsock *vsock,
 
 	mutex_lock(&vq->mutex);
 
-	if (!vhost_vq_get_backend(vq))
+	if (!vq->private_data)
 		goto out;
 
 	/* Avoid further vmexits, we're already processing the virtqueue */
@@ -196,12 +197,6 @@ vhost_transport_do_send_pkt(struct vhost_vsock *vsock,
 		 * to send it with the next available buffer.
 		 */
 		if (pkt->off < pkt->len) {
-			/* We are queueing the same virtio_vsock_pkt to handle
-			 * the remaining bytes, and we want to deliver it
-			 * to monitoring devices in the next iteration.
-			 */
-			pkt->tap_delivered = false;
-
 			spin_lock_bh(&vsock->send_pkt_list_lock);
 			list_add(&pkt->list, &vsock->send_pkt_list);
 			spin_unlock_bh(&vsock->send_pkt_list_lock);
@@ -359,13 +354,11 @@ vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq,
 		return NULL;
 	}
 
-	pkt->buf = kvmalloc(pkt->len, GFP_KERNEL);
+	pkt->buf = kmalloc(pkt->len, GFP_KERNEL);
 	if (!pkt->buf) {
 		kfree(pkt);
 		return NULL;
 	}
-
-	pkt->buf_len = pkt->len;
 
 	nbytes = copy_from_iter(pkt->buf, pkt->len, &iov_iter);
 	if (nbytes != pkt->len) {
@@ -392,8 +385,6 @@ static bool vhost_vsock_more_replies(struct vhost_vsock *vsock)
 
 static struct virtio_transport vhost_transport = {
 	.transport = {
-		.module                   = THIS_MODULE,
-
 		.get_local_cid            = vhost_transport_get_local_cid,
 
 		.init                     = virtio_transport_do_socket_init,
@@ -426,8 +417,13 @@ static struct virtio_transport vhost_transport = {
 		.notify_send_pre_block    = virtio_transport_notify_send_pre_block,
 		.notify_send_pre_enqueue  = virtio_transport_notify_send_pre_enqueue,
 		.notify_send_post_enqueue = virtio_transport_notify_send_post_enqueue,
-		.notify_buffer_size       = virtio_transport_notify_buffer_size,
 
+		.set_buffer_size          = virtio_transport_set_buffer_size,
+		.set_min_buffer_size      = virtio_transport_set_min_buffer_size,
+		.set_max_buffer_size      = virtio_transport_set_max_buffer_size,
+		.get_buffer_size          = virtio_transport_get_buffer_size,
+		.get_min_buffer_size      = virtio_transport_get_min_buffer_size,
+		.get_max_buffer_size      = virtio_transport_get_max_buffer_size,
 	},
 
 	.send_pkt = vhost_transport_send_pkt,
@@ -446,7 +442,7 @@ static void vhost_vsock_handle_tx_kick(struct vhost_work *work)
 
 	mutex_lock(&vq->mutex);
 
-	if (!vhost_vq_get_backend(vq))
+	if (!vq->private_data)
 		goto out;
 
 	vhost_disable_notify(&vsock->dev, vq);
@@ -494,7 +490,7 @@ static void vhost_vsock_handle_tx_kick(struct vhost_work *work)
 			virtio_transport_free_pkt(pkt);
 
 		len += sizeof(pkt->hdr);
-		vhost_add_used(vq, head, 0);
+		vhost_add_used(vq, head, len);
 		total_len += len;
 		added = true;
 	} while(likely(!vhost_exceeds_weight(vq, ++pkts, total_len)));
@@ -539,8 +535,8 @@ static int vhost_vsock_start(struct vhost_vsock *vsock)
 			goto err_vq;
 		}
 
-		if (!vhost_vq_get_backend(vq)) {
-			vhost_vq_set_backend(vq, vsock);
+		if (!vq->private_data) {
+			vq->private_data = vsock;
 			ret = vhost_vq_init_access(vq);
 			if (ret)
 				goto err_vq;
@@ -558,14 +554,14 @@ static int vhost_vsock_start(struct vhost_vsock *vsock)
 	return 0;
 
 err_vq:
-	vhost_vq_set_backend(vq, NULL);
+	vq->private_data = NULL;
 	mutex_unlock(&vq->mutex);
 
 	for (i = 0; i < ARRAY_SIZE(vsock->vqs); i++) {
 		vq = &vsock->vqs[i];
 
 		mutex_lock(&vq->mutex);
-		vhost_vq_set_backend(vq, NULL);
+		vq->private_data = NULL;
 		mutex_unlock(&vq->mutex);
 	}
 err:
@@ -573,24 +569,22 @@ err:
 	return ret;
 }
 
-static int vhost_vsock_stop(struct vhost_vsock *vsock, bool check_owner)
+static int vhost_vsock_stop(struct vhost_vsock *vsock)
 {
 	size_t i;
-	int ret = 0;
+	int ret;
 
 	mutex_lock(&vsock->dev.mutex);
 
-	if (check_owner) {
-		ret = vhost_dev_check_owner(&vsock->dev);
-		if (ret)
-			goto err;
-	}
+	ret = vhost_dev_check_owner(&vsock->dev);
+	if (ret)
+		goto err;
 
 	for (i = 0; i < ARRAY_SIZE(vsock->vqs); i++) {
 		struct vhost_virtqueue *vq = &vsock->vqs[i];
 
 		mutex_lock(&vq->mutex);
-		vhost_vq_set_backend(vq, NULL);
+		vq->private_data = NULL;
 		mutex_unlock(&vq->mutex);
 	}
 
@@ -634,7 +628,7 @@ static int vhost_vsock_dev_open(struct inode *inode, struct file *file)
 
 	vhost_dev_init(&vsock->dev, vqs, ARRAY_SIZE(vsock->vqs),
 		       UIO_MAXIOV, VHOST_VSOCK_PKT_WEIGHT,
-		       VHOST_VSOCK_WEIGHT, true, NULL);
+		       VHOST_VSOCK_WEIGHT);
 
 	file->private_data = vsock;
 	spin_lock_init(&vsock->send_pkt_list_lock);
@@ -687,10 +681,10 @@ static int vhost_vsock_dev_release(struct inode *inode, struct file *file)
 {
 	struct vhost_vsock *vsock = file->private_data;
 
-	mutex_lock(&vhost_vsock_mutex);
+	spin_lock_bh(&vhost_vsock_lock);
 	if (vsock->guest_cid)
 		hash_del_rcu(&vsock->hash);
-	mutex_unlock(&vhost_vsock_mutex);
+	spin_unlock_bh(&vhost_vsock_lock);
 
 	/* Wait for other CPUs to finish using vsock */
 	synchronize_rcu();
@@ -699,12 +693,7 @@ static int vhost_vsock_dev_release(struct inode *inode, struct file *file)
 	 * inefficient.  Room for improvement here. */
 	vsock_for_each_connected_socket(vhost_vsock_reset_orphans);
 
-	/* Don't check the owner, because we are in the release path, so we
-	 * need to stop the vsock device in any case.
-	 * vhost_vsock_stop() can not fail in this case, so we don't need to
-	 * check the return code.
-	 */
-	vhost_vsock_stop(vsock, false);
+	vhost_vsock_stop(vsock);
 	vhost_vsock_flush(vsock);
 	vhost_dev_stop(&vsock->dev);
 
@@ -738,17 +727,11 @@ static int vhost_vsock_set_cid(struct vhost_vsock *vsock, u64 guest_cid)
 	if (guest_cid > U32_MAX)
 		return -EINVAL;
 
-	/* Refuse if CID is assigned to the guest->host transport (i.e. nested
-	 * VM), to make the loopback work.
-	 */
-	if (vsock_find_cid(guest_cid))
-		return -EADDRINUSE;
-
 	/* Refuse if CID is already in use */
-	mutex_lock(&vhost_vsock_mutex);
+	spin_lock_bh(&vhost_vsock_lock);
 	other = vhost_vsock_get(guest_cid);
 	if (other && other != vsock) {
-		mutex_unlock(&vhost_vsock_mutex);
+		spin_unlock_bh(&vhost_vsock_lock);
 		return -EADDRINUSE;
 	}
 
@@ -757,7 +740,7 @@ static int vhost_vsock_set_cid(struct vhost_vsock *vsock, u64 guest_cid)
 
 	vsock->guest_cid = guest_cid;
 	hash_add_rcu(vhost_vsock_hash, &vsock->hash, vsock->guest_cid);
-	mutex_unlock(&vhost_vsock_mutex);
+	spin_unlock_bh(&vhost_vsock_lock);
 
 	return 0;
 }
@@ -808,7 +791,7 @@ static long vhost_vsock_dev_ioctl(struct file *f, unsigned int ioctl,
 		if (start)
 			return vhost_vsock_start(vsock);
 		else
-			return vhost_vsock_stop(vsock, true);
+			return vhost_vsock_stop(vsock);
 	case VHOST_GET_FEATURES:
 		features = VHOST_VSOCK_FEATURES;
 		if (copy_to_user(argp, &features, sizeof(features)))
@@ -830,13 +813,23 @@ static long vhost_vsock_dev_ioctl(struct file *f, unsigned int ioctl,
 	}
 }
 
+#ifdef CONFIG_COMPAT
+static long vhost_vsock_dev_compat_ioctl(struct file *f, unsigned int ioctl,
+					 unsigned long arg)
+{
+	return vhost_vsock_dev_ioctl(f, ioctl, (unsigned long)compat_ptr(arg));
+}
+#endif
+
 static const struct file_operations vhost_vsock_fops = {
 	.owner          = THIS_MODULE,
 	.open           = vhost_vsock_dev_open,
 	.release        = vhost_vsock_dev_release,
 	.llseek		= noop_llseek,
 	.unlocked_ioctl = vhost_vsock_dev_ioctl,
-	.compat_ioctl   = compat_ptr_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl   = vhost_vsock_dev_compat_ioctl,
+#endif
 };
 
 static struct miscdevice vhost_vsock_misc = {
@@ -849,24 +842,16 @@ static int __init vhost_vsock_init(void)
 {
 	int ret;
 
-	ret = vsock_core_register(&vhost_transport.transport,
-				  VSOCK_TRANSPORT_F_H2G);
+	ret = vsock_core_init(&vhost_transport.transport);
 	if (ret < 0)
 		return ret;
-
-	ret = misc_register(&vhost_vsock_misc);
-	if (ret) {
-		vsock_core_unregister(&vhost_transport.transport);
-		return ret;
-	}
-
-	return 0;
+	return misc_register(&vhost_vsock_misc);
 };
 
 static void __exit vhost_vsock_exit(void)
 {
 	misc_deregister(&vhost_vsock_misc);
-	vsock_core_unregister(&vhost_transport.transport);
+	vsock_core_exit();
 };
 
 module_init(vhost_vsock_init);

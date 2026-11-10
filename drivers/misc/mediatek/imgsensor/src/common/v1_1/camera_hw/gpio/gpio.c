@@ -4,7 +4,6 @@
  */
 
 #include "gpio.h"
-#include "platform_common.h"
 
 struct GPIO_PINCTRL gpio_pinctrl_list_cam[
 			GPIO_CTRL_STATE_MAX_NUM_CAM] = {
@@ -15,28 +14,17 @@ struct GPIO_PINCTRL gpio_pinctrl_list_cam[
 	{"rst0"},
 	{"ldo_vcama_1"},
 	{"ldo_vcama_0"},
+#ifdef CONFIG_REGULATOR_RT5133
 	{"ldo_vcama1_1"},
 	{"ldo_vcama1_0"},
-#if defined(CONFIG_MOT_CANCUNF_CAMERA_PROJECT)  || defined(CONFIG_MOT_DEVONN_CAMERA_PROJECT) || defined(CONFIG_MOT_DEVONF_CAMERA_PROJECT)
-	{"ldo_vcamaf_1"},
-	{"ldo_vcamaf_0"},
 #endif
 	{"ldo_vcamd_1"},
 	{"ldo_vcamd_0"},
-#if defined(CONFIG_MOT_CANCUNF_CAMERA_PROJECT)
-	{"ldo_vcamd1_1"},
-	{"ldo_vcamd1_0"},
-#endif
 	{"ldo_vcamio_1"},
 	{"ldo_vcamio_0"},
 };
 
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-extern bool devonf_vcamio_reset;
-static int vcamio_cnt = 0;
-#endif
-
-/* for mipi switch platform */
+#ifdef MIPI_SWITCH
 struct GPIO_PINCTRL gpio_pinctrl_list_switch[
 			GPIO_CTRL_STATE_MAX_NUM_SWITCH] = {
 	{"cam_mipi_switch_en_1"},
@@ -44,6 +32,9 @@ struct GPIO_PINCTRL gpio_pinctrl_list_switch[
 	{"cam_mipi_switch_sel_1"},
 	{"cam_mipi_switch_sel_0"}
 };
+#endif
+
+extern void gpio_dump_regs(void);
 
 static struct GPIO gpio_instance;
 
@@ -61,7 +52,7 @@ static enum IMGSENSOR_RETURN gpio_init(
 
 	pgpio->ppinctrl = devm_pinctrl_get(&pcommon->pplatform_device->dev);
 	if (IS_ERR(pgpio->ppinctrl)) {
-		PK_DBG("ERROR: %s, Cannot find camera pinctrl!", __func__);
+		PK_PR_ERR("%s : Cannot find camera pinctrl!", __func__);
 		return IMGSENSOR_RETURN_ERROR;
 	}
 
@@ -73,54 +64,14 @@ static enum IMGSENSOR_RETURN gpio_init(
 			gpio_pinctrl_list_cam[i].ppinctrl_lookup_names;
 
 			if (lookup_names) {
-#if defined(CONFIG_MOT_DEVONN_CAMERA_PROJECT)
-				if (strncmp(lookup_names, "ldo_vcamio", strlen("ldo_vcamio")) == 0)
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					0,//camera ldo io all
-					lookup_names);
-				else if ((j != 0)&&(strncmp(lookup_names, "ldo_vcama", strlen("ldo_vcama")) == 0))
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					1,//camera 1,2,4 avdd
-					lookup_names);
-/*				else if ((j != 0)&&(strncmp(lookup_names, "pnd", strlen("pnd")) == 0))
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					0,//camera 0,1 Dvdd
-					lookup_names);*/
-				else
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					j,
-					lookup_names);
-#elif defined(CONFIG_MOT_DEVONF_CAMERA_PROJECT)
-				if (strncmp(lookup_names, "ldo_vcamio", strlen("ldo_vcamio")) == 0){
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					0,//camera ldo io all
-					lookup_names);
-				} else{
 				ret = snprintf(str_pinctrl_name,
 				sizeof(str_pinctrl_name),
 				"cam%d_%s",
 				j,
 				lookup_names);
-				}
-#else
-				ret = snprintf(str_pinctrl_name,
-				sizeof(str_pinctrl_name),
-				"cam%d_%s",
-				j,
-				lookup_names);
-#endif
 				if (ret < 0)
-					PK_DBG("NOITCE: %s, snprintf err, %d\n",
+					pr_info(
+						"ERROR:%s, snprintf err, %d\n",
 						__func__,
 						ret);
 
@@ -132,14 +83,15 @@ static enum IMGSENSOR_RETURN gpio_init(
 
 			if (pgpio->ppinctrl_state_cam[j][i] == NULL ||
 				IS_ERR(pgpio->ppinctrl_state_cam[j][i])) {
-				PK_DBG("NOTICE: %s, pinctrl err, %s\n",
+				pr_info(
+					"ERROR: %s : pinctrl err, %s\n",
 					__func__,
 					str_pinctrl_name);
-				pgpio->ppinctrl_state_cam[j][i] = NULL;
+				ret = IMGSENSOR_RETURN_ERROR;
 			}
 		}
 	}
-	/* for mipi switch platform */
+#ifdef MIPI_SWITCH
 	for (i = 0; i < GPIO_CTRL_STATE_MAX_NUM_SWITCH; i++) {
 		if (gpio_pinctrl_list_switch[i].ppinctrl_lookup_names) {
 			pgpio->ppinctrl_state_switch[i] =
@@ -150,11 +102,12 @@ static enum IMGSENSOR_RETURN gpio_init(
 
 		if (pgpio->ppinctrl_state_switch[i] == NULL ||
 			IS_ERR(pgpio->ppinctrl_state_switch[i])) {
-			PK_DBG("NOTICE: %s, pinctrl err, %s\n", __func__,
+			PK_PR_ERR("%s : pinctrl err, %s\n", __func__,
 			gpio_pinctrl_list_switch[i].ppinctrl_lookup_names);
-			pgpio->ppinctrl_state_switch[i] = NULL;
+			ret = IMGSENSOR_RETURN_ERROR;
 		}
 	}
+#endif
 
 	return ret;
 }
@@ -173,35 +126,26 @@ static enum IMGSENSOR_RETURN gpio_set(
 	struct pinctrl_state  *ppinctrl_state;
 	struct GPIO           *pgpio = (struct GPIO *)pinstance;
 	enum   GPIO_STATE      gpio_state;
-	unsigned int pin_index = 0;
-	unsigned int sensor_idx_uint = 0;
+
 	/* PK_DBG("%s :debug pinctrl ENABLE, PinIdx %d, Val %d\n",
 	 *	__func__, pin, pin_state);
 	 */
 
 	if (pin < IMGSENSOR_HW_PIN_PDN ||
-		pin > IMGSENSOR_HW_PIN_MIPI_SWITCH_SEL ||
-		pin_state < IMGSENSOR_HW_PIN_STATE_LEVEL_0 ||
-		pin_state > IMGSENSOR_HW_PIN_STATE_LEVEL_HIGH)
-		return IMGSENSOR_RETURN_ERROR;
-
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-	if (pin == IMGSENSOR_HW_PIN_DOVDD) {
-		if (pin_state == IMGSENSOR_HW_PIN_STATE_LEVEL_0) {
-			vcamio_cnt--;
-		} else {
-			vcamio_cnt++;
-		}
-	}
+#ifdef MIPI_SWITCH
+	    pin > IMGSENSOR_HW_PIN_MIPI_SWITCH_SEL ||
+#else
+		pin > IMGSENSOR_HW_PIN_DOVDD ||
 #endif
-
-	sensor_idx_uint = sensor_idx;
+		pin_state < IMGSENSOR_HW_PIN_STATE_LEVEL_0 ||
+		pin_state > IMGSENSOR_HW_PIN_STATE_LEVEL_HIGH ||
+		sensor_idx < 0)
+		return IMGSENSOR_RETURN_ERROR;
 
 	gpio_state = (pin_state > IMGSENSOR_HW_PIN_STATE_LEVEL_0)
 		? GPIO_STATE_H : GPIO_STATE_L;
 
-	pin_index = pin - IMGSENSOR_HW_PIN_PDN;
-
+#ifdef MIPI_SWITCH
 	if (pin == IMGSENSOR_HW_PIN_MIPI_SWITCH_EN)
 		ppinctrl_state = pgpio->ppinctrl_state_switch[
 			GPIO_CTRL_STATE_MIPI_SWITCH_EN_H + gpio_state];
@@ -209,28 +153,19 @@ static enum IMGSENSOR_RETURN gpio_set(
 		ppinctrl_state = pgpio->ppinctrl_state_switch[
 			GPIO_CTRL_STATE_MIPI_SWITCH_SEL_H + gpio_state];
 	else
-		ppinctrl_state =
-			pgpio->ppinctrl_state_cam[sensor_idx_uint][
-			(pin_index << 1) + gpio_state];
-
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-	if ((pin == IMGSENSOR_HW_PIN_DOVDD) && (pin_state == IMGSENSOR_HW_PIN_STATE_LEVEL_0)) {
-		if (devonf_vcamio_reset == true) {
-			vcamio_cnt = 0;
-			devonf_vcamio_reset = false;
-		}
-		if (vcamio_cnt > 0) {
-			return IMGSENSOR_RETURN_SUCCESS;
-		}
-	}
 #endif
+	{
+		ppinctrl_state =
+			pgpio->ppinctrl_state_cam[sensor_idx][
+			((pin - IMGSENSOR_HW_PIN_PDN) << 1) + gpio_state];
+	}
 
 	mutex_lock(pgpio->pgpio_mutex);
 
 	if (ppinctrl_state != NULL && !IS_ERR(ppinctrl_state))
 		pinctrl_select_state(pgpio->ppinctrl, ppinctrl_state);
 	else
-		PK_DBG("%s : pinctrl err, PinIdx %d, Val %d\n",
+		PK_PR_ERR("%s : pinctrl err, PinIdx %d, Val %d\n",
 			__func__, pin, pin_state);
 
 	mutex_unlock(pgpio->pgpio_mutex);

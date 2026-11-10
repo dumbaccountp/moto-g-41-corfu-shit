@@ -18,10 +18,6 @@
 #include "mtu3.h"
 #include "mtu3_dr.h"
 
-
-/* mt6983 etc */
-#define PERI_WK_CTRL2	0x8
-
 /* mt8173 etc */
 #define PERI_WK_CTRL1	0x4
 #define WC1_IS_C(x)	(((x) & 0xf) << 26)  /* cycle debounce */
@@ -30,13 +26,9 @@
 
 /* mt8183 */
 #define PERI_WK_CTRL0	0x0
-#define WC0_IS_C(x)	((u32)(((x) & 0xf) << 28))  /* cycle debounce */
-#define WC0_IS_P	BIT(12)	/* polarity */
+#define WC0_IS_C(x)	(((x) & 0xfU) << 28) /* cycle debounce */
+#define WC0_IS_P	BIT(12) /* polarity */
 #define WC0_IS_EN	BIT(6)
-
-/* mt8192 */
-#define WC0_SSUSB0_CDEN		BIT(6)
-#define WC0_IS_SPM_EN		BIT(1)
 
 /* mt2712 etc */
 #define PERI_SSUSB_SPM_CTRL	0x0
@@ -46,9 +38,7 @@
 enum ssusb_uwk_vers {
 	SSUSB_UWK_V1 = 1,
 	SSUSB_UWK_V2,
-	SSUSB_UWK_V1_1 = 101,	/* specific revision 1.01 */
-	SSUSB_UWK_V1_2,		/* specific revision 1.02 */
-	SSUSB_UWK_V1_3,		/* specific revision 1.03 */
+	SSUSB_UWK_V1_1 = 101, /* specific revision 1.01 */
 };
 
 /*
@@ -65,31 +55,15 @@ static void ssusb_wakeup_ip_sleep_set(struct ssusb_mtk *ssusb, bool enable)
 		msk = WC1_IS_EN | WC1_IS_C(0xf) | WC1_IS_P;
 		val = enable ? (WC1_IS_EN | WC1_IS_C(0x8)) : 0;
 		break;
-	case SSUSB_UWK_V1_1:
-		reg = ssusb->uwk_reg_base + PERI_WK_CTRL0;
-		msk = WC0_IS_EN | WC0_IS_C(0xf) | WC0_IS_P;
-		val = enable ? (WC0_IS_EN | WC0_IS_C(0x8)) : 0;
-		break;
-	case SSUSB_UWK_V1_2:
-		reg = ssusb->uwk_reg_base + PERI_WK_CTRL0;
-		msk = WC0_SSUSB0_CDEN | WC0_IS_SPM_EN;
-		val = enable ? msk : 0;
-		break;
-	case SSUSB_UWK_V1_3:
-		reg = ssusb->uwk_reg_base + PERI_WK_CTRL0;
-		msk = 0x3;
-		val = enable ? msk : 0;
-		regmap_update_bits(ssusb->uwk, reg, msk, val);
-
-		reg = ssusb->uwk_reg_base + PERI_WK_CTRL2;
-		msk = 0x699;
-		val = enable ? msk : 0;
-		regmap_update_bits(ssusb->uwk, reg, msk, val);
-		break;
 	case SSUSB_UWK_V2:
 		reg = ssusb->uwk_reg_base + PERI_SSUSB_SPM_CTRL;
 		msk = SSC_IP_SLEEP_EN | SSC_SPM_INT_EN;
 		val = enable ? msk : 0;
+		break;
+	case SSUSB_UWK_V1_1:
+		reg = ssusb->uwk_reg_base + PERI_WK_CTRL0;
+		msk = WC0_IS_EN | WC0_IS_C(0xf) | WC0_IS_P;
+		val = enable ? (WC0_IS_EN | WC0_IS_C(0x8)) : 0;
 		break;
 	default:
 		return;
@@ -150,7 +124,6 @@ int ssusb_host_enable(struct ssusb_mtk *ssusb)
 	int u3_ports_disabed;
 	u32 check_clk;
 	u32 value;
-	int ret;
 	int i;
 
 	/* power on host ip */
@@ -182,12 +155,7 @@ int ssusb_host_enable(struct ssusb_mtk *ssusb)
 	if (num_u3p > u3_ports_disabed)
 		check_clk = SSUSB_U3_MAC_RST_B_STS;
 
-	ret =  ssusb_check_clocks(ssusb, check_clk);
-
-	/* update txdeemph */
-	ssusb_set_txdeemph(ssusb);
-
-	return ret;
+	return ssusb_check_clocks(ssusb, check_clk);
 }
 
 int ssusb_host_disable(struct ssusb_mtk *ssusb, bool suspend)
@@ -261,25 +229,6 @@ static void ssusb_host_cleanup(struct ssusb_mtk *ssusb)
 	ssusb_host_disable(ssusb, false);
 }
 
-static void ssusb_get_platform_driver(struct ssusb_mtk *ssusb)
-{
-	struct device_node *parent_dn = ssusb->dev->of_node;
-	struct device_node *child;
-	struct platform_device *pdev;
-
-	for_each_child_of_node(parent_dn, child) {
-		if (of_device_is_compatible(child, "mediatek,mtk-xhci") ||
-		    of_device_is_compatible(child, "mediatek,mtk-xhci-p1")) {
-			pdev = of_find_device_by_node(child);
-			if (pdev) {
-				ssusb->xhci_pdrv =
-					to_platform_driver(pdev->dev.driver);
-				break;
-			}
-		}
-	}
-}
-
 /*
  * If host supports multiple ports, the VBUSes(5V) of ports except port0
  * which supports OTG are better to be enabled by default in DTS.
@@ -293,8 +242,6 @@ int ssusb_host_init(struct ssusb_mtk *ssusb, struct device_node *parent_dn)
 
 	ssusb_host_setup(ssusb);
 
-	ssusb_set_power_state(ssusb, MTU3_STATE_POWER_ON);
-
 	ret = of_platform_populate(parent_dn, NULL, NULL, parent_dev);
 	if (ret) {
 		dev_dbg(parent_dev, "failed to create child devices at %pOF\n",
@@ -304,14 +251,11 @@ int ssusb_host_init(struct ssusb_mtk *ssusb, struct device_node *parent_dn)
 
 	dev_info(parent_dev, "xHCI platform device register success...\n");
 
-	ssusb_get_platform_driver(ssusb);
-
 	return 0;
 }
 
 void ssusb_host_exit(struct ssusb_mtk *ssusb)
 {
 	of_platform_depopulate(ssusb->dev);
-	ssusb_set_power_state(ssusb, MTU3_STATE_POWER_OFF);
 	ssusb_host_cleanup(ssusb);
 }

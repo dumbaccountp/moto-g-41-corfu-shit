@@ -1,7 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * net/dsa/tag_edsa.c - Ethertype DSA tagging
  * Copyright (c) 2008-2009 Marvell Semiconductor
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 
 #include <linux/etherdevice.h>
@@ -35,6 +39,8 @@ static struct sk_buff *edsa_xmit(struct sk_buff *skb, struct net_device *dev)
 	 * current ethertype field if the packet is untagged.
 	 */
 	if (skb->protocol == htons(ETH_P_8021Q)) {
+		if (skb_cow_head(skb, DSA_HLEN) < 0)
+			return NULL;
 		skb_push(skb, DSA_HLEN);
 
 		memmove(skb->data, skb->data + DSA_HLEN, 2 * ETH_ALEN);
@@ -58,6 +64,8 @@ static struct sk_buff *edsa_xmit(struct sk_buff *skb, struct net_device *dev)
 			edsa_header[6] &= ~0x10;
 		}
 	} else {
+		if (skb_cow_head(skb, EDSA_HLEN) < 0)
+			return NULL;
 		skb_push(skb, EDSA_HLEN);
 
 		memmove(skb->data, skb->data + EDSA_HLEN, 2 * ETH_ALEN);
@@ -188,15 +196,7 @@ static struct sk_buff *edsa_rcv(struct sk_buff *skb, struct net_device *dev,
 	return skb;
 }
 
-static const struct dsa_device_ops edsa_netdev_ops = {
-	.name	= "edsa",
-	.proto	= DSA_TAG_PROTO_EDSA,
+const struct dsa_device_ops edsa_netdev_ops = {
 	.xmit	= edsa_xmit,
 	.rcv	= edsa_rcv,
-	.overhead = EDSA_HLEN,
 };
-
-MODULE_LICENSE("GPL");
-MODULE_ALIAS_DSA_TAG_DRIVER(DSA_TAG_PROTO_EDSA);
-
-module_dsa_tag_driver(edsa_netdev_ops);

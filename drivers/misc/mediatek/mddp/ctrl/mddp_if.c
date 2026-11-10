@@ -32,7 +32,8 @@
 //------------------------------------------------------------------------------
 // Private helper macro.
 //------------------------------------------------------------------------------
-#define MDDP_CHECK_APP_TYPE(_type) ((_type < MDDP_APP_TYPE_CNT) ? (1) : (0))
+#define MDDP_CHECK_APP_TYPE(_type) \
+	((_type >= 0 && _type < MDDP_APP_TYPE_CNT) ? (1) : (0))
 
 //------------------------------------------------------------------------------
 // Private functions.
@@ -289,16 +290,16 @@ static void mddp_exit(void)
 	switch (mddp_init_steps) {
 	case 4:
 		mddp_filter_uninit();
-		fallthrough;
+		/* fallthrough */
 	case 3:
 		mddp_dev_uninit();
-		fallthrough;
+		/* fallthrough */
 	case 2:
 		mddp_ipc_uninit();
-		fallthrough;
+		/* fallthrough */
 	case 1:
 		mddp_sm_uninit();
-		fallthrough;
+		/* fallthrough */
 	default:
 		break;
 	}

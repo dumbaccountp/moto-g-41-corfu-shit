@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/media/platform/s5p-mfc/s5p_mfc_opr_v6.c
  *
@@ -7,6 +6,10 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com/
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #undef DEBUG
@@ -50,7 +53,7 @@ static int s5p_mfc_alloc_dec_temp_buffers_v6(struct s5p_mfc_ctx *ctx)
 	return 0;
 }
 
-/* Release temporary buffers for decoding */
+/* Release temproary buffers for decoding */
 static void s5p_mfc_release_dec_desc_buffer_v6(struct s5p_mfc_ctx *ctx)
 {
 	/* NOP */
@@ -733,10 +736,10 @@ static int s5p_mfc_set_slice_mode(struct s5p_mfc_ctx *ctx)
 	/* multi-slice control */
 	/* multi-slice MB number or bit size */
 	writel(ctx->slice_mode, mfc_regs->e_mslice_mode);
-	if (ctx->slice_mode == V4L2_MPEG_VIDEO_MULTI_SLICE_MODE_MAX_MB) {
+	if (ctx->slice_mode == V4L2_MPEG_VIDEO_MULTI_SICE_MODE_MAX_MB) {
 		writel(ctx->slice_size.mb, mfc_regs->e_mslice_size_mb);
 	} else if (ctx->slice_mode ==
-			V4L2_MPEG_VIDEO_MULTI_SLICE_MODE_MAX_BYTES) {
+			V4L2_MPEG_VIDEO_MULTI_SICE_MODE_MAX_BYTES) {
 		writel(ctx->slice_size.bits, mfc_regs->e_mslice_size_bits);
 	} else {
 		writel(0x0, mfc_regs->e_mslice_size_mb);
@@ -776,11 +779,11 @@ static int s5p_mfc_set_enc_params(struct s5p_mfc_ctx *ctx)
 	/* multi-slice MB number or bit size */
 	ctx->slice_mode = p->slice_mode;
 	reg = 0;
-	if (p->slice_mode == V4L2_MPEG_VIDEO_MULTI_SLICE_MODE_MAX_MB) {
+	if (p->slice_mode == V4L2_MPEG_VIDEO_MULTI_SICE_MODE_MAX_MB) {
 		reg |= (0x1 << 3);
 		writel(reg, mfc_regs->e_enc_options);
 		ctx->slice_size.mb = p->slice_mb;
-	} else if (p->slice_mode == V4L2_MPEG_VIDEO_MULTI_SLICE_MODE_MAX_BYTES) {
+	} else if (p->slice_mode == V4L2_MPEG_VIDEO_MULTI_SICE_MODE_MAX_BYTES) {
 		reg |= (0x1 << 3);
 		writel(reg, mfc_regs->e_enc_options);
 		ctx->slice_size.bits = p->slice_bit;
@@ -840,7 +843,7 @@ static int s5p_mfc_set_enc_params(struct s5p_mfc_ctx *ctx)
 	if (p->pad) {
 		reg = 0;
 		/** enable */
-		reg |= (1UL << 31);
+		reg |= (1 << 31);
 		/** cr value */
 		reg |= ((p->pad_cr & 0xFF) << 16);
 		/** cb value */
@@ -1060,7 +1063,7 @@ static int s5p_mfc_set_enc_params_h264(struct s5p_mfc_ctx *ctx)
 	}
 
 	/* aspect ratio VUI */
-	reg = readl(mfc_regs->e_h264_options);
+	readl(mfc_regs->e_h264_options);
 	reg &= ~(0x1 << 5);
 	reg |= ((p_h264->vui_sar & 0x1) << 5);
 	writel(reg, mfc_regs->e_h264_options);
@@ -1083,7 +1086,7 @@ static int s5p_mfc_set_enc_params_h264(struct s5p_mfc_ctx *ctx)
 
 	/* intra picture period for H.264 open GOP */
 	/* control */
-	reg = readl(mfc_regs->e_h264_options);
+	readl(mfc_regs->e_h264_options);
 	reg &= ~(0x1 << 4);
 	reg |= ((p_h264->open_gop & 0x1) << 4);
 	writel(reg, mfc_regs->e_h264_options);
@@ -1097,23 +1100,23 @@ static int s5p_mfc_set_enc_params_h264(struct s5p_mfc_ctx *ctx)
 	}
 
 	/* 'WEIGHTED_BI_PREDICTION' for B is disable */
-	reg = readl(mfc_regs->e_h264_options);
+	readl(mfc_regs->e_h264_options);
 	reg &= ~(0x3 << 9);
 	writel(reg, mfc_regs->e_h264_options);
 
 	/* 'CONSTRAINED_INTRA_PRED_ENABLE' is disable */
-	reg = readl(mfc_regs->e_h264_options);
+	readl(mfc_regs->e_h264_options);
 	reg &= ~(0x1 << 14);
 	writel(reg, mfc_regs->e_h264_options);
 
 	/* ASO */
-	reg = readl(mfc_regs->e_h264_options);
+	readl(mfc_regs->e_h264_options);
 	reg &= ~(0x1 << 6);
 	reg |= ((p_h264->aso & 0x1) << 6);
 	writel(reg, mfc_regs->e_h264_options);
 
 	/* hier qp enable */
-	reg = readl(mfc_regs->e_h264_options);
+	readl(mfc_regs->e_h264_options);
 	reg &= ~(0x1 << 8);
 	reg |= ((p_h264->open_gop & 0x1) << 8);
 	writel(reg, mfc_regs->e_h264_options);
@@ -1134,7 +1137,7 @@ static int s5p_mfc_set_enc_params_h264(struct s5p_mfc_ctx *ctx)
 	writel(reg, mfc_regs->e_h264_num_t_layer);
 
 	/* frame packing SEI generation */
-	reg = readl(mfc_regs->e_h264_options);
+	readl(mfc_regs->e_h264_options);
 	reg &= ~(0x1 << 25);
 	reg |= ((p_h264->sei_frame_packing & 0x1) << 25);
 	writel(reg, mfc_regs->e_h264_options);
@@ -1925,7 +1928,7 @@ static inline int s5p_mfc_run_init_dec_buffers(struct s5p_mfc_ctx *ctx)
 
 	if (ctx->capture_state != QUEUE_BUFS_MMAPED) {
 		mfc_err("It seems that not all destination buffers were\n"
-			"mmapped.MFC requires that all destination are mmapped\n"
+			"mmaped.MFC requires that all destination are mmaped\n"
 			"before starting processing.\n");
 		return -EAGAIN;
 	}

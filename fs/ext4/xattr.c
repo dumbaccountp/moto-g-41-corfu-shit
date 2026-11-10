@@ -93,7 +93,6 @@ static const struct xattr_handler * const ext4_xattr_handler_map[] = {
 #ifdef CONFIG_EXT4_FS_SECURITY
 	[EXT4_XATTR_INDEX_SECURITY]	     = &ext4_xattr_security_handler,
 #endif
-	[EXT4_XATTR_INDEX_HURD]		     = &ext4_xattr_hurd_handler,
 };
 
 const struct xattr_handler *ext4_xattr_handlers[] = {
@@ -106,7 +105,6 @@ const struct xattr_handler *ext4_xattr_handlers[] = {
 #ifdef CONFIG_EXT4_FS_SECURITY
 	&ext4_xattr_security_handler,
 #endif
-	&ext4_xattr_hurd_handler,
 	NULL
 };
 
@@ -247,7 +245,7 @@ __ext4_xattr_check_block(struct inode *inode, struct buffer_head *bh,
 					 bh->b_data);
 errout:
 	if (error)
-		__ext4_error_inode(inode, function, line, 0, -error,
+		__ext4_error_inode(inode, function, line, 0,
 				   "corrupted xattr block %llu",
 				   (unsigned long long) bh->b_blocknr);
 	else
@@ -271,7 +269,7 @@ __xattr_check_inode(struct inode *inode, struct ext4_xattr_ibody_header *header,
 	error = ext4_xattr_check_entries(IFIRST(header), end, IFIRST(header));
 errout:
 	if (error)
-		__ext4_error_inode(inode, function, line, 0, -error,
+		__ext4_error_inode(inode, function, line, 0,
 				   "corrupted in-inode xattr");
 	return error;
 }
@@ -434,21 +432,6 @@ static int ext4_xattr_inode_iget(struct inode *parent, unsigned long ea_ino,
 error:
 	iput(inode);
 	return err;
-}
-
-/* Remove entry from mbcache when EA inode is getting evicted */
-void ext4_evict_ea_inode(struct inode *inode)
-{
-	struct mb_cache_entry *oe;
-
-	if (!EA_INODE_CACHE(inode))
-		return;
-	/* Wait for entry to get unused so that we can remove it */
-	while ((oe = mb_cache_entry_delete_or_get(EA_INODE_CACHE(inode),
-			ext4_xattr_inode_get_hash(inode), inode->i_ino))) {
-		mb_cache_entry_wait_unused(oe);
-		mb_cache_entry_put(EA_INODE_CACHE(inode), oe);
-	}
 }
 
 static int
@@ -984,18 +967,71 @@ int __ext4_xattr_set_credits(struct super_block *sb, struct inode *inode,
 	return credits;
 }
 
+static int ext4_xattr_ensure_credits(handle_t *handle, struct inode *inode,
+				     int credits, struct buffer_head *bh,
+				     bool dirty, bool block_csum)
+{
+	int error;
+
+	if (!ext4_handle_valid(handle))
+		return 0;
+
+	if (handle->h_buffer_credits >= credits)
+		return 0;
+
+	error = ext4_journal_extend(handle, credits - handle->h_buffer_credits);
+	if (!error)
+		return 0;
+	if (error < 0) {
+		ext4_warning(inode->i_sb, "Extend journal (error %d)", error);
+		return error;
+	}
+
+	if (bh && dirty) {
+		if (block_csum)
+			ext4_xattr_block_csum_set(inode, bh);
+		error = ext4_handle_dirty_metadata(handle, NULL, bh);
+		if (error) {
+			ext4_warning(inode->i_sb, "Handle metadata (error %d)",
+				     error);
+			return error;
+		}
+	}
+
+	error = ext4_journal_restart(handle, credits);
+	if (error) {
+		ext4_warning(inode->i_sb, "Restart journal (error %d)", error);
+		return error;
+	}
+
+	if (bh) {
+		error = ext4_journal_get_write_access(handle, bh);
+		if (error) {
+			ext4_warning(inode->i_sb,
+				     "Get write access failed (error %d)",
+				     error);
+			return error;
+		}
+	}
+	return 0;
+}
+
 static int ext4_xattr_inode_update_ref(handle_t *handle, struct inode *ea_inode,
 				       int ref_change)
 {
+	struct mb_cache *ea_inode_cache = EA_INODE_CACHE(ea_inode);
 	struct ext4_iloc iloc;
 	s64 ref_count;
+	u32 hash;
 	int ret;
 
 	inode_lock(ea_inode);
 
 	ret = ext4_reserve_inode_write(handle, ea_inode, &iloc);
-	if (ret)
+	if (ret) {
+		iloc.bh = NULL;
 		goto out;
+	}
 
 	ref_count = ext4_xattr_inode_get_ref(ea_inode);
 	ref_count += ref_change;
@@ -1011,6 +1047,14 @@ static int ext4_xattr_inode_update_ref(handle_t *handle, struct inode *ea_inode,
 
 			set_nlink(ea_inode, 1);
 			ext4_orphan_del(handle, ea_inode);
+
+			if (ea_inode_cache) {
+				hash = ext4_xattr_inode_get_hash(ea_inode);
+				mb_cache_entry_create(ea_inode_cache,
+						      GFP_NOFS, hash,
+						      ea_inode->i_ino,
+						      true /* reusable */);
+			}
 		}
 	} else {
 		WARN_ONCE(ref_count < 0, "EA inode %lu ref_count=%lld",
@@ -1023,14 +1067,22 @@ static int ext4_xattr_inode_update_ref(handle_t *handle, struct inode *ea_inode,
 
 			clear_nlink(ea_inode);
 			ext4_orphan_add(handle, ea_inode);
+
+			if (ea_inode_cache) {
+				hash = ext4_xattr_inode_get_hash(ea_inode);
+				mb_cache_entry_delete(ea_inode_cache, hash,
+						      ea_inode->i_ino);
+			}
 		}
 	}
 
 	ret = ext4_mark_iloc_dirty(handle, ea_inode, &iloc);
+	iloc.bh = NULL;
 	if (ret)
 		ext4_warning_inode(ea_inode,
 				   "ext4_mark_iloc_dirty() failed ret=%d", ret);
 out:
+	brelse(iloc.bh);
 	inode_unlock(ea_inode);
 	return ret;
 }
@@ -1101,24 +1153,6 @@ cleanup:
 	return saved_err;
 }
 
-static int ext4_xattr_restart_fn(handle_t *handle, struct inode *inode,
-			struct buffer_head *bh, bool block_csum, bool dirty)
-{
-	int error;
-
-	if (bh && dirty) {
-		if (block_csum)
-			ext4_xattr_block_csum_set(inode, bh);
-		error = ext4_handle_dirty_metadata(handle, NULL, bh);
-		if (error) {
-			ext4_warning(inode->i_sb, "Handle metadata (error %d)",
-				     error);
-			return error;
-		}
-	}
-	return 0;
-}
-
 static void
 ext4_xattr_inode_dec_ref_all(handle_t *handle, struct inode *parent,
 			     struct buffer_head *bh,
@@ -1155,23 +1189,12 @@ ext4_xattr_inode_dec_ref_all(handle_t *handle, struct inode *parent,
 			continue;
 		}
 
-		err = ext4_journal_ensure_credits_fn(handle, credits, credits,
-			ext4_free_metadata_revoke_credits(parent->i_sb, 1),
-			ext4_xattr_restart_fn(handle, parent, bh, block_csum,
-					      dirty));
-		if (err < 0) {
+		err = ext4_xattr_ensure_credits(handle, parent, credits, bh,
+						dirty, block_csum);
+		if (err) {
 			ext4_warning_inode(ea_inode, "Ensure credits err=%d",
 					   err);
 			continue;
-		}
-		if (err > 0) {
-			err = ext4_journal_get_write_access(handle, bh);
-			if (err) {
-				ext4_warning_inode(ea_inode,
-						"Re-get write access err=%d",
-						err);
-				continue;
-			}
 		}
 
 		err = ext4_xattr_inode_dec_ref(handle, ea_inode);
@@ -1230,7 +1253,6 @@ ext4_xattr_release_block(handle_t *handle, struct inode *inode,
 	if (error)
 		goto out;
 
-retry_ref:
 	lock_buffer(bh);
 	hash = le32_to_cpu(BHDR(bh)->h_hash);
 	ref = le32_to_cpu(BHDR(bh)->h_refcount);
@@ -1240,18 +1262,9 @@ retry_ref:
 		 * This must happen under buffer lock for
 		 * ext4_xattr_block_set() to reliably detect freed block
 		 */
-		if (ea_block_cache) {
-			struct mb_cache_entry *oe;
-
-			oe = mb_cache_entry_delete_or_get(ea_block_cache, hash,
-							  bh->b_blocknr);
-			if (oe) {
-				unlock_buffer(bh);
-				mb_cache_entry_wait_unused(oe);
-				mb_cache_entry_put(ea_block_cache, oe);
-				goto retry_ref;
-			}
-		}
+		if (ea_block_cache)
+			mb_cache_entry_delete(ea_block_cache, hash,
+					      bh->b_blocknr);
 		get_bh(bh);
 		unlock_buffer(bh);
 
@@ -1275,7 +1288,7 @@ retry_ref:
 				ce = mb_cache_entry_get(ea_block_cache, hash,
 							bh->b_blocknr);
 				if (ce) {
-					set_bit(MBE_REUSABLE_B, &ce->e_flags);
+					ce->e_reusable = 1;
 					mb_cache_entry_put(ea_block_cache, ce);
 				}
 			}
@@ -1338,7 +1351,7 @@ static int ext4_xattr_inode_write(handle_t *handle, struct inode *ea_inode,
 	int blocksize = ea_inode->i_sb->s_blocksize;
 	int max_blocks = (bufsize + blocksize - 1) >> ea_inode->i_blkbits;
 	int csize, wsize = 0;
-	int ret = 0, ret2 = 0;
+	int ret = 0;
 	int retries = 0;
 
 retry:
@@ -1365,7 +1378,8 @@ retry:
 
 	block = 0;
 	while (wsize < bufsize) {
-		brelse(bh);
+		if (bh != NULL)
+			brelse(bh);
 		csize = (bufsize - wsize) > blocksize ? blocksize :
 								bufsize - wsize;
 		bh = ext4_getblk(handle, ea_inode, block, 0);
@@ -1395,9 +1409,7 @@ retry:
 	ext4_update_i_disksize(ea_inode, wsize);
 	inode_unlock(ea_inode);
 
-	ret2 = ext4_mark_inode_dirty(handle, ea_inode);
-	if (unlikely(ret2 && !ret))
-		ret = ret2;
+	ext4_mark_inode_dirty(handle, ea_inode);
 
 out:
 	brelse(bh);
@@ -1414,13 +1426,6 @@ static struct inode *ext4_xattr_inode_create(handle_t *handle,
 	struct inode *ea_inode = NULL;
 	uid_t owner[2] = { i_uid_read(inode), i_gid_read(inode) };
 	int err;
-
-	if (inode->i_sb->s_root == NULL) {
-		ext4_warning(inode->i_sb,
-			     "refuse to create EA inode when umounting");
-		WARN_ON(1);
-		return ERR_PTR(-EINVAL);
-	}
 
 	/*
 	 * Let the next inode be the goal, so we try and allocate the EA inode
@@ -1441,9 +1446,6 @@ static struct inode *ext4_xattr_inode_create(handle_t *handle,
 		if (!err)
 			err = ext4_inode_attach_jinode(ea_inode);
 		if (err) {
-			if (ext4_xattr_inode_dec_ref(handle, ea_inode))
-				ext4_warning_inode(ea_inode,
-					"cleanup dec ref error %d", err);
 			iput(ea_inode);
 			return ERR_PTR(err);
 		}
@@ -1481,7 +1483,7 @@ ext4_xattr_inode_cache_find(struct inode *inode, const void *value,
 	WARN_ON_ONCE(ext4_handle_valid(journal_current_handle()) &&
 		     !(current->flags & PF_MEMALLOC_NOFS));
 
-	ea_data = kvmalloc(value_len, GFP_KERNEL);
+	ea_data = ext4_kvmalloc(value_len, GFP_NOFS);
 	if (!ea_data) {
 		mb_cache_entry_put(ea_inode_cache, ce);
 		return NULL;
@@ -1633,7 +1635,7 @@ static int ext4_xattr_set_entry(struct ext4_xattr_info *i,
 		 * If storing the value in an external inode is an option,
 		 * reserve space for xattr entries/names in the external
 		 * attribute block so that a long value does not occupy the
-		 * whole space and prevent further entries being added.
+		 * whole space and prevent futher entries being added.
 		 */
 		if (ext4_has_feature_ea_inode(inode->i_sb) &&
 		    new_size && is_block &&
@@ -1870,8 +1872,6 @@ ext4_xattr_block_set(handle_t *handle, struct inode *inode,
 #define header(x) ((struct ext4_xattr_header *)(x))
 
 	if (s->base) {
-		int offset = (char *)s->here - bs->bh->b_data;
-
 		BUFFER_TRACE(bs->bh, "get_write_access");
 		error = ext4_journal_get_write_access(handle, bs->bh);
 		if (error)
@@ -1886,20 +1886,9 @@ ext4_xattr_block_set(handle_t *handle, struct inode *inode,
 			 * ext4_xattr_block_set() to reliably detect modified
 			 * block
 			 */
-			if (ea_block_cache) {
-				struct mb_cache_entry *oe;
-
-				oe = mb_cache_entry_delete_or_get(ea_block_cache,
-					hash, bs->bh->b_blocknr);
-				if (oe) {
-					/*
-					 * Xattr block is getting reused. Leave
-					 * it alone.
-					 */
-					mb_cache_entry_put(ea_block_cache, oe);
-					goto clone_block;
-				}
-			}
+			if (ea_block_cache)
+				mb_cache_entry_delete(ea_block_cache, hash,
+						      bs->bh->b_blocknr);
 			ea_bdebug(bs->bh, "modifying in-place");
 			error = ext4_xattr_set_entry(i, s, handle, inode,
 						     true /* is_block */);
@@ -1914,47 +1903,50 @@ ext4_xattr_block_set(handle_t *handle, struct inode *inode,
 			if (error)
 				goto cleanup;
 			goto inserted;
-		}
-clone_block:
-		unlock_buffer(bs->bh);
-		ea_bdebug(bs->bh, "cloning");
-		s->base = kmemdup(BHDR(bs->bh), bs->bh->b_size, GFP_NOFS);
-		error = -ENOMEM;
-		if (s->base == NULL)
-			goto cleanup;
-		s->first = ENTRY(header(s->base)+1);
-		header(s->base)->h_refcount = cpu_to_le32(1);
-		s->here = ENTRY(s->base + offset);
-		s->end = s->base + bs->bh->b_size;
+		} else {
+			int offset = (char *)s->here - bs->bh->b_data;
 
-		/*
-		 * If existing entry points to an xattr inode, we need
-		 * to prevent ext4_xattr_set_entry() from decrementing
-		 * ref count on it because the reference belongs to the
-		 * original block. In this case, make the entry look
-		 * like it has an empty value.
-		 */
-		if (!s->not_found && s->here->e_value_inum) {
-			ea_ino = le32_to_cpu(s->here->e_value_inum);
-			error = ext4_xattr_inode_iget(inode, ea_ino,
-				      le32_to_cpu(s->here->e_hash),
-				      &tmp_inode);
-			if (error)
+			unlock_buffer(bs->bh);
+			ea_bdebug(bs->bh, "cloning");
+			s->base = kmalloc(bs->bh->b_size, GFP_NOFS);
+			error = -ENOMEM;
+			if (s->base == NULL)
 				goto cleanup;
+			memcpy(s->base, BHDR(bs->bh), bs->bh->b_size);
+			s->first = ENTRY(header(s->base)+1);
+			header(s->base)->h_refcount = cpu_to_le32(1);
+			s->here = ENTRY(s->base + offset);
+			s->end = s->base + bs->bh->b_size;
 
-			if (!ext4_test_inode_state(tmp_inode,
-					EXT4_STATE_LUSTRE_EA_INODE)) {
-				/*
-				 * Defer quota free call for previous
-				 * inode until success is guaranteed.
-				 */
-				old_ea_inode_quota = le32_to_cpu(
-						s->here->e_value_size);
+			/*
+			 * If existing entry points to an xattr inode, we need
+			 * to prevent ext4_xattr_set_entry() from decrementing
+			 * ref count on it because the reference belongs to the
+			 * original block. In this case, make the entry look
+			 * like it has an empty value.
+			 */
+			if (!s->not_found && s->here->e_value_inum) {
+				ea_ino = le32_to_cpu(s->here->e_value_inum);
+				error = ext4_xattr_inode_iget(inode, ea_ino,
+					      le32_to_cpu(s->here->e_hash),
+					      &tmp_inode);
+				if (error)
+					goto cleanup;
+
+				if (!ext4_test_inode_state(tmp_inode,
+						EXT4_STATE_LUSTRE_EA_INODE)) {
+					/*
+					 * Defer quota free call for previous
+					 * inode until success is guaranteed.
+					 */
+					old_ea_inode_quota = le32_to_cpu(
+							s->here->e_value_size);
+				}
+				iput(tmp_inode);
+
+				s->here->e_value_inum = 0;
+				s->here->e_value_size = 0;
 			}
-			iput(tmp_inode);
-
-			s->here->e_value_inum = 0;
-			s->here->e_value_size = 0;
 		}
 	} else {
 		/* Allocate a buffer where we construct the new block. */
@@ -2021,13 +2013,18 @@ inserted:
 				lock_buffer(new_bh);
 				/*
 				 * We have to be careful about races with
-				 * adding references to xattr block. Once we
-				 * hold buffer lock xattr block's state is
-				 * stable so we can check the additional
-				 * reference fits.
+				 * freeing, rehashing or adding references to
+				 * xattr block. Once we hold buffer lock xattr
+				 * block's state is stable so we can check
+				 * whether the block got freed / rehashed or
+				 * not.  Since we unhash mbcache entry under
+				 * buffer lock when freeing / rehashing xattr
+				 * block, checking whether entry is still
+				 * hashed is reliable. Same rules hold for
+				 * e_reusable handling.
 				 */
-				ref = le32_to_cpu(BHDR(new_bh)->h_refcount) + 1;
-				if (ref > EXT4_XATTR_REFCOUNT_MAX) {
+				if (hlist_bl_unhashed(&ce->e_hash_list) ||
+				    !ce->e_reusable) {
 					/*
 					 * Undo everything and check mbcache
 					 * again.
@@ -2042,9 +2039,10 @@ inserted:
 					new_bh = NULL;
 					goto inserted;
 				}
+				ref = le32_to_cpu(BHDR(new_bh)->h_refcount) + 1;
 				BHDR(new_bh)->h_refcount = cpu_to_le32(ref);
-				if (ref == EXT4_XATTR_REFCOUNT_MAX)
-					clear_bit(MBE_REUSABLE_B, &ce->e_flags);
+				if (ref >= EXT4_XATTR_REFCOUNT_MAX)
+					ce->e_reusable = 0;
 				ea_bdebug(new_bh, "reusing; refcount now=%d",
 					  ref);
 				ext4_xattr_block_csum_set(inode, new_bh);
@@ -2072,10 +2070,18 @@ inserted:
 
 			goal = ext4_group_first_block_no(sb,
 						EXT4_I(inode)->i_block_group);
+
+			/* non-extent files can't have physical blocks past 2^32 */
+			if (!(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)))
+				goal = goal & EXT4_MAX_BLOCK_FILE_PHYS;
+
 			block = ext4_new_meta_blocks(handle, inode, goal, 0,
 						     NULL, &error);
 			if (error)
 				goto cleanup;
+
+			if (!(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)))
+				BUG_ON(block > EXT4_MAX_BLOCK_FILE_PHYS);
 
 			ea_idebug(inode, "creating block %llu",
 				  (unsigned long long)block);
@@ -2182,9 +2188,8 @@ int ext4_xattr_ibody_find(struct inode *inode, struct ext4_xattr_info *i,
 	struct ext4_inode *raw_inode;
 	int error;
 
-	if (!EXT4_INODE_HAS_XATTR_SPACE(inode))
+	if (EXT4_I(inode)->i_extra_isize == 0)
 		return 0;
-
 	raw_inode = ext4_raw_inode(&is->iloc);
 	header = IHDR(inode, raw_inode);
 	is->s.base = is->s.first = IFIRST(header);
@@ -2204,7 +2209,7 @@ int ext4_xattr_ibody_find(struct inode *inode, struct ext4_xattr_info *i,
 	return 0;
 }
 
-int ext4_xattr_ibody_set(handle_t *handle, struct inode *inode,
+int ext4_xattr_ibody_inline_set(handle_t *handle, struct inode *inode,
 				struct ext4_xattr_info *i,
 				struct ext4_xattr_ibody_find *is)
 {
@@ -2212,9 +2217,32 @@ int ext4_xattr_ibody_set(handle_t *handle, struct inode *inode,
 	struct ext4_xattr_search *s = &is->s;
 	int error;
 
-	if (!EXT4_INODE_HAS_XATTR_SPACE(inode))
+	if (EXT4_I(inode)->i_extra_isize == 0)
 		return -ENOSPC;
+	error = ext4_xattr_set_entry(i, s, handle, inode, false /* is_block */);
+	if (error)
+		return error;
+	header = IHDR(inode, ext4_raw_inode(&is->iloc));
+	if (!IS_LAST_ENTRY(s->first)) {
+		header->h_magic = cpu_to_le32(EXT4_XATTR_MAGIC);
+		ext4_set_inode_state(inode, EXT4_STATE_XATTR);
+	} else {
+		header->h_magic = cpu_to_le32(0);
+		ext4_clear_inode_state(inode, EXT4_STATE_XATTR);
+	}
+	return 0;
+}
 
+static int ext4_xattr_ibody_set(handle_t *handle, struct inode *inode,
+				struct ext4_xattr_info *i,
+				struct ext4_xattr_ibody_find *is)
+{
+	struct ext4_xattr_ibody_header *header;
+	struct ext4_xattr_search *s = &is->s;
+	int error;
+
+	if (EXT4_I(inode)->i_extra_isize == 0)
+		return -ENOSPC;
 	error = ext4_xattr_set_entry(i, s, handle, inode, false /* is_block */);
 	if (error)
 		return error;
@@ -2317,7 +2345,7 @@ ext4_xattr_set_handle(handle_t *handle, struct inode *inode, int name_index,
 						   flags & XATTR_CREATE);
 		brelse(bh);
 
-		if (jbd2_handle_buffer_credits(handle) < credits) {
+		if (!ext4_handle_has_enough_credits(handle, credits)) {
 			error = -ENOSPC;
 			goto cleanup;
 		}
@@ -2416,7 +2444,6 @@ retry_inode:
 		if (IS_SYNC(inode))
 			ext4_handle_sync(handle);
 	}
-	ext4_fc_mark_ineligible(inode->i_sb, EXT4_FC_REASON_XATTR);
 
 cleanup:
 	brelse(is.iloc.bh);
@@ -2494,7 +2521,6 @@ retry:
 		if (error == 0)
 			error = error2;
 	}
-	ext4_fc_mark_ineligible(inode->i_sb, EXT4_FC_REASON_XATTR);
 
 	return error;
 }
@@ -2547,8 +2573,9 @@ static int ext4_xattr_move_to_block(handle_t *handle, struct inode *inode,
 
 	is = kzalloc(sizeof(struct ext4_xattr_ibody_find), GFP_NOFS);
 	bs = kzalloc(sizeof(struct ext4_xattr_block_find), GFP_NOFS);
+	buffer = kmalloc(value_size, GFP_NOFS);
 	b_entry_name = kmalloc(entry->e_name_len + 1, GFP_NOFS);
-	if (!is || !bs || !b_entry_name) {
+	if (!is || !bs || !buffer || !b_entry_name) {
 		error = -ENOMEM;
 		goto out;
 	}
@@ -2560,18 +2587,12 @@ static int ext4_xattr_move_to_block(handle_t *handle, struct inode *inode,
 
 	/* Save the entry name and the entry value */
 	if (entry->e_value_inum) {
-		buffer = kvmalloc(value_size, GFP_NOFS);
-		if (!buffer) {
-			error = -ENOMEM;
-			goto out;
-		}
-
 		error = ext4_xattr_inode_get(inode, entry, buffer, value_size);
 		if (error)
 			goto out;
 	} else {
 		size_t value_offs = le16_to_cpu(entry->e_value_offs);
-		buffer = (void *)IFIRST(header) + value_offs;
+		memcpy(buffer, (void *)IFIRST(header) + value_offs, value_size);
 	}
 
 	memcpy(b_entry_name, entry->e_name, entry->e_name_len);
@@ -2586,26 +2607,25 @@ static int ext4_xattr_move_to_block(handle_t *handle, struct inode *inode,
 	if (error)
 		goto out;
 
+	/* Remove the chosen entry from the inode */
+	error = ext4_xattr_ibody_set(handle, inode, &i, is);
+	if (error)
+		goto out;
+
 	i.value = buffer;
 	i.value_len = value_size;
 	error = ext4_xattr_block_find(inode, &i, bs);
 	if (error)
 		goto out;
 
-	/* Move ea entry from the inode into the block */
+	/* Add entry which was removed from the inode into the block */
 	error = ext4_xattr_block_set(handle, inode, &i, bs);
 	if (error)
 		goto out;
-
-	/* Remove the chosen entry from the inode */
-	i.value = NULL;
-	i.value_len = 0;
-	error = ext4_xattr_ibody_set(handle, inode, &i, is);
-
+	error = 0;
 out:
 	kfree(b_entry_name);
-	if (entry->e_value_inum && buffer)
-		kvfree(buffer);
+	kfree(buffer);
 	if (is)
 		brelse(is->iloc.bh);
 	if (bs)
@@ -2853,9 +2873,11 @@ int ext4_xattr_delete_inode(handle_t *handle, struct inode *inode,
 	struct inode *ea_inode;
 	int error;
 
-	error = ext4_journal_ensure_credits(handle, extra_credits,
-			ext4_free_metadata_revoke_credits(inode->i_sb, 1));
-	if (error < 0) {
+	error = ext4_xattr_ensure_credits(handle, inode, extra_credits,
+					  NULL /* bh */,
+					  false /* dirty */,
+					  false /* block_csum */);
+	if (error) {
 		EXT4_ERROR_INODE(inode, "ensure credits (error %d)", error);
 		goto cleanup;
 	}
@@ -2890,11 +2912,9 @@ int ext4_xattr_delete_inode(handle_t *handle, struct inode *inode,
 		bh = ext4_sb_bread(inode->i_sb, EXT4_I(inode)->i_file_acl, REQ_PRIO);
 		if (IS_ERR(bh)) {
 			error = PTR_ERR(bh);
-			if (error == -EIO) {
-				EXT4_ERROR_INODE_ERR(inode, EIO,
-						     "block %llu read error",
-						     EXT4_I(inode)->i_file_acl);
-			}
+			if (error == -EIO)
+				EXT4_ERROR_INODE(inode, "block %llu read error",
+						 EXT4_I(inode)->i_file_acl);
 			bh = NULL;
 			goto cleanup;
 		}
@@ -2933,7 +2953,6 @@ int ext4_xattr_delete_inode(handle_t *handle, struct inode *inode,
 					 error);
 			goto cleanup;
 		}
-		ext4_fc_mark_ineligible(inode->i_sb, EXT4_FC_REASON_XATTR);
 	}
 	error = 0;
 cleanup:

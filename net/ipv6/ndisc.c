@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Neighbour Discovery for IPv6
  *	Linux INET6 implementation
@@ -6,6 +5,11 @@
  *	Authors:
  *	Pedro Roque		<roque@di.fc.ul.pt>
  *	Mike Shaver		<shaver@ingenia.com>
+ *
+ *	This program is free software; you can redistribute it and/or
+ *      modify it under the terms of the GNU General Public License
+ *      as published by the Free Software Foundation; either version
+ *      2 of the License, or (at your option) any later version.
  */
 
 /*
@@ -73,15 +77,12 @@ static u32 ndisc_hash(const void *pkey,
 		      const struct net_device *dev,
 		      __u32 *hash_rnd);
 static bool ndisc_key_eq(const struct neighbour *neigh, const void *pkey);
-static bool ndisc_allow_add(const struct net_device *dev,
-			    struct netlink_ext_ack *extack);
 static int ndisc_constructor(struct neighbour *neigh);
 static void ndisc_solicit(struct neighbour *neigh, struct sk_buff *skb);
 static void ndisc_error_report(struct neighbour *neigh, struct sk_buff *skb);
 static int pndisc_constructor(struct pneigh_entry *n);
 static void pndisc_destructor(struct pneigh_entry *n);
 static void pndisc_redo(struct sk_buff *skb);
-static int ndisc_is_multicast(const void *pkey);
 
 static const struct neigh_ops ndisc_generic_ops = {
 	.family =		AF_INET6,
@@ -116,8 +117,6 @@ struct neigh_table nd_tbl = {
 	.pconstructor =	pndisc_constructor,
 	.pdestructor =	pndisc_destructor,
 	.proxy_redo =	pndisc_redo,
-	.is_multicast =	ndisc_is_multicast,
-	.allow_add  =   ndisc_allow_add,
 	.id =		"ndisc_cache",
 	.parms = {
 		.tbl			= &nd_tbl,
@@ -393,20 +392,6 @@ static void pndisc_destructor(struct pneigh_entry *n)
 		return;
 	addrconf_addr_solict_mult(addr, &maddr);
 	ipv6_dev_mc_dec(dev, &maddr);
-}
-
-/* called with rtnl held */
-static bool ndisc_allow_add(const struct net_device *dev,
-			    struct netlink_ext_ack *extack)
-{
-	struct inet6_dev *idev = __in6_dev_get(dev);
-
-	if (!idev || idev->cnf.disable_ipv6) {
-		NL_SET_ERR_MSG(extack, "IPv6 is disabled on this device");
-		return false;
-	}
-
-	return true;
 }
 
 static struct sk_buff *ndisc_alloc_skb(struct net_device *dev,
@@ -1246,6 +1231,16 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 		in6_dev->if_flags |= IF_RA_RCVD;
 	}
 
+	if ((sysctl_optr == MTK_IPV6_VZW_ALL ||
+	     sysctl_optr == MTK_IPV6_ATT_ALL ||
+         sysctl_optr == MTK_IPV6_TMO_ALL ||
+	     sysctl_optr == MTK_IPV6_EX_RS_INTERVAL) &&
+	    (strncmp(in6_dev->dev->name, "ccmni", 2) == 0)) {
+		/*add for VzW feature : remove IF_RS_VZW_SENT flag*/
+		if (in6_dev->if_flags & IF_RS_VZW_SENT)
+			in6_dev->if_flags &= ~IF_RS_VZW_SENT;
+	}
+
 	/*
 	 * Remember the managed/otherconf flags from most recently
 	 * received RA message (RFC 2462) -- yoshfuji
@@ -1289,11 +1284,12 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 	    !in6_dev->cnf.accept_ra_rtr_pref)
 		pref = ICMPV6_ROUTER_PREF_MEDIUM;
 #endif
-	/* routes added from RAs do not use nexthop objects */
+
 	rt = rt6_get_dflt_router(net, &ipv6_hdr(skb)->saddr, skb->dev);
+
 	if (rt) {
-		neigh = ip6_neigh_lookup(&rt->fib6_nh->fib_nh_gw6,
-					 rt->fib6_nh->fib_nh_dev, NULL,
+		neigh = ip6_neigh_lookup(&rt->fib6_nh.nh_gw,
+					 rt->fib6_nh.nh_dev, NULL,
 					  &ipv6_hdr(skb)->saddr);
 		if (!neigh) {
 			ND_PRINTK(0, err,
@@ -1304,7 +1300,7 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 		}
 	}
 	if (rt && lifetime == 0) {
-		ip6_del_rt(net, rt, false);
+		ip6_del_rt(net, rt);
 		rt = NULL;
 	}
 
@@ -1322,8 +1318,8 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 			return;
 		}
 
-		neigh = ip6_neigh_lookup(&rt->fib6_nh->fib_nh_gw6,
-					 rt->fib6_nh->fib_nh_dev, NULL,
+		neigh = ip6_neigh_lookup(&rt->fib6_nh.nh_gw,
+					 rt->fib6_nh.nh_dev, NULL,
 					  &ipv6_hdr(skb)->saddr);
 		if (!neigh) {
 			ND_PRINTK(0, err,
@@ -1361,8 +1357,8 @@ skip_defrtr:
 
 		if (rtime && rtime/1000 < MAX_SCHEDULE_TIMEOUT/HZ) {
 			rtime = (rtime*HZ)/1000;
-			if (rtime < HZ/100)
-				rtime = HZ/100;
+			if (rtime < HZ/10)
+				rtime = HZ/10;
 			NEIGH_VAR_SET(in6_dev->nd_parms, RETRANS_TIME, rtime);
 			in6_dev->tstamp = jiffies;
 			send_ifinfo_notify = true;
@@ -1492,6 +1488,11 @@ skip_routeinfo:
 		memcpy(&n, ((u8 *)(ndopts.nd_opts_mtu+1))+2, sizeof(mtu));
 		mtu = ntohl(n);
 
+		if (in6_dev->cnf.ra_mtu != mtu) {
+			in6_dev->cnf.ra_mtu = mtu;
+			pr_info("[mtk_net]update ra_mtu to %d\n", in6_dev->cnf.ra_mtu);
+		}
+
 		if (mtu < IPV6_MIN_MTU || mtu > skb->dev->mtu) {
 			ND_PRINTK(2, warn, "RA: invalid mtu: %d\n", mtu);
 		} else if (in6_dev->cnf.mtu6 != mtu) {
@@ -1549,7 +1550,7 @@ static void ndisc_redirect_rcv(struct sk_buff *skb)
 
 	if (!ndopts.nd_opts_rh) {
 		ip6_redirect_no_header(skb, dev_net(skb->dev),
-					skb->dev->ifindex);
+					skb->dev->ifindex, 0);
 		return;
 	}
 
@@ -1708,11 +1709,6 @@ static void pndisc_redo(struct sk_buff *skb)
 	kfree_skb(skb);
 }
 
-static int ndisc_is_multicast(const void *pkey)
-{
-	return ipv6_addr_is_multicast((struct in6_addr *)pkey);
-}
-
 static bool ndisc_suppress_frag_ndisc(struct sk_buff *skb)
 {
 	struct inet6_dev *idev = __in6_dev_get(skb->dev);
@@ -1790,7 +1786,7 @@ static int ndisc_netdev_event(struct notifier_block *this, unsigned long event, 
 	case NETDEV_CHANGEADDR:
 		neigh_changeaddr(&nd_tbl, dev);
 		fib6_run_gc(0, net, false);
-		fallthrough;
+		/* fallthrough */
 	case NETDEV_UP:
 		idev = in6_dev_get(dev);
 		if (!idev)
@@ -1804,8 +1800,6 @@ static int ndisc_netdev_event(struct notifier_block *this, unsigned long event, 
 		change_info = ptr;
 		if (change_info->flags_changed & IFF_NOARP)
 			neigh_changeaddr(&nd_tbl, dev);
-		if (!netif_carrier_ok(dev))
-			neigh_carrier_down(&nd_tbl, dev);
 		break;
 	case NETDEV_DOWN:
 		neigh_ifdown(&nd_tbl, dev);
@@ -1842,8 +1836,7 @@ static void ndisc_warn_deprecated_sysctl(struct ctl_table *ctl,
 	}
 }
 
-int ndisc_ifinfo_sysctl_change(struct ctl_table *ctl, int write, void *buffer,
-		size_t *lenp, loff_t *ppos)
+int ndisc_ifinfo_sysctl_change(struct ctl_table *ctl, int write, void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct net_device *dev = ctl->extra1;
 	struct inet6_dev *idev;

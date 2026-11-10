@@ -1,22 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Goodix Touchscreen Driver
- * Core layer of touchdriver architecture.
- *
- * Copyright (C) 2015 - 2016 Goodix, Inc.
- * Authors:  Yulong Cai <caiyulong@goodix.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be a reference
- * to you, when you are integrating the GOODiX's CTP IC into your system,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 #include "goodix_cfg_bin.h"
 #define CFG_TAG ""
 int goodix_start_cfg_bin(struct goodix_ts_core *ts_core)
@@ -292,10 +277,15 @@ int goodix_cfg_bin_proc(void *data)
 	goodix_modules.core_exit = false;
 	/*complete_all(&goodix_modules.core_comp);*/
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	core_data->disp_notifier.notifier_call = goodix_ts_disp_notifier_callback;
-	if (mtk_disp_notifier_register("Touch-gt9886", &core_data->disp_notifier))
-		ts_err("Failed to register disp notifier client:%d", r);
+#ifdef CONFIG_FB
+	core_data->fb_notifier.notifier_call = goodix_ts_fb_notifier_callback;
+	if (fb_register_client(&core_data->fb_notifier))
+		ts_err("Failed to register fb notifier client:%d", r);
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	core_data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	core_data->early_suspend.resume = goodix_ts_lateresume;
+	core_data->early_suspend.suspend = goodix_ts_earlysuspend;
+	register_early_suspend(&core_data->early_suspend);
 #endif
 
 	/* esd protector */
@@ -554,20 +544,15 @@ int goodix_read_cfg_bin(struct device *dev, struct goodix_cfg_bin *cfg_bin)
 {
 	int r;
 	const struct firmware *firmware = NULL;
-	char cfg_bin_name[128] = {0};
+	char cfg_bin_name[32] = {0};
 	int i = 0;
 
 	/*get cfg_bin_name*/
-	if (gt9886_find_touch_node == 1) {
-		strncat(panel_config_buf, ".bin", 4);
-		strncpy(cfg_bin_name, panel_config_buf, sizeof(cfg_bin_name));
-	} else {
-		r = snprintf(cfg_bin_name, sizeof(cfg_bin_name), "%s%s.bin",
-			TS_DEFAULT_CFG_BIN, gt9886_config_buf);
-		if (r >= sizeof(cfg_bin_name)) {
-			ts_err("get cfg_bin name FAILED!!!");
-			goto exit;
-		}
+	r = snprintf(cfg_bin_name, sizeof(cfg_bin_name), "%s%s.bin",
+		TS_DEFAULT_CFG_BIN, gt9886_config_buf);
+	if (r >= sizeof(cfg_bin_name)) {
+		ts_err("get cfg_bin name FAILED!!!");
+		goto exit;
 	}
 	ts_info("cfg_bin_name:%s", cfg_bin_name);
 
@@ -577,7 +562,7 @@ int goodix_read_cfg_bin(struct device *dev, struct goodix_cfg_bin *cfg_bin)
 			ts_err("Cfg_bin image [%s] not available,error:%d,"
 				CFG_TAG"try_times:%d", cfg_bin_name, r, i + 1);
 
-			msleep(1000);
+			msleep(3000);
 		} else {
 			ts_info("Cfg_bin image [%s] is ready, try_times:%d",
 					cfg_bin_name, i + 1);

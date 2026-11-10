@@ -13,7 +13,7 @@
 #include <musb_dr.h>
 #include <musb_host.h>
 #include <musb_gadget.h>
-#if IS_ENABLED(CONFIG_DEBUG_FS)
+#ifdef CONFIG_DEBUG_FS
 #include <musb_debug.h>
 #endif
 
@@ -63,7 +63,7 @@ int mt_usb_set_vbus(struct otg_switch_mtk *otg_sx, int is_on)
 	if (is_on) {
 		ret = regulator_enable(vbus);
 		if (ret) {
-			dev_info(musb->controller, "vbus regulator enable failed\n");
+			dev_err(musb->controller, "vbus regulator enable failed\n");
 			return ret;
 		}
 	} else {
@@ -137,7 +137,7 @@ static void mt_usb_set_mailbox(struct otg_switch_mtk *otg_sx,
 		mt_usb_connect();
 		break;
 	default:
-		dev_info(musb->controller, "invalid state\n");
+		dev_err(musb->controller, "invalid state\n");
 	}
 }
 
@@ -207,7 +207,7 @@ static int mt_usb_extcon_register(struct otg_switch_mtk *otg_sx)
 	ret = devm_extcon_register_notifier(musb->controller, edev, EXTCON_USB,
 					&otg_sx->vbus_nb);
 	if (ret < 0) {
-		dev_info(musb->controller, "failed to register notifier for USB\n");
+		dev_err(musb->controller, "failed to register notifier for USB\n");
 		return ret;
 	}
 
@@ -215,7 +215,7 @@ static int mt_usb_extcon_register(struct otg_switch_mtk *otg_sx)
 	ret = devm_extcon_register_notifier(musb->controller, edev, EXTCON_USB_HOST,
 					&otg_sx->id_nb);
 	if (ret < 0) {
-		dev_info(musb->controller, "failed to register notifier for USB-HOST\n");
+		dev_err(musb->controller, "failed to register notifier for USB-HOST\n");
 		return ret;
 	}
 
@@ -254,11 +254,10 @@ void mt_usb_mode_switch(struct musb *musb, int to_host)
 }
 EXPORT_SYMBOL(mt_usb_mode_switch);
 
-static int mt_usb_role_sx_set(struct usb_role_switch *sw, enum usb_role role)
+static int mt_usb_role_sx_set(struct device *dev, enum usb_role role)
 {
-	struct mt_usb_glue *glue = usb_role_switch_get_drvdata(sw);
+	struct mt_usb_glue *glue = dev_get_drvdata(dev);
 	struct otg_switch_mtk *otg_sx = &glue->otg_sx;
-	struct device *dev = glue->dev;
 	bool id_event, vbus_event;
 	static bool first_init = true;
 
@@ -269,7 +268,7 @@ static int mt_usb_role_sx_set(struct usb_role_switch *sw, enum usb_role role)
 	if ((role == USB_ROLE_DEVICE && otg_sx->latest_role == USB_ROLE_HOST) ||
 		(role == USB_ROLE_HOST && otg_sx->latest_role == USB_ROLE_DEVICE)) {
 		DBG(0, "force USB_ROLE_NONE transit state.\n");
-		mt_usb_role_sx_set(sw, USB_ROLE_NONE);
+		mt_usb_role_sx_set(dev, USB_ROLE_NONE);
 	}
 
 	otg_sx->latest_role = role;
@@ -282,7 +281,7 @@ static int mt_usb_role_sx_set(struct usb_role_switch *sw, enum usb_role role)
 	id_event = (role == USB_ROLE_HOST);
 	vbus_event = (role == USB_ROLE_DEVICE);
 
-#if IS_ENABLED(CONFIG_MTK_UART_USB_SWITCH)
+#ifdef CONFIG_MTK_UART_USB_SWITCH
 	in_uart_mode = usb_phy_check_in_uart_mode();
 	if (in_uart_mode) {
 		DBG(0, "At UART mode. Switch to USB is not support\n");
@@ -295,9 +294,7 @@ static int mt_usb_role_sx_set(struct usb_role_switch *sw, enum usb_role role)
 	if (!!(otg_sx->sw_state & MUSB_VBUS_VALID) ^ vbus_event) {
 		if (vbus_event) {
 			dev_info(dev, "%s: if vbus_event true\n", __func__);
-			/* phy_set_mode(glue->phy, PHY_MODE_USB_DEVICE); */
-			/* PHY mode will be set in do_connection_work */
-			set_usb_phy_clear();
+			phy_set_mode(glue->phy, PHY_MODE_USB_DEVICE);
 			phy_power_on(glue->phy);
 			mt_usb_set_mailbox(otg_sx, MUSB_VBUS_VALID);
 		} else {
@@ -334,9 +331,9 @@ static int mt_usb_role_sx_set(struct usb_role_switch *sw, enum usb_role role)
 	return 0;
 }
 
-static enum usb_role mt_usb_role_sx_get(struct usb_role_switch *sw)
+static enum usb_role mt_usb_role_sx_get(struct device *dev)
 {
-	struct mt_usb_glue *glue = usb_role_switch_get_drvdata(sw);
+	struct mt_usb_glue *glue = dev_get_drvdata(dev);
 	struct musb *musb = glue->mtk_musb;
 	enum usb_role role;
 
@@ -357,14 +354,12 @@ static int mt_usb_role_sw_register(struct otg_switch_mtk *otg_sx)
 
 	role_sx_desc.set = mt_usb_role_sx_set;
 	role_sx_desc.get = mt_usb_role_sx_get;
-	role_sx_desc.fwnode = dev_fwnode(glue->dev);
-	role_sx_desc.driver_data = glue;
 	otg_sx->role_sw = usb_role_switch_register(glue->dev, &role_sx_desc);
 
 	if (IS_ERR(otg_sx->role_sw))
 		return PTR_ERR(otg_sx->role_sw);
 
-	mt_usb_role_sx_set(otg_sx->role_sw, USB_ROLE_NONE);
+	mt_usb_role_sx_set(glue->dev, USB_ROLE_NONE);
 	musb->usb_connected = 0;
 
 	return 0;
@@ -378,6 +373,9 @@ static ssize_t cmode_store(struct device *dev,
 	struct otg_switch_mtk *otg_sx = mtk_musb->otg_sx;
 	enum usb_role role = otg_sx->latest_role;
 
+	/* note: can't use container_of() by mtk_musb glue, use otg_sx here */
+	struct mt_usb_glue *glue =
+		container_of(otg_sx, struct mt_usb_glue, otg_sx);
 	int mode;
 
 	if (kstrtoint(buf, 10, &mode))
@@ -406,7 +404,7 @@ static ssize_t cmode_store(struct device *dev,
 		/* switch operation mode to normal temporarily */
 		otg_sx->op_mode = MUSB_DR_OPERATION_NORMAL;
 		/* switch usb role */
-		mt_usb_role_sx_set(otg_sx->role_sw, otg_sx->latest_role);
+		mt_usb_role_sx_set(glue->dev, otg_sx->latest_role);
 		/* update operation mode */
 		otg_sx->op_mode = mode;
 		/* restore role */
@@ -459,7 +457,7 @@ int mt_usb_otg_switch_init(struct mt_usb_glue *glue)
 	if (ret)
 		dev_info(mtk_musb->controller, "error creating sysfs attributes\n");
 
-#if IS_ENABLED(CONFIG_DEBUG_FS)
+#ifdef CONFIG_DEBUG_FS
 	if (otg_sx->manual_drd_enabled)
 		musb_dr_debugfs_init(mtk_musb);
 #endif

@@ -16,7 +16,6 @@
 #include <linux/cdev.h>
 #include <linux/kthread.h>
 #include <linux/timer.h>
-#include <linux/rpmsg.h>
 
 #include "edma_dbgfs.h"
 #include "edma_driver.h"
@@ -58,8 +57,9 @@ int edma_initialize(struct edma_device *edma_device)
 		edma_sub->power_state = EDMA_POWER_OFF;
 		mutex_init(&edma_sub->cmd_mutex);
 		init_waitqueue_head(&edma_sub->cmd_wait);
-		if (sprintf(edma_sub->sub_name, "edma%d", edma_sub->sub) < 0)
-			LOG_ERR("sprintf error\n");
+		if (snprintf(edma_sub->sub_name, sizeof(edma_sub->sub_name),
+			"edma%d", edma_sub->sub) < 0)
+			pr_notice("edma_sub->sub_name cop fail!\n");
 	}
 
 	return ret;
@@ -121,7 +121,6 @@ int edma_send_cmd(int cmd, void *hnd, struct apusys_device *adev)
 	case APUSYS_CMD_POWERON:
 		/*pre-power on*/
 		return edma_power_on(edma_sub);
-
 	case APUSYS_CMD_POWERDOWN:
 		//return edma_power_off(edma_sub, 1);
 		break;
@@ -130,34 +129,18 @@ int edma_send_cmd(int cmd, void *hnd, struct apusys_device *adev)
 	case APUSYS_CMD_SUSPEND:
 		return edma_power_off(edma_sub, 1);
 	case APUSYS_CMD_EXECUTE:{
-			struct apusys_cmd_handle *cmd_hnd;
+			struct apusys_cmd_hnd *cmd_hnd;
 			struct edma_ext *edma_ext;
 
 			if (hnd == NULL)
 				break;
 
-			cmd_hnd = (struct apusys_cmd_handle *)hnd;
-			if (cmd_hnd->cmdbufs == 0) {
-				LOG_ERR("%s cmd_hnd->cmdbufs == 0 error\n", __func__);
+			cmd_hnd = (struct apusys_cmd_hnd *)hnd;
+			if (cmd_hnd->kva == 0 ||
+				cmd_hnd->size != sizeof(struct edma_ext))
 				break;
-			}
 
-			if (cmd_hnd->num_cmdbufs < 2) {
-				LOG_ERR("%s num_cmdbufs = %d error\n", __func__, cmd_hnd->num_cmdbufs);				
-				break;
-			}
-
-			if (cmd_hnd->cmdbufs[0].size != sizeof(struct edma_ext)) {
-				LOG_ERR("%s cmdHnd->cmdbufs[0].size = %d error\n", __func__, cmd_hnd->cmdbufs[0].size);
-				break;
-			}
-			edma_ext = (struct edma_ext *)cmd_hnd->cmdbufs[0].kva;
-
-			edma_ext->reg_addr = (u32)apusys_mem_query_iova((uint64_t)cmd_hnd->cmdbufs[1].kva);
-
-			LOG_INF("%s cmdbufs[1].kva = %p\n", __func__, cmd_hnd->cmdbufs[1].kva);
-
-			LOG_INF("%s edma_ext.reg_addr = 0x%x\n", __func__, edma_ext->reg_addr);
+			edma_ext = (struct edma_ext *)cmd_hnd->kva;
 
 			result = edma_execute(edma_sub, edma_ext);
 
@@ -245,8 +228,6 @@ static int edma_setup_resource(struct platform_device *pdev,
 	struct device *dev = &pdev->dev;
 	struct device_node *sub_node;
 	struct platform_device *sub_pdev;
-	struct edma_plat_drv *drv;
-
 	int i, ret;
 
 	ret = of_property_read_u32(dev->of_node, "sub_nr",
@@ -291,13 +272,6 @@ static int edma_setup_resource(struct platform_device *pdev,
 		edma_sub->adev.private = edma_sub;
 		edma_sub->adev.send_cmd = edma_send_cmd;
 		edma_sub->adev.idx = i;
-
-		drv = (struct edma_plat_drv *)edma_sub->plat_drv;
-		if (drv != NULL) {
-			edma_sub->adev.meta_data[0] = drv->version;
-			dev_notice(dev, "drv->version = %d\n",
-						drv->version);
-		}
 		ret = apusys_register_device(&edma_sub->adev);
 		if (ret) {
 			dev_notice(dev,
@@ -305,6 +279,7 @@ static int edma_setup_resource(struct platform_device *pdev,
 			return -EPROBE_DEFER;
 		}
 	}
+
 	apu_power_device_register(EDMA, pdev);
 
 	return 0;
@@ -331,7 +306,6 @@ static int edma_probe(struct platform_device *pdev)
 #ifdef _EDMA_DEV
 	if (edma_reg_chardev(edma_device) == 0) {
 		/* Create class register */
-
 		edma_class = class_create(THIS_MODULE, EDMA_DEV_NAME);
 		if (IS_ERR(edma_class)) {
 			ret = PTR_ERR(edma_class);
@@ -349,6 +323,7 @@ static int edma_probe(struct platform_device *pdev)
 				EDMA_DEV_NAME, ret);
 			goto dev_out;
 		}
+
 		platform_set_drvdata(pdev, edma_device);
 		dev_set_drvdata(dev, edma_device);
 		edma_create_sysfs(dev);
@@ -404,13 +379,11 @@ static struct platform_driver edma_driver = {
 	}
 };
 
-int edma_init(struct apusys_core_info *info)
+static int __init edma_init(void)
 {
 	int ret = 0;
 
 	pr_info("%s in\n", __func__);
-
-	edma_rv_setup(info);
 
 	if (!apusys_power_check()) {
 		pr_info("%s: edma is disabled by apusys\n", __func__);
@@ -437,8 +410,11 @@ err_unreg_edma_sub:
 	return ret;
 }
 
-void edma_exit(void)
+static void __exit edma_exit(void)
 {
 	platform_driver_unregister(&edma_driver);
 	platform_driver_unregister(&mtk_edma_sub_driver);
 }
+
+module_init(edma_init);
+module_exit(edma_exit);

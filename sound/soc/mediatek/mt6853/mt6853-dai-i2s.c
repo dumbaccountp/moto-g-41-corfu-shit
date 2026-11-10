@@ -125,7 +125,7 @@ static int mt6853_i2s_hd_get(struct snd_kcontrol *kcontrol,
 	i2s_priv = get_i2s_priv_by_name(afe, kcontrol->id.name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return -EINVAL;
 	}
 
@@ -154,7 +154,7 @@ static int mt6853_i2s_hd_set(struct snd_kcontrol *kcontrol,
 	i2s_priv = get_i2s_priv_by_name(afe, kcontrol->id.name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return -EINVAL;
 	}
 
@@ -204,8 +204,6 @@ static const struct snd_kcontrol_new i2s3_out_mux_control =
 
 static const struct snd_kcontrol_new i2s5_out_mux_control =
 	SOC_DAPM_ENUM("I2S5 Out Select", i2s_mux_map_enum);
-
-
 /* Tinyconn Mux */
 enum {
 	TINYCONN_CH1_MUX_DL1 = 0x0,
@@ -321,6 +319,7 @@ static const struct snd_kcontrol_new mtk_i2s3_ch1_mix[] = {
 	SOC_DAPM_SINGLE_AUTODISABLE("DL6_CH1", AFE_CONN0_1, I_DL6_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL4_CH1", AFE_CONN0_1, I_DL4_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL5_CH1", AFE_CONN0_1, I_DL5_CH1, 1, 0),
+	SOC_DAPM_SINGLE_AUTODISABLE("DL7_CH1", AFE_CONN0_1, I_DL7_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL8_CH1", AFE_CONN0_1, I_DL8_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL9_CH1", AFE_CONN0_1, I_DL9_CH1, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("GAIN1_OUT_CH1", AFE_CONN0,
@@ -345,6 +344,7 @@ static const struct snd_kcontrol_new mtk_i2s3_ch2_mix[] = {
 	SOC_DAPM_SINGLE_AUTODISABLE("DL6_CH2", AFE_CONN1_1, I_DL6_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL4_CH2", AFE_CONN1_1, I_DL4_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL5_CH2", AFE_CONN1_1, I_DL5_CH2, 1, 0),
+	SOC_DAPM_SINGLE_AUTODISABLE("DL7_CH2", AFE_CONN1_1, I_DL7_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL8_CH2", AFE_CONN1_1, I_DL8_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("DL9_CH2", AFE_CONN1_1, I_DL9_CH2, 1, 0),
 	SOC_DAPM_SINGLE_AUTODISABLE("GAIN1_OUT_CH2", AFE_CONN1,
@@ -471,7 +471,7 @@ static int mtk_i2s_en_event(struct snd_soc_dapm_widget *w,
 	i2s_priv = get_i2s_priv_by_name(afe, w->name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return -EINVAL;
 	}
 
@@ -596,7 +596,7 @@ static int mtk_mclk_en_event(struct snd_soc_dapm_widget *w,
 	i2s_priv = get_i2s_priv_by_name(afe, w->name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return -EINVAL;
 	}
 
@@ -739,7 +739,6 @@ static const struct snd_soc_dapm_widget mtk_dai_i2s_widgets[] = {
 			 SND_SOC_NOPM, 0, 0, &i2s3_out_mux_control),
 	SND_SOC_DAPM_MUX("I2S5_Out_Mux",
 			 SND_SOC_NOPM, 0, 0, &i2s5_out_mux_control),
-
 	SND_SOC_DAPM_INPUT("I2S_DUMMY_IN"),
 	SND_SOC_DAPM_MUX("I2S0_In_Mux",
 			 SND_SOC_NOPM, 0, 0, &i2s0_in_mux_control),
@@ -762,7 +761,7 @@ static int mtk_afe_i2s_share_connect(struct snd_soc_dapm_widget *source,
 	i2s_priv = get_i2s_priv_by_name(afe, sink->name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return 0;
 	}
 
@@ -783,7 +782,7 @@ static int mtk_afe_i2s_hd_connect(struct snd_soc_dapm_widget *source,
 	i2s_priv = get_i2s_priv_by_name(afe, sink->name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return 0;
 	}
 
@@ -814,7 +813,7 @@ static int mtk_afe_i2s_apll_connect(struct snd_soc_dapm_widget *source,
 	i2s_priv = get_i2s_priv_by_name(afe, w->name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return 0;
 	}
 
@@ -838,7 +837,7 @@ static int mtk_afe_i2s_mclk_connect(struct snd_soc_dapm_widget *source,
 	i2s_priv = get_i2s_priv_by_name(afe, sink->name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return 0;
 	}
 
@@ -868,7 +867,7 @@ static int mtk_afe_mclk_apll_connect(struct snd_soc_dapm_widget *source,
 	i2s_priv = get_i2s_priv_by_name(afe, w->name);
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return 0;
 	}
 
@@ -893,7 +892,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S0", NULL, I2S2_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S0", NULL, I2S3_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S0", NULL, I2S5_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
-
 	{I2S0_HD_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_i2s_apll_connect},
 	{I2S0_HD_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_i2s_apll_connect},
 
@@ -902,7 +900,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S0", NULL, I2S2_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S0", NULL, I2S3_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S0", NULL, I2S5_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
-
 	{I2S0_MCLK_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_mclk_apll_connect},
 	{I2S0_MCLK_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_mclk_apll_connect},
 
@@ -944,7 +941,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S1", NULL, "I2S3_TINYCONN_CH1_MUX"},
 	{"I2S1", NULL, "I2S3_TINYCONN_CH2_MUX"},
 
-
 	{"I2S1", NULL, "I2S0_EN", mtk_afe_i2s_share_connect},
 	{"I2S1", NULL, "I2S1_EN"},
 	{"I2S1", NULL, "I2S2_EN", mtk_afe_i2s_share_connect},
@@ -964,7 +960,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S1", NULL, I2S2_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S1", NULL, I2S3_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S1", NULL, I2S5_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
-
 	{I2S1_MCLK_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_mclk_apll_connect},
 	{I2S1_MCLK_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_mclk_apll_connect},
 
@@ -980,7 +975,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S2", NULL, I2S2_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S2", NULL, I2S3_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S2", NULL, I2S5_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
-
 	{I2S2_HD_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_i2s_apll_connect},
 	{I2S2_HD_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_i2s_apll_connect},
 
@@ -989,7 +983,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S2", NULL, I2S2_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S2", NULL, I2S3_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S2", NULL, I2S5_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
-
 	{I2S2_MCLK_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_mclk_apll_connect},
 	{I2S2_MCLK_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_mclk_apll_connect},
 
@@ -1026,6 +1019,8 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S3_CH1", "DL8_CH1", "DL8"},
 	{"I2S3_CH2", "DL8_CH2", "DL8"},
 
+	{"I2S3_CH1", "DL7_CH1", "DL7"},
+	{"I2S3_CH2", "DL7_CH2", "DL7"},
 	{"I2S3", NULL, "I2S3_CH1"},
 	{"I2S3", NULL, "I2S3_CH2"},
 	{"I2S3", NULL, "I2S3_TINYCONN_CH1_MUX"},
@@ -1042,7 +1037,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S3", NULL, I2S2_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S3", NULL, I2S3_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S3", NULL, I2S5_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
-
 	{I2S3_HD_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_i2s_apll_connect},
 	{I2S3_HD_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_i2s_apll_connect},
 
@@ -1051,7 +1045,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S3", NULL, I2S2_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S3", NULL, I2S3_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S3", NULL, I2S5_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
-
 	{I2S3_MCLK_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_mclk_apll_connect},
 	{I2S3_MCLK_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_mclk_apll_connect},
 
@@ -1094,7 +1087,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S5", NULL, I2S2_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S5", NULL, I2S3_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
 	{"I2S5", NULL, I2S5_HD_EN_W_NAME, mtk_afe_i2s_hd_connect},
-
 	{I2S5_HD_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_i2s_apll_connect},
 	{I2S5_HD_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_i2s_apll_connect},
 
@@ -1103,10 +1095,8 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 	{"I2S5", NULL, I2S2_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S5", NULL, I2S3_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
 	{"I2S5", NULL, I2S5_MCLK_EN_W_NAME, mtk_afe_i2s_mclk_connect},
-
 	{I2S5_MCLK_EN_W_NAME, NULL, APLL1_W_NAME, mtk_afe_mclk_apll_connect},
 	{I2S5_MCLK_EN_W_NAME, NULL, APLL2_W_NAME, mtk_afe_mclk_apll_connect},
-
 
 	/* allow i2s on without codec on */
 	{"I2S0", NULL, "I2S0_In_Mux"},
@@ -1120,7 +1110,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 
 	{"I2S5_Out_Mux", "Dummy_Widget", "I2S5"},
 	{"I2S_DUMMY_OUT", NULL, "I2S5_Out_Mux"},
-
 
 	/* i2s in lpbk */
 	{"I2S0_Lpbk_Mux", "Lpbk", "I2S3"},
@@ -1286,7 +1275,7 @@ static int mtk_dai_i2s_config(struct mtk_base_afe *afe,
 	if (i2s_priv)
 		i2s_priv->rate = rate;
 	else
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 
 	switch (i2s_id) {
 	case MT6853_DAI_I2S_0:
@@ -1359,16 +1348,14 @@ static int mtk_dai_i2s_set_sysclk(struct snd_soc_dai *dai,
 	int apll_rate;
 
 	if (!i2s_priv) {
-		dev_warn(afe->dev, "%s(), i2s_priv == NULL", __func__);
+		AUDIO_AEE("i2s_priv == NULL");
 		return -EINVAL;
 	}
-
 
 	if (dir != SND_SOC_CLOCK_OUT) {
-		dev_warn(afe->dev, "%s(), dir != SND_SOC_CLOCK_OUT", __func__);
+		AUDIO_AEE("dir != SND_SOC_CLOCK_OUT");
 		return -EINVAL;
 	}
-
 
 	dev_info(afe->dev, "%s(), freq %d\n", __func__, freq);
 
@@ -1376,17 +1363,14 @@ static int mtk_dai_i2s_set_sysclk(struct snd_soc_dai *dai,
 	apll_rate = mt6853_get_apll_rate(afe, apll);
 
 	if (freq > apll_rate) {
-		dev_warn(afe->dev, "%s(), freq > apll rate", __func__);
+		AUDIO_AEE("freq > apll rate");
 		return -EINVAL;
 	}
-
 
 	if (apll_rate % freq != 0) {
-		dev_warn(afe->dev, "%s(), APLL cannot generate freq Hz",
-			 __func__);
+		AUDIO_AEE("APLL cannot generate freq Hz");
 		return -EINVAL;
 	}
-
 
 	i2s_priv->mclk_rate = freq;
 	i2s_priv->mclk_apll = apll;
@@ -1396,8 +1380,7 @@ static int mtk_dai_i2s_set_sysclk(struct snd_soc_dai *dai,
 
 		share_i2s_priv = afe_priv->dai_priv[i2s_priv->share_i2s_id];
 		if (!share_i2s_priv) {
-			dev_warn(afe->dev, "%s(), share_i2s_priv == NULL",
-				 __func__);
+			AUDIO_AEE("share_i2s_priv == NULL");
 			return -EINVAL;
 		}
 
@@ -1498,7 +1481,7 @@ static struct snd_soc_dai_driver mtk_dai_i2s_driver[] = {
 			.formats = MTK_I2S_FORMATS,
 		},
 		.ops = &mtk_dai_i2s_ops,
-	}
+	},
 };
 
 /* this enum is merely for mtk_afe_i2s_priv declare */

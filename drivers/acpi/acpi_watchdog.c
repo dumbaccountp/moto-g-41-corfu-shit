@@ -1,9 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ACPI watchdog table parsing support.
  *
  * Copyright (C) 2016, Intel Corporation
  * Author: Mika Westerberg <mika.westerberg@linux.intel.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) "ACPI: watchdog: " fmt
@@ -73,7 +76,6 @@ static const struct acpi_table_wdat *acpi_watchdog_get_wdat(void)
 	}
 
 	if (acpi_watchdog_uses_rtc(wdat)) {
-		acpi_put_table((struct acpi_table_header *)wdat);
 		pr_info("Skipping WDAT on this system because it uses RTC SRAM\n");
 		return NULL;
 	}
@@ -118,12 +120,12 @@ void __init acpi_watchdog_init(void)
 
 	/* Watchdog disabled by BIOS */
 	if (!(wdat->flags & ACPI_WDAT_ENABLED))
-		goto fail_put_wdat;
+		return;
 
 	/* Skip legacy PCI WDT devices */
 	if (wdat->pci_segment != 0xff || wdat->pci_bus != 0xff ||
 	    wdat->pci_device != 0xff || wdat->pci_function != 0xff)
-		goto fail_put_wdat;
+		return;
 
 	INIT_LIST_HEAD(&resource_list);
 
@@ -189,6 +191,4 @@ void __init acpi_watchdog_init(void)
 
 fail_free_resource_list:
 	resource_list_free(&resource_list);
-fail_put_wdat:
-	acpi_put_table((struct acpi_table_header *)wdat);
 }

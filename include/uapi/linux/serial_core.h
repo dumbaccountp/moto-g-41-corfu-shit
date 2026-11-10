@@ -1,23 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- *  linux/drivers/char/serial_core.h
- *
- *  Copyright (C) 2000 Deep Blue Solutions Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 #ifndef _UAPILINUX_SERIAL_CORE_H
 #define _UAPILINUX_SERIAL_CORE_H
 
@@ -26,6 +10,20 @@
 /*
  * The type definitions.  These are from Ted Ts'o's serial.h
  */
+#define PORT_UNKNOWN	0
+#define PORT_8250	1
+#define PORT_16450	2
+#define PORT_16550	3
+#define PORT_16550A	4
+#define PORT_CIRRUS	5
+#define PORT_16650	6
+#define PORT_16650V2	7
+#define PORT_16750	8
+#define PORT_STARTECH	9
+#define PORT_16C950	10
+#define PORT_16654	11
+#define PORT_16850	12
+#define PORT_RSA	13
 #define PORT_NS16550A	14
 #define PORT_XSCALE	15
 #define PORT_RM9000	16	/* PMC-Sierra RM9xxx internal UART */
@@ -64,9 +62,6 @@
 
 /* Nuvoton UART */
 #define PORT_NPCM	40
-
-/* NVIDIA Tegra Combined UART */
-#define PORT_TEGRA_TCU	41
 
 /* Intel EG20 */
 #define PORT_PCH_8LINE	44
@@ -115,7 +110,7 @@
 /* Motorola i.MX SoC */
 #define PORT_IMX	62
 
-/* Marvell MPSC (obsolete unused) */
+/* Marvell MPSC */
 #define PORT_MPSC	63
 
 /* TXX9 type number */
@@ -136,6 +131,9 @@
 
 #define PORT_PNX8XXX	70
 
+/* Hilscher netx */
+#define PORT_NETX	71
+
 /* SUN4V Hypervisor Console */
 #define PORT_SUNHV	72
 
@@ -146,6 +144,9 @@
 
 /* Blackfin bf5xx */
 #define PORT_BFIN	75
+
+/* Micrel KS8695 */
+#define PORT_KS8695	76
 
 /* Broadcom SB1250, etc. SOC */
 #define PORT_SB1250_DUART	77
@@ -264,19 +265,6 @@
 /* MediaTek BTIF */
 #define PORT_MTK_BTIF	117
 
-/* RDA UART */
-#define PORT_RDA	118
-
-/* Socionext Milbeaut UART */
-#define PORT_MLB_USIO	119
-
-/* SiFive UART */
-#define PORT_SIFIVE_V0	120
-
-/* Sunix UART */
-#define PORT_SUNIX	121
-
-/* Freescale LINFlexD UART */
-#define PORT_LINFLEXUART	122
-
+/* Mediatek */
+#define PORT_MTK	118
 #endif /* _UAPILINUX_SERIAL_CORE_H */

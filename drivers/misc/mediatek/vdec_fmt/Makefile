@@ -1,27 +1,28 @@
 #
-# Copyright (C) 2021 MediaTek Inc.
+# SPDX-License-Identifier: GPL-2.0 */
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License version 2 as
-# published by the Free Software Foundation.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
+# Copyright (C) 2016 MediaTek Inc.
 #
 
 # driver code for VDEC-FMT
 
-obj-$(CONFIG_MTK_VDEC_FMT) += vdec-fmt.o
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmdvfs/ \
+             -I$(srctree)/drivers/misc/mediatek/smi/ \
+             -I$(srctree)/drivers/misc/mediatek/m4u/$(MTK_PLATFORM) \
+             -I$(srctree)/drivers/iommu/ \
+             -I$(srctree)/drivers/staging/android/mtk_ion/ \
+             -I$(srctree)/drivers/staging/android/mtk_ion/mtk
 
-vdec-fmt-$(CONFIG_MTK_VDEC_FMT) += vdec_fmt_driver.o \
-			vdec_fmt_pm.o \
-			vdec_fmt_dmabuf.o \
-			vdec_fmt_sync.o
+ifeq ($(CONFIG_MACH_MT6781),y)
+FMT_PLATFORM := mt6781
+endif
 
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mtk-interconnect/ \
-			 -I$(srctree)/drivers/misc/mediatek/cmdq/mailbox/ \
-			 -I$(srctree)/drivers/misc/mediatek/include/ \
-			 -I$(srctree)/drivers/misc/mediatek/iommu/ \
-			 -I$(srctree)/drivers/iommu/ \
+obj-y += vdec_fmt_driver.o
+obj-y += $(FMT_PLATFORM)/vdec_fmt_pm.o
+obj-y += vdec_fmt_ion.o
+obj-y += vdec_fmt_sync.o
+
+ccflags-y +=  -I$(srctree)/drivers/misc/mediatek/vdec_fmt/
+ccflags-y +=  -I$(srctree)/drivers/misc/mediatek/vdec_fmt/$(FMT_PLATFORM)
+ccflags-y +=  -I$(srctree)/drivers/misc/mediatek/smi/$(FMT_PLATFORM)/
+

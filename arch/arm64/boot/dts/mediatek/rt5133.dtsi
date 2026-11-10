@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
-//
-// Copyright (c) 2021 MediaTek Inc.
+/*
+ * Copyright (c) 2021 MediaTek Inc.
+ */
 
 &odm {
 	rt5133_eint:rt5133_eint {
@@ -37,15 +38,16 @@
 	};
 };
 
-&i2c5 {
+
+
+&i2c3 {
 	rt5133: rt5133@18 {
-		status = "disabled";
+		status = "ok";
 		compatible = "richtek,rt5133";
 		reg = <0x18>;
 		wakeup-source;
-		/* Temporarily choose unused gpios */
-		interrupts-extended = <&pio 187 0x0>;
-		enable-gpio = <&pio 188 0x0>;
+		interrupts-extended = <&pio 92 0x0>;
+		enable-gpio = <&pio 162 0x0>;
 		gpio-supply = <&rt5133_ldo1>;
 		gpio-controller;
 		#gpio-cells = <2>;
@@ -132,5 +134,6 @@
 				soft_start_time_sel = <1>;
 			};
 		};
+
 	};
 };

@@ -1,9 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
-* Copyright (c) 2016 MediaTek Inc.
-* Author: PC Chen <pc.chen@mediatek.com>
-*         Tiffany Lin <tiffany.lin@mediatek.com>
-*/
+ * Copyright (c) 2019 MediaTek Inc.
+ */
 
 #ifndef _MTK_VCODEC_DRV_H_
 #define _MTK_VCODEC_DRV_H_
@@ -11,10 +9,6 @@
 #include <linux/platform_device.h>
 #include <linux/videodev2.h>
 #include <linux/semaphore.h>
-#include <linux/regulator/consumer.h>
-#include <linux/interconnect-provider.h>
-#include <linux/types.h>
-#include <linux/list.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
@@ -22,11 +16,14 @@
 #include "mtk_vcodec_util.h"
 #include "vcodec_ipi_msg.h"
 #include "mtk_vcodec_pm.h"
-#include "vcodec_dvfs.h"
-#include "vcodec_bw.h"
-#include "mtk_dma_contig.h"
-#include "slbc_ops.h"
 
+#include "mtk-dma-contig.h"
+#ifdef CONFIG_VB2_MEDIATEK_DMA_SG
+#include "mtkbuf-dma-cache-sg.h"
+#endif
+#ifdef CONFIG_MTK_SLBC
+#include "slbc_ops.h"
+#endif
 #define MTK_VCODEC_DRV_NAME     "mtk_vcodec_drv"
 #define MTK_VCODEC_DEC_NAME     "mtk-vcodec-dec"
 #define MTK_VCODEC_ENC_NAME     "mtk-vcodec-enc"
@@ -34,23 +31,11 @@
 
 #define MTK_SLOWMOTION_GCE_TH   120
 #define MTK_VCODEC_MAX_PLANES   3
+#define MTK_V4L2_BENCHMARK      0
 #define WAIT_INTR_TIMEOUT_MS    500
 #define SUSPEND_TIMEOUT_CNT     5000
 #define MTK_MAX_CTRLS_HINT      64
 #define V4L2_BUF_FLAG_OUTPUT_NOT_GENERATED 0x02000000
-
-#define MAX_CODEC_FREQ_STEP	10
-#define MTK_VDEC_PORT_NUM	32
-#define MTK_VENC_PORT_NUM	64
-#define MTK_MAX_METADATA_NUM    8
-
-#define DEBUG_GKI 1
-
-enum mtk_vcodec_ipm {
-	VCODEC_IPM_V1 = 1,
-	VCODEC_IPM_V2 = 2,
-	VCODEC_IPM_MAX,
-};
 
 /**
  * enum mtk_instance_type - The type of an MTK Vcodec instance.
@@ -77,30 +62,6 @@ enum mtk_instance_state {
 	MTK_STATE_ABORT = 4,
 };
 
-enum mtk_codec_type {
-	VDEC_VENC_UNKNOWN = 0,
-	VDEC_H264,
-	VDEC_H265,
-	VDEC_HEIF,
-	VDEC_VP8,
-	VDEC_VP9,
-	VDEC_MPEG4,
-	VDEC_H263,
-	VDEC_MPEG12,
-	VDEC_WMV,
-	VDEC_RV30,
-	VDEC_RV40,
-	VDEC_AV1,
-	VENC_H264,
-	VENC_H265,
-	VENC_HEIF,
-	VENC_VP8,
-	VENC_MPEG4,
-	VENC_HYBRID_H264,
-	VENC_H263,
-	VDEC_VENC_MAX
-};
-
 /**
  * struct mtk_encode_param - General encoding parameters type
  */
@@ -124,13 +85,15 @@ enum mtk_encode_param {
 	MTK_ENCODE_PARAM_SEC_ENCODE = (1 << 15),
 	MTK_ENCODE_PARAM_TSVC = (1 << 16),
 	MTK_ENCODE_PARAM_NONREFPFREQ = (1 << 17),
-	MTK_ENCODE_PARAM_HIGHQUALITY = (1 << 18),
-	MTK_ENCODE_PARAM_MAXQP = (1 << 19),
-	MTK_ENCODE_PARAM_MINQP = (1 << 20),
-	MTK_ENCODE_PARAM_FRAMELVLQP = (1 << 21),
-	MTK_ENCODE_PARAM_IP_QPDELTA = (1 << 22),
-	MTK_ENCODE_PARAM_QP_CTRL_MODE = (1 << 23),
-	MTK_ENCODE_PARAM_DUMMY_NAL = (1 << 24),
+	MTK_ENCODE_PARAM_MAX_QP = (1 << 18),
+	MTK_ENCODE_PARAM_MIN_QP = (1 << 19),
+	MTK_ENCODE_PARAM_I_P_QP_DELTA = (1 << 20),
+	MTK_ENCODE_PARAM_QP_CONTROL_MODE = (1 << 21),
+	MTK_ENCODE_PARAM_FRAME_LEVEL_QP = (1 << 22),
+	MTK_ENCODE_PARAM_MAX_REFP_NUM = (1 << 23),
+	MTK_ENCODE_PARAM_REFP_DISTANCE = (1 << 24),
+	MTK_ENCODE_PARAM_REFP_FRMNUM = (1 << 25),
+	MTK_ENCODE_PARAM_DUMMY_NAL = (1 << 26),
 };
 
 /*
@@ -164,7 +127,6 @@ enum venc_yuv_fmt {
 	VENC_YUV_FORMAT_P010 = 26,
 	VENC_YUV_FORMAT_NV12_AFBC = 27,
 	VENC_YUV_FORMAT_NV12_10B_AFBC = 28,
-	VENC_YUV_FORMAT_NV21_AFBC = 29,
 };
 
 /**
@@ -173,18 +135,6 @@ enum venc_yuv_fmt {
 enum mtk_q_type {
 	MTK_Q_DATA_SRC = 0,
 	MTK_Q_DATA_DST = 1,
-};
-
-/**
- * enum input_driven_mode  - decoder different input driven mode
- * @NON_INPUT_DRIVEN     : non input driven, bs/frm pairwise trigger ipi
- * @INPUT_DRIVEN_CB_FRM      : input driven, codec callback get frame
- * @INPUT_DRIVEN_PUT_FRM : input driven, v4l2 initiatively put frame to codec
- */
-enum vdec_input_driven_mode {
-	NON_INPUT_DRIVEN = 0,
-	INPUT_DRIVEN_CB_FRM = 1,
-	INPUT_DRIVEN_PUT_FRM = 2,
 };
 
 /**
@@ -237,7 +187,6 @@ struct mtk_dec_params {
 	u64	timestamp;
 	unsigned int	total_frame_bufq_count;
 	unsigned int	queued_frame_buf_count;
-	int		priority;
 };
 
 /**
@@ -293,14 +242,15 @@ struct mtk_enc_params {
 	unsigned int    svp_mode;
 	unsigned int    tsvc;
 	unsigned int    nonrefpfreq;
-	unsigned int    highquality;
-	int             max_qp;
-	int             min_qp;
-	int             framelvl_qp;
-	int             ip_qpdelta;
-	unsigned int	qp_control_mode;
+	unsigned int    max_qp;
+	unsigned int    min_qp;
+	unsigned int    i_p_qp_delta;
+	unsigned int    qp_control_mode;
+	unsigned int    frame_level_qp;
+	unsigned int    maxrefpnum;
+	unsigned int    refpdistance;
+	unsigned int    refpfrmnum;
 	unsigned int	dummynal;
-	int		priority;
 };
 
 /*
@@ -354,16 +304,16 @@ struct venc_enc_param {
 	unsigned int svp_mode;
 	unsigned int tsvc;
 	unsigned int nonrefpfreq;
-	unsigned int highquality;
 	unsigned int max_qp;
 	unsigned int min_qp;
-	unsigned int framelvl_qp;
+	unsigned int i_p_qp_delta;
 	unsigned int qp_control_mode;
-	unsigned int ip_qpdelta;
+	unsigned int frame_level_qp;
+	unsigned int maxrefpnum;
+	unsigned int refpdistance;
+	unsigned int refpfrmnum;
+	char *log;
 	unsigned int dummynal;
-	unsigned int slbc_addr;
-	char set_vcp_buf[1024];
-	char property_buf[1024];
 };
 
 /*
@@ -373,39 +323,13 @@ struct venc_enc_param {
  */
 struct venc_frm_buf {
 	struct mtk_vcodec_mem fb_addr[MTK_VCODEC_MAX_PLANES];
-	u32 index;
 	unsigned int num_planes;
 	u64 timestamp;
+	unsigned int roimap;
 	bool has_meta;
+	unsigned int qpmap;
 	struct dma_buf *meta_dma;
-	struct dma_buf_attachment *buf_att;
-	struct sg_table *sgt;
 	dma_addr_t meta_addr;
-	struct dma_buf_attachment *qpmap_dma_att;
-	struct sg_table *qpmap_sgt;
-	unsigned int meta_offset;
-	bool has_qpmap;
-	struct dma_buf *qpmap_dma;
-	dma_addr_t qpmap_dma_addr;
-	struct dma_buf *metabuffer_dma;
-	dma_addr_t metabuffer_addr;
-};
-
-enum metadata_type {
-	METADATA_HDR               = 0,
-	METADATA_QPMAP             = 1
-};
-
-struct meta_describe {
-	uint8_t invalid;  //1: valid 0:invalid
-	uint8_t fd_flag;  //whether pass with fd - 1:yes 0:no
-	uint32_t type;
-	uint32_t size;  //size of metadata (total in 32 bits length)
-	uint32_t value; //fd number or memory offset from the begginning of metadata buffer
-};
-
-struct metadata_info {
-	struct meta_describe metadata_dsc[MTK_MAX_METADATA_NUM];
 };
 
 /**
@@ -470,8 +394,6 @@ struct mtk_vcodec_ctx {
 	const struct vdec_common_if *dec_if;
 	const struct venc_common_if *enc_if;
 	unsigned long drv_handle;
-	uintptr_t bs_list[VB2_MAX_FRAME+1];
-	uintptr_t fb_list[VB2_MAX_FRAME+1];
 
 	struct vdec_pic_info picinfo;
 	int dpb_size;
@@ -480,10 +402,6 @@ struct mtk_vcodec_ctx {
 	int last_is_hdr;
 	unsigned int errormap_info[VB2_MAX_FRAME];
 	s64 input_max_ts;
-
-	bool is_flushing;
-	unsigned int eos_type;
-	u64 early_eos_ts;
 
 	int int_cond[MTK_VDEC_HW_NUM];
 	int int_type;
@@ -498,13 +416,11 @@ struct mtk_vcodec_ctx {
 	struct mtk_video_enc_buf *enc_flush_buf;
 	struct vb2_buffer *pend_src_buf;
 	wait_queue_head_t fm_wq;
-	unsigned char *ipi_blocked;
-	enum vdec_input_driven_mode input_driven;
-
+	int input_driven;
+	int user_lock_hw;
 	/* for user lock HW case release check */
 	struct mutex hw_status;
 	int hw_locked[MTK_VDEC_HW_NUM];
-	int core_locked[MTK_VENC_HW_NUM];
 	int async_mode;
 	int oal_vcodec;
 
@@ -513,27 +429,14 @@ struct mtk_vcodec_ctx {
 	enum v4l2_quantization quantization;
 	enum v4l2_xfer_func xfer_func;
 
-	int init_cnt;
 	int decoded_frame_cnt;
 	struct mutex buf_lock;
 	struct mutex worker_lock;
+#ifdef CONFIG_MTK_SLBC
 	struct slbc_data sram_data;
-	struct mutex q_mutex;
+#endif
 	int use_slbc;
-	unsigned int slbc_addr;
 };
-
-/*
- * struct venc_frm_buf - frame buffer information used in venc_if_encode()
- * @fb_addr: plane frame buffer addresses
- * @num_planes: frmae buffer plane num
- */
-struct venc_larb_port {
-	unsigned int total_port_num;
-	unsigned int port_id[MTK_VENC_PORT_NUM];
-	unsigned int ram_type[MTK_VENC_PORT_NUM];
-};
-
 
 /**
  * struct mtk_vcodec_dev - driver data
@@ -577,16 +480,11 @@ struct mtk_vcodec_dev {
 	struct video_device *vfd_enc;
 	struct iommu_domain *io_domain;
 
-	const char *platform;
-	enum mtk_vcodec_ipm vdec_hw_ipm;
-	enum mtk_vcodec_ipm venc_hw_ipm;
-
 	struct v4l2_m2m_dev *m2m_dev_dec;
 	struct v4l2_m2m_dev *m2m_dev_enc;
 	struct platform_device *plat_dev;
 	struct platform_device *vcu_plat_dev;
 	struct list_head ctx_list;
-	struct notifier_block vcp_notify;
 	spinlock_t irqlock;
 	struct mtk_vcodec_ctx *curr_dec_ctx[MTK_VDEC_HW_NUM];
 	struct mtk_vcodec_ctx *curr_enc_ctx[MTK_VENC_HW_NUM];
@@ -594,10 +492,7 @@ struct mtk_vcodec_dev {
 	void __iomem *enc_reg_base[NUM_MAX_VENC_REG_BASE];
 
 	bool dec_is_power_on[MTK_VDEC_HW_NUM];
-	bool enc_is_power_on[MTK_VENC_HW_NUM];
 	spinlock_t dec_power_lock[MTK_VDEC_HW_NUM];
-	spinlock_t enc_power_lock[MTK_VENC_HW_NUM];
-	int dec_m4u_ports[NUM_MAX_VDEC_M4U_PORT];
 
 	unsigned long id_counter;
 
@@ -605,14 +500,11 @@ struct mtk_vcodec_dev {
 	struct workqueue_struct *encode_workqueue;
 	int int_cond;
 	int int_type;
-	struct mutex ctx_mutex;
 	struct mutex dev_mutex;
-	struct mutex ipi_mutex;
-	struct mutex ipi_mutex_res;
-	struct mtk_vcodec_msgq mq;
+	wait_queue_head_t queue;
 
 	int dec_irq[MTK_VDEC_HW_NUM];
-	int enc_irq[MTK_VENC_HW_NUM];
+	int enc_irq;
 	int enc_lt_irq;
 
 	struct semaphore dec_sem[MTK_VDEC_HW_NUM];
@@ -622,68 +514,15 @@ struct mtk_vcodec_dev {
 	struct mutex enc_dvfs_mutex;
 
 	struct mtk_vcodec_pm pm;
+	unsigned int dec_capability;
+	unsigned int enc_capability;
+
 	struct notifier_block pm_notifier;
 	bool is_codec_suspending;
 
 	int dec_cnt;
 	int enc_cnt;
-
-	struct share_obj dec_ipi_data;
-	struct share_obj enc_ipi_data;
-	int *dec_mem_slot_stat;
-	int *enc_mem_slot_stat;
-
-	int dec_hw_cnt;
-	int enc_hw_cnt;
-
-	struct plist_head vdec_rlist[MTK_VDEC_HW_NUM];
-	struct plist_head venc_rlist[MTK_VENC_HW_NUM];
-	struct icc_path *vdec_qos_req[MTK_VDEC_PORT_NUM];
-	struct icc_path *venc_qos_req[MTK_VENC_PORT_NUM];
-
-	int vdec_freq_cnt;
-	int venc_freq_cnt;
-	unsigned long vdec_freqs[MAX_CODEC_FREQ_STEP];
-	unsigned long venc_freqs[MAX_CODEC_FREQ_STEP];
-
-	struct regulator *vdec_reg;
-	struct regulator *venc_reg;
-	struct venc_larb_port venc_ports[MTK_VENC_HW_NUM];
-
-	int vdec_op_rate_cnt;
-	//int venc_op_rate_cnt;
-	int vdec_tput_cnt;
-	int venc_tput_cnt;
-	int vdec_cfg_cnt;
-	int venc_cfg_cnt;
-	int vdec_port_cnt;
-	int venc_port_cnt;
-	int vdec_port_idx[MTK_VDEC_HW_NUM];
-	int venc_port_idx[MTK_VENC_HW_NUM];
-	struct vcodec_perf *vdec_tput;
-	struct vcodec_perf *venc_tput;
-	//struct vcodec_config *vdec_cfg;
-	struct vcodec_config *venc_cfg;
-	struct vcodec_op_rate *vdec_dflt_op_rate;
-	//struct vcodec_op_rate *venc_dflt_op_rate;
-	struct list_head vdec_dvfs_inst;
-	struct list_head venc_dvfs_inst;
-	struct dvfs_params vdec_dvfs_params;
-	struct dvfs_params venc_dvfs_params;
-	struct vcodec_port_bw *vdec_port_bw;
-	struct vcodec_port_bw *venc_port_bw;
-/**
- *	struct ion_client *ion_vdec_client;
- *	struct ion_client *ion_venc_client;
- **/
-	struct list_head log_param_list;
-	struct list_head prop_param_list;
-	struct mutex log_param_mutex;
-	struct mutex prop_param_mutex;
 	enum venc_lock enc_hw_locked[MTK_VENC_HW_NUM];
-
-	unsigned int svp_mtee;
-	unsigned int unique_domain;
 };
 
 static inline struct mtk_vcodec_ctx *fh_to_ctx(struct v4l2_fh *fh)
@@ -695,196 +534,5 @@ static inline struct mtk_vcodec_ctx *ctrl_to_ctx(struct v4l2_ctrl *ctrl)
 {
 	return container_of(ctrl->handler, struct mtk_vcodec_ctx, ctrl_hdl);
 }
-
-    /* 10-bit for RGB, 2-bit for A; 32-bit per-pixel;  */
-#define V4L2_PIX_FMT_ARGB1010102  v4l2_fourcc('A', 'B', '3', '0')
-#define V4L2_PIX_FMT_ABGR1010102  v4l2_fourcc('A', 'R', '3', '0')
-#define V4L2_PIX_FMT_RGBA1010102  v4l2_fourcc('R', 'A', '3', '0')
-#define V4L2_PIX_FMT_BGRA1010102  v4l2_fourcc('B', 'A', '3', '0')
-
-    /* 10-bit; each pixel needs 2 bytes, and LSB 6-bit is not used */
-#define V4L2_PIX_FMT_P010M   v4l2_fourcc('P', '0', '1', '0')
-
-#define V4L2_PIX_FMT_H264_SLICE v4l2_fourcc('S', '2', '6', '4') /* H264 parsed slices */
-#define V4L2_PIX_FMT_H265     v4l2_fourcc('H', '2', '6', '5') /* H265 with start codes */
-#define V4L2_PIX_FMT_HEIF     v4l2_fourcc('H', 'E', 'I', 'F') /* HEIF */
-
-#define V4L2_PIX_FMT_VP8_FRAME v4l2_fourcc('V', 'P', '8', 'F') /* VP8 parsed frames */
-#define V4L2_PIX_FMT_WMV1     v4l2_fourcc('W', 'M', 'V', '1') /* WMV7 */
-#define V4L2_PIX_FMT_WMV2     v4l2_fourcc('W', 'M', 'V', '2') /* WMV8 */
-#define V4L2_PIX_FMT_WMV3     v4l2_fourcc('W', 'M', 'V', '3') /* WMV9 */
-#define V4L2_PIX_FMT_WMVA     v4l2_fourcc('W', 'M', 'V', 'A') /* WMVA */
-#define V4L2_PIX_FMT_WVC1     v4l2_fourcc('W', 'V', 'C', '1') /* VC1 */
-#define V4L2_PIX_FMT_RV30     v4l2_fourcc('R', 'V', '3', '0') /* RealVideo 8 */
-#define V4L2_PIX_FMT_RV40     v4l2_fourcc('R', 'V', '4', '0') /* RealVideo 9/10 */
-#define V4L2_PIX_FMT_AV1      v4l2_fourcc('A', 'V', '1', '0') /* AV1 */
-
-	/* Mediatek compressed block mode  */
-#define V4L2_PIX_FMT_MT21         v4l2_fourcc('M', 'M', '2', '1')
-	/* MTK 8-bit block mode, two non-contiguous planes */
-#define V4L2_PIX_FMT_MT2110T      v4l2_fourcc('M', 'T', '2', 'T')
-	/* MTK 10-bit tile block mode, two non-contiguous planes */
-#define V4L2_PIX_FMT_MT2110R      v4l2_fourcc('M', 'T', '2', 'R')
-	/* MTK 10-bit raster block mode, two non-contiguous planes */
-#define V4L2_PIX_FMT_MT21C10T     v4l2_fourcc('M', 'T', 'C', 'T')
-	/* MTK 10-bit tile compressed block mode, two non-contiguous planes */
-#define V4L2_PIX_FMT_MT21C10R     v4l2_fourcc('M', 'T', 'C', 'R')
-	/* MTK 10-bit raster compressed block mode, two non-contiguous planes */
-#define V4L2_PIX_FMT_MT21CS       v4l2_fourcc('M', '2', 'C', 'S')
-	/* MTK 8-bit compressed block mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21S        v4l2_fourcc('M', '2', '1', 'S')
-	/* MTK 8-bit block mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21S10T     v4l2_fourcc('M', 'T', 'S', 'T')
-	/* MTK 10-bit tile block mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21S10R     v4l2_fourcc('M', 'T', 'S', 'R')
-	/* MTK 10-bit raster block mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21CS10T    v4l2_fourcc('M', 'C', 'S', 'T')
-	/* MTK 10-bit tile compressed block mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21CS10R    v4l2_fourcc('M', 'C', 'S', 'R')
-	/* MTK 10-bit raster compressed block mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21CSA      v4l2_fourcc('M', 'A', 'C', 'S')
-	/* MTK 8-bit compressed block au offset mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21S10TJ    v4l2_fourcc('M', 'J', 'S', 'T')
-	/* MTK 10-bit tile block jump mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21S10RJ    v4l2_fourcc('M', 'J', 'S', 'R')
-	/* MTK 10-bit raster block jump mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21CS10TJ   v4l2_fourcc('J', 'C', 'S', 'T')
-	/* MTK 10-bit tile compressed block jump mode, two contiguous planes */
-#define V4L2_PIX_FMT_MT21CS10RJ   v4l2_fourcc('J', 'C', 'S', 'R')
-	/* MTK 10-bit raster compressed block jump mode, two cont. planes */
-#define V4L2_PIX_FMT_MT10S     v4l2_fourcc('M', '1', '0', 'S')
-	/* MTK 10-bit compressed mode, three contiguous planes */
-#define V4L2_PIX_FMT_MT10     v4l2_fourcc('M', 'T', '1', '0')
-	/* MTK 10-bit compressed mode, three non-contiguous planes */
-#define V4L2_PIX_FMT_P010S   v4l2_fourcc('P', '0', '1', 'S')
-	/* 10-bit each pixel needs 2 bytes, LSB 6-bit is not used contiguous*/
-
-	/* MTK 8-bit frame buffer compressed mode, single plane */
-#define V4L2_PIX_FMT_RGB32_AFBC         v4l2_fourcc('M', 'C', 'R', '8')
-#define V4L2_PIX_FMT_BGR32_AFBC         v4l2_fourcc('M', 'C', 'B', '8')
-	/* MTK 10-bit frame buffer compressed mode, single plane */
-#define V4L2_PIX_FMT_RGBA1010102_AFBC   v4l2_fourcc('M', 'C', 'R', 'X')
-#define V4L2_PIX_FMT_BGRA1010102_AFBC   v4l2_fourcc('M', 'C', 'B', 'X')
-	/* MTK 8-bit frame buffer compressed mode, two planes */
-#define V4L2_PIX_FMT_NV12_AFBC          v4l2_fourcc('M', 'C', 'N', '8')
-	/* MTK 8-bit frame buffer compressed mode, two planes */
-#define V4L2_PIX_FMT_NV21_AFBC          v4l2_fourcc('M', 'N', '2', '8')
-	/* MTK 10-bit frame buffer compressed mode, two planes */
-#define V4L2_PIX_FMT_NV12_10B_AFBC      v4l2_fourcc('M', 'C', 'N', 'X')
-/* Vendor specific - Mediatek ISP compressed formats */
-#define V4L2_PIX_FMT_MTISP_B8	v4l2_fourcc('M', 'T', 'B', '8') /* 8 bit */
-
-
-/* Reference freed flags*/
-#define V4L2_BUF_FLAG_REF_FREED			0x00000200
-/* Crop changed flags*/
-#define V4L2_BUF_FLAG_CROP_CHANGED		0x00008000
-#define V4L2_BUF_FLAG_CSD					0x00200000
-#define V4L2_BUF_FLAG_ROI					0x00400000
-#define V4L2_BUF_FLAG_HDR_META			0x00800000
-#define V4L2_BUF_FLAG_QP_META			0x01000000
-#define V4L2_BUF_FLAG_HAS_META			0x4000000
-
-#define V4L2_EVENT_MTK_VCODEC_START	(V4L2_EVENT_PRIVATE_START + 0x00002000)
-#define V4L2_EVENT_MTK_VDEC_ERROR	(V4L2_EVENT_MTK_VCODEC_START + 1)
-#define V4L2_EVENT_MTK_VDEC_NOHEADER	(V4L2_EVENT_MTK_VCODEC_START + 2)
-#define V4L2_EVENT_MTK_VENC_ERROR	(V4L2_EVENT_MTK_VCODEC_START + 3)
-
-/* Mediatek control IDs */
-#define V4L2_CID_MPEG_MTK_BASE \
-	(V4L2_CTRL_CLASS_MPEG | 0x2000)
-#define V4L2_CID_MPEG_MTK_FRAME_INTERVAL \
-	(V4L2_CID_MPEG_MTK_BASE+0)
-#define V4L2_CID_MPEG_MTK_ERRORMB_MAP \
-	(V4L2_CID_MPEG_MTK_BASE+1)
-#define V4L2_CID_MPEG_MTK_DECODE_MODE \
-	(V4L2_CID_MPEG_MTK_BASE+2)
-#define V4L2_CID_MPEG_MTK_FRAME_SIZE \
-	(V4L2_CID_MPEG_MTK_BASE+3)
-#define V4L2_CID_MPEG_MTK_FIXED_MAX_FRAME_BUFFER \
-	(V4L2_CID_MPEG_MTK_BASE+4)
-#define V4L2_CID_MPEG_MTK_CRC_PATH \
-	(V4L2_CID_MPEG_MTK_BASE+5)
-#define V4L2_CID_MPEG_MTK_GOLDEN_PATH \
-	(V4L2_CID_MPEG_MTK_BASE+6)
-#define V4L2_CID_MPEG_MTK_COLOR_DESC \
-	(V4L2_CID_MPEG_MTK_BASE+7)
-#define V4L2_CID_MPEG_MTK_ASPECT_RATIO \
-	(V4L2_CID_MPEG_MTK_BASE+8)
-#define V4L2_CID_MPEG_MTK_SET_WAIT_KEY_FRAME \
-	(V4L2_CID_MPEG_MTK_BASE+9)
-#define V4L2_CID_MPEG_MTK_SET_NAL_SIZE_LENGTH \
-	(V4L2_CID_MPEG_MTK_BASE+10)
-#define V4L2_CID_MPEG_MTK_SEC_DECODE \
-	(V4L2_CID_MPEG_MTK_BASE+11)
-#define V4L2_CID_MPEG_MTK_FIX_BUFFERS \
-	(V4L2_CID_MPEG_MTK_BASE+12)
-#define V4L2_CID_MPEG_MTK_FIX_BUFFERS_SVP \
-	(V4L2_CID_MPEG_MTK_BASE+13)
-#define V4L2_CID_MPEG_MTK_INTERLACING \
-	(V4L2_CID_MPEG_MTK_BASE+14)
-#define V4L2_CID_MPEG_MTK_CODEC_TYPE \
-	(V4L2_CID_MPEG_MTK_BASE+15)
-#define V4L2_CID_MPEG_MTK_OPERATING_RATE \
-	(V4L2_CID_MPEG_MTK_BASE+16)
-#define V4L2_CID_MPEG_MTK_SEC_ENCODE \
-	(V4L2_CID_MPEG_MTK_BASE+17)
-#define V4L2_CID_MPEG_MTK_QUEUED_FRAMEBUF_COUNT \
-	(V4L2_CID_MPEG_MTK_BASE+18)
-#define V4L2_CID_MPEG_MTK_UFO_MODE \
-	(V4L2_CID_MPEG_MTK_BASE+19)
-#define V4L2_CID_MPEG_MTK_ENCODE_SCENARIO \
-	(V4L2_CID_MPEG_MTK_BASE+20)
-#define V4L2_CID_MPEG_MTK_ENCODE_NONREFP \
-	(V4L2_CID_MPEG_MTK_BASE+21)
-#define V4L2_CID_MPEG_MTK_ENCODE_DETECTED_FRAMERATE \
-	(V4L2_CID_MPEG_MTK_BASE+22)
-#define V4L2_CID_MPEG_MTK_ENCODE_RFS_ON \
-	(V4L2_CID_MPEG_MTK_BASE+23)
-#define V4L2_CID_MPEG_MTK_ENCODE_OPERATION_RATE \
-	(V4L2_CID_MPEG_MTK_BASE+24)
-#define V4L2_CID_MPEG_MTK_ENCODE_ROI_RC_QP \
-	(V4L2_CID_MPEG_MTK_BASE+25)
-#define V4L2_CID_MPEG_MTK_ENCODE_ROI_ON \
-	(V4L2_CID_MPEG_MTK_BASE+26)
-#define V4L2_CID_MPEG_MTK_ENCODE_GRID_SIZE \
-	(V4L2_CID_MPEG_MTK_BASE+27)
-#define V4L2_CID_MPEG_MTK_RESOLUTION_CHANGE \
-	(V4L2_CID_MPEG_MTK_BASE+28)
-#define V4L2_CID_MPEG_MTK_MAX_WIDTH \
-	(V4L2_CID_MPEG_MTK_BASE+29)
-#define V4L2_CID_MPEG_MTK_MAX_HEIGHT \
-	(V4L2_CID_MPEG_MTK_BASE+30)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_I_FRAME_QP \
-	(V4L2_CID_MPEG_MTK_BASE+31)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_P_FRAME_QP \
-	(V4L2_CID_MPEG_MTK_BASE+32)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_B_FRAME_QP \
-	(V4L2_CID_MPEG_MTK_BASE+33)
-#define V4L2_CID_MPEG_VIDEO_ENABLE_TSVC \
-	(V4L2_CID_MPEG_MTK_BASE+34)
-#define V4L2_CID_MPEG_MTK_ENCODE_NONREFP_FREQ \
-	(V4L2_CID_MPEG_MTK_BASE+35)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_MAX_QP \
-	(V4L2_CID_MPEG_MTK_BASE+36)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_MIN_QP \
-	(V4L2_CID_MPEG_MTK_BASE+37)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_I_P_QP_DELTA \
-	(V4L2_CID_MPEG_MTK_BASE+38)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_QP_CONTROL_MODE \
-	(V4L2_CID_MPEG_MTK_BASE+39)
-#define V4L2_CID_MPEG_MTK_ENCODE_RC_FRAME_LEVEL_QP \
-	(V4L2_CID_MPEG_MTK_BASE+40)
-
-#define V4L2_CID_MPEG_MTK_ENCODE_ENABLE_HIGHQUALITY \
-	(V4L2_CID_MPEG_MTK_BASE+45)
-#define V4L2_CID_MPEG_MTK_LOG \
-	(V4L2_CID_MPEG_MTK_BASE+46)
-#define V4L2_CID_MPEG_MTK_ENCODE_ENABLE_DUMMY_NAL \
-	(V4L2_CID_MPEG_MTK_BASE+47)
-#define V4L2_CID_MPEG_MTK_REAL_TIME_PRIORITY \
-	(V4L2_CID_MPEG_MTK_BASE+48)
-#define V4L2_CID_MPEG_MTK_VCP_PROP \
-	(V4L2_CID_MPEG_MTK_BASE+49)
 
 #endif /* _MTK_VCODEC_DRV_H_ */

@@ -1,6 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2014 IBM Corp.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version
+ * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/pci_regs.h>
@@ -387,7 +391,6 @@ int cxl_calc_capp_routing(struct pci_dev *dev, u64 *chipid,
 	rc = get_phb_index(np, phb_index);
 	if (rc) {
 		pr_err("cxl: invalid phb index\n");
-		of_node_put(np);
 		return rc;
 	}
 
@@ -1165,10 +1168,10 @@ static int pci_init_afu(struct cxl *adapter, int slice, struct pci_dev *dev)
 	 * if it returns an error!
 	 */
 	if ((rc = cxl_register_afu(afu)))
-		goto err_put_dev;
+		goto err_put1;
 
 	if ((rc = cxl_sysfs_afu_add(afu)))
-		goto err_del_dev;
+		goto err_put1;
 
 	adapter->afu[afu->slice] = afu;
 
@@ -1177,12 +1180,10 @@ static int pci_init_afu(struct cxl *adapter, int slice, struct pci_dev *dev)
 
 	return 0;
 
-err_del_dev:
-	device_del(&afu->dev);
-err_put_dev:
+err_put1:
 	pci_deconfigure_afu(afu);
 	cxl_debugfs_afu_remove(afu);
-	put_device(&afu->dev);
+	device_unregister(&afu->dev);
 	return rc;
 
 err_free_native:
@@ -1670,25 +1671,23 @@ static struct cxl *cxl_pci_init_adapter(struct pci_dev *dev)
 	 * even if it returns an error!
 	 */
 	if ((rc = cxl_register_adapter(adapter)))
-		goto err_put_dev;
+		goto err_put1;
 
 	if ((rc = cxl_sysfs_adapter_add(adapter)))
-		goto err_del_dev;
+		goto err_put1;
 
 	/* Release the context lock as adapter is configured */
 	cxl_adapter_context_unlock(adapter);
 
 	return adapter;
 
-err_del_dev:
-	device_del(&adapter->dev);
-err_put_dev:
+err_put1:
 	/* This should mirror cxl_remove_adapter, except without the
 	 * sysfs parts
 	 */
 	cxl_debugfs_adapter_remove(adapter);
 	cxl_deconfigure_adapter(adapter);
-	put_device(&adapter->dev);
+	device_unregister(&adapter->dev);
 	return ERR_PTR(rc);
 
 err_release:
@@ -1719,6 +1718,7 @@ int cxl_slot_is_switched(struct pci_dev *dev)
 {
 	struct device_node *np;
 	int depth = 0;
+	const __be32 *prop;
 
 	if (!(np = pci_device_to_OF_node(dev))) {
 		pr_err("cxl: np = NULL\n");
@@ -1727,7 +1727,8 @@ int cxl_slot_is_switched(struct pci_dev *dev)
 	of_node_get(np);
 	while (np) {
 		np = of_get_next_parent(np);
-		if (!of_node_is_type(np, "pciex"))
+		prop = of_get_property(np, "device_type", NULL);
+		if (!prop || strcmp((char *)prop, "pciex"))
 			break;
 		depth++;
 	}

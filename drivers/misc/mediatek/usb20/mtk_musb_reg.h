@@ -6,7 +6,6 @@
 #ifndef __MT_MUSB_REG_H__
 #define __MT_MUSB_REG_H__
 
-#include "musb_debug.h"
 
 #define MUSB_EP0_FIFOSIZE	64	/* This is non-configurable */
 
@@ -221,7 +220,6 @@
 #define MUSB_DEVCTL		0x60	/* 8 bit */
 
 #define MUSB_OPSTATE    0x620
-#define MUSB_OPSTATE_HOST_WAIT_DEV 0x21
 #define OTG_IDLE 0
 
 /*
@@ -339,9 +337,6 @@
 #define IDDIG_INT_POL        (1<<9)
 #define DRVVBUS_INT_POL      (1<<10)
 
-#define RESREG		0x700	/* Reserved Register */
-#define HSTPWRDWN_OPT	(1<<0)	/* connection detection option */
-
 /*
  * OTG 2.0 Registers
  */
@@ -399,7 +394,7 @@
  */
 #define CON_DEB_SHORT (1<<0)
 /* QMU Registers */
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 #define MUSB_QMUBASE	(0x800)
 #define MUSB_QISAR	(0xc00)
 #define MUSB_QIMR	(0xc04)

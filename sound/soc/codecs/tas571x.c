@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * TAS571x amplifier audio driver
  *
@@ -10,6 +9,11 @@
  *
  * TAS5707 support:
  * Copyright (C) 2018 Jerome Brunet, Baylibre SAS <jbrunet@baylibre.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 
 #include <linux/clk.h>
@@ -301,7 +305,7 @@ static int tas571x_hw_params(struct snd_pcm_substream *substream,
 				  TAS571X_SDI_FMT_MASK, val);
 }
 
-static int tas571x_mute(struct snd_soc_dai *dai, int mute, int direction)
+static int tas571x_mute(struct snd_soc_dai *dai, int mute)
 {
 	struct snd_soc_component *component = dai->component;
 	u8 sysctl2;
@@ -354,8 +358,7 @@ static int tas571x_set_bias_level(struct snd_soc_component *component,
 static const struct snd_soc_dai_ops tas571x_dai_ops = {
 	.set_fmt	= tas571x_set_dai_fmt,
 	.hw_params	= tas571x_hw_params,
-	.mute_stream	= tas571x_mute,
-	.no_capture_mute = 1,
+	.digital_mute	= tas571x_mute,
 };
 
 
@@ -722,8 +725,8 @@ static const struct regmap_config tas5721_regmap_config = {
 static const struct tas571x_chip tas5721_chip = {
 	.supply_names			= tas5721_supply_names,
 	.num_supply_names		= ARRAY_SIZE(tas5721_supply_names),
-	.controls			= tas5721_controls,
-	.num_controls			= ARRAY_SIZE(tas5721_controls),
+	.controls			= tas5711_controls,
+	.num_controls			= ARRAY_SIZE(tas5711_controls),
 	.regmap_config			= &tas5721_regmap_config,
 	.vol_reg_size			= 1,
 };

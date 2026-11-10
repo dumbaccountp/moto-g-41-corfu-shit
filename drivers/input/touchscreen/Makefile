@@ -22,7 +22,6 @@ obj-$(CONFIG_TOUCHSCREEN_BU21013)	+= bu21013_ts.o
 obj-$(CONFIG_TOUCHSCREEN_BU21029)	+= bu21029_ts.o
 obj-$(CONFIG_TOUCHSCREEN_CHIPONE_ICN8318)	+= chipone_icn8318.o
 obj-$(CONFIG_TOUCHSCREEN_CHIPONE_ICN8505)	+= chipone_icn8505.o
-obj-$(CONFIG_TOUCHSCREEN_CY8CTMA140)	+= cy8ctma140.o
 obj-$(CONFIG_TOUCHSCREEN_CY8CTMG110)	+= cy8ctmg110_ts.o
 obj-$(CONFIG_TOUCHSCREEN_CYTTSP_CORE)	+= cyttsp_core.o
 obj-$(CONFIG_TOUCHSCREEN_CYTTSP_I2C)	+= cyttsp_i2c.o cyttsp_i2c_common.o
@@ -57,6 +56,21 @@ obj-$(CONFIG_TOUCHSCREEN_MX25)		+= fsl-imx25-tcq.o
 obj-$(CONFIG_TOUCHSCREEN_MC13783)	+= mc13783_ts.o
 obj-$(CONFIG_TOUCHSCREEN_MCS5000)	+= mcs5000_ts.o
 obj-$(CONFIG_TOUCHSCREEN_MELFAS_MIP4)	+= melfas_mip4.o
+ifeq ($(CONFIG_MACH_MT6739),y)
+obj-$(CONFIG_TOUCHSCREEN_MTK)		+= mediatek/
+else
+obj-$(CONFIG_TOUCHSCREEN_MTK_GT1151)	+= GT1151/
+endif
+ifeq ($(CONFIG_TOUCHSCREEN_MTK_GT9XX_LM),y)
+obj-$(CONFIG_TOUCHSCREEN_MTK)		+= mediatek/
+endif
+ifeq ($(CONFIG_TOUCHSCREEN_GOODIX_BRL),y)
+obj-$(CONFIG_TOUCHSCREEN_MTK)		+= mediatek/
+endif
+ifeq ($(CONFIG_TOUCHSCREEN_HIMAX_IC_HX83102),y)
+obj-$(CONFIG_TOUCHSCREEN_MTK)		+= mediatek/
+endif
+obj-$(CONFIG_TOUCHSCREEN_MTK_NT36572_COMMON)   +=  nt36572_common/
 obj-$(CONFIG_TOUCHSCREEN_MIGOR)		+= migor_ts.o
 obj-$(CONFIG_TOUCHSCREEN_MMS114)	+= mms114.o
 obj-$(CONFIG_TOUCHSCREEN_MTOUCH)	+= mtouch.o
@@ -103,23 +117,15 @@ wm97xx-ts-$(CONFIG_TOUCHSCREEN_WM9712)	+= wm9712.o
 wm97xx-ts-$(CONFIG_TOUCHSCREEN_WM9713)	+= wm9713.o
 obj-$(CONFIG_TOUCHSCREEN_WM97XX_MAINSTONE)	+= mainstone-wm97xx.o
 obj-$(CONFIG_TOUCHSCREEN_WM97XX_ZYLONITE)	+= zylonite-wm97xx.o
+obj-$(CONFIG_TOUCHSCREEN_W90X900)	+= w90p910_ts.o
 obj-$(CONFIG_TOUCHSCREEN_SX8654)	+= sx8654.o
 obj-$(CONFIG_TOUCHSCREEN_TPS6507X)	+= tps6507x-ts.o
 obj-$(CONFIG_TOUCHSCREEN_ZET6223)	+= zet6223.o
 obj-$(CONFIG_TOUCHSCREEN_ZFORCE)	+= zforce_ts.o
 obj-$(CONFIG_TOUCHSCREEN_COLIBRI_VF50)	+= colibri-vf50-ts.o
 obj-$(CONFIG_TOUCHSCREEN_ROHM_BU21023)	+= rohm_bu21023.o
-obj-$(CONFIG_TOUCHSCREEN_RASPBERRYPI_FW)	+= raspberrypi-ts.o
-obj-$(CONFIG_TOUCHSCREEN_IQS5XX)	+= iqs5xx.o
-obj-$(CONFIG_TOUCHSCREEN_ZINITIX)	+= zinitix.o
-obj-$(CONFIG_TOUCHSCREEN_MTK_TUI_COMMON_API) +=tui-common.o
+obj-$(CONFIG_TOUCHSCREEN_MTK_FOCALTECH_HD)	+= focaltech_hd_touch/
+obj-$(CONFIG_TOUCHSCREEN_MTK_FOCALTECH_FHD)	+= focaltech_fhd_touch/
+obj-$(CONFIG_TOUCHSCREEN_MTK_SYNAPTICS_I2C_RMI4)	+=  synaptics_i2c_rmi4/
 TOUCH_LISTS := $(subst ",,$(CONFIG_TOUCHSCREEN_MTK_TOUCH))
 obj-y += $(foreach TOUCH,$(TOUCH_LISTS),$(TOUCH)/)
-
-ifneq ($(wildcard $(srctree)/$(src)/k6983v1_64_alpha),)
-obj-$(CONFIG_TOUCHSCREEN_MT6983_ALPHA_SUPPORT) += k6983v1_64_alpha/
-endif
-
-ifneq ($(wildcard $(srctree)/$(src)/k6895v1_64_95t_alpha),)
-obj-$(CONFIG_TOUCHSCREEN_MT6895_ALPHA_SUPPORT) += k6895v1_64_95t_alpha/
-endif

@@ -1,7 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (C) 2000-2002 Joakim Axelsson <gozem@linux.nu>
  *                         Patrick Schaaf <bof@bof.de>
  *			   Martin Josefsson <gandalf@wlug.westbo.se>
+ * Copyright (C) 2003-2013 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 /* Kernel module implementing an IP set type: the bitmap:ip,mac type */
@@ -27,7 +31,7 @@
 #define IPSET_TYPE_REV_MAX	3	/* skbinfo support added */
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@netfilter.org>");
+MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
 IP_SET_MODULE_DESC("bitmap:ip,mac", IPSET_TYPE_REV_MIN, IPSET_TYPE_REV_MAX);
 MODULE_ALIAS("ip_set_bitmap:ip,mac");
 
@@ -49,7 +53,7 @@ struct bitmap_ipmac {
 	size_t memsize;		/* members size */
 	struct timer_list gc;	/* garbage collector */
 	struct ip_set *set;	/* attached to this ip_set */
-	unsigned char extensions[]	/* MAC + data extensions */
+	unsigned char extensions[0]	/* MAC + data extensions */
 		__aligned(__alignof__(u64));
 };
 
@@ -65,7 +69,7 @@ struct bitmap_ipmac_elem {
 	unsigned char filled;
 } __aligned(__alignof__(u64));
 
-static u32
+static inline u32
 ip_to_id(const struct bitmap_ipmac *m, u32 ip)
 {
 	return ip - m->first_ip;
@@ -79,7 +83,7 @@ ip_to_id(const struct bitmap_ipmac *m, u32 ip)
 
 /* Common functions */
 
-static int
+static inline int
 bitmap_ipmac_do_test(const struct bitmap_ipmac_adt_elem *e,
 		     const struct bitmap_ipmac *map, size_t dsize)
 {
@@ -94,7 +98,7 @@ bitmap_ipmac_do_test(const struct bitmap_ipmac_adt_elem *e,
 	return -EAGAIN;
 }
 
-static int
+static inline int
 bitmap_ipmac_gc_test(u16 id, const struct bitmap_ipmac *map, size_t dsize)
 {
 	const struct bitmap_ipmac_elem *elem;
@@ -106,13 +110,13 @@ bitmap_ipmac_gc_test(u16 id, const struct bitmap_ipmac *map, size_t dsize)
 	return elem->filled == MAC_FILLED;
 }
 
-static int
+static inline int
 bitmap_ipmac_is_filled(const struct bitmap_ipmac_elem *elem)
 {
 	return elem->filled == MAC_FILLED;
 }
 
-static int
+static inline int
 bitmap_ipmac_add_timeout(unsigned long *timeout,
 			 const struct bitmap_ipmac_adt_elem *e,
 			 const struct ip_set_ext *ext, struct ip_set *set,
@@ -139,7 +143,7 @@ bitmap_ipmac_add_timeout(unsigned long *timeout,
 	return 0;
 }
 
-static int
+static inline int
 bitmap_ipmac_do_add(const struct bitmap_ipmac_adt_elem *e,
 		    struct bitmap_ipmac *map, u32 flags, size_t dsize)
 {
@@ -177,14 +181,14 @@ bitmap_ipmac_do_add(const struct bitmap_ipmac_adt_elem *e,
 	return IPSET_ADD_STORE_PLAIN_TIMEOUT;
 }
 
-static int
+static inline int
 bitmap_ipmac_do_del(const struct bitmap_ipmac_adt_elem *e,
 		    struct bitmap_ipmac *map)
 {
 	return !test_and_clear_bit(e->id, map->members);
 }
 
-static int
+static inline int
 bitmap_ipmac_do_list(struct sk_buff *skb, const struct bitmap_ipmac *map,
 		     u32 id, size_t dsize)
 {
@@ -197,7 +201,7 @@ bitmap_ipmac_do_list(struct sk_buff *skb, const struct bitmap_ipmac *map,
 		nla_put(skb, IPSET_ATTR_ETHER, ETH_ALEN, elem->ether));
 }
 
-static int
+static inline int
 bitmap_ipmac_do_head(struct sk_buff *skb, const struct bitmap_ipmac *map)
 {
 	return nla_put_ipaddr4(skb, IPSET_ATTR_IP, htonl(map->first_ip)) ||
@@ -363,7 +367,7 @@ bitmap_ipmac_create(struct net *net, struct ip_set *set, struct nlattr *tb[],
 	map->memsize = BITS_TO_LONGS(elements) * sizeof(unsigned long);
 	set->variant = &bitmap_ipmac;
 	if (!init_map_ipmac(set, map, first_ip, last_ip, elements)) {
-		ip_set_free(map);
+		kfree(map);
 		return -ENOMEM;
 	}
 	if (tb[IPSET_ATTR_TIMEOUT]) {

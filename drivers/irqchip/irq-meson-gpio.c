@@ -1,9 +1,22 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 Endless Mobile, Inc.
  * Author: Carlo Caione <carlo@endlessm.com>
  * Copyright (c) 2016 BayLibre, SAS.
  * Author: Jerome Brunet <jbrunet@baylibre.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * The full GNU General Public License is included in this distribution
+ * in the file called COPYING.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -15,7 +28,6 @@
 #include <linux/irqchip.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_irq.h>
 
 #define NUM_CHANNEL 8
 #define MAX_INPUT_MUX 256
@@ -25,101 +37,34 @@
 #define REG_PIN_47_SEL	0x08
 #define REG_FILTER_SEL	0x0c
 
-/* use for A1 like chips */
-#define REG_PIN_A1_SEL	0x04
-
-/*
- * Note: The S905X3 datasheet reports that BOTH_EDGE is controlled by
- * bits 24 to 31. Tests on the actual HW show that these bits are
- * stuck at 0. Bits 8 to 15 are responsive and have the expected
- * effect.
- */
-#define REG_EDGE_POL_EDGE(params, x)	BIT((params)->edge_single_offset + (x))
-#define REG_EDGE_POL_LOW(params, x)	BIT((params)->pol_low_offset + (x))
-#define REG_BOTH_EDGE(params, x)	BIT((params)->edge_both_offset + (x))
-#define REG_EDGE_POL_MASK(params, x)    (	\
-		REG_EDGE_POL_EDGE(params, x) |	\
-		REG_EDGE_POL_LOW(params, x)  |	\
-		REG_BOTH_EDGE(params, x))
+#define REG_EDGE_POL_MASK(x)	(BIT(x) | BIT(16 + (x)))
+#define REG_EDGE_POL_EDGE(x)	BIT(x)
+#define REG_EDGE_POL_LOW(x)	BIT(16 + (x))
 #define REG_PIN_SEL_SHIFT(x)	(((x) % 4) * 8)
 #define REG_FILTER_SEL_SHIFT(x)	((x) * 4)
 
-struct meson_gpio_irq_controller;
-static void meson8_gpio_irq_sel_pin(struct meson_gpio_irq_controller *ctl,
-				    unsigned int channel, unsigned long hwirq);
-static void meson_gpio_irq_init_dummy(struct meson_gpio_irq_controller *ctl);
-static void meson_a1_gpio_irq_sel_pin(struct meson_gpio_irq_controller *ctl,
-				      unsigned int channel,
-				      unsigned long hwirq);
-static void meson_a1_gpio_irq_init(struct meson_gpio_irq_controller *ctl);
-
-struct irq_ctl_ops {
-	void (*gpio_irq_sel_pin)(struct meson_gpio_irq_controller *ctl,
-				 unsigned int channel, unsigned long hwirq);
-	void (*gpio_irq_init)(struct meson_gpio_irq_controller *ctl);
-};
-
 struct meson_gpio_irq_params {
 	unsigned int nr_hwirq;
-	bool support_edge_both;
-	unsigned int edge_both_offset;
-	unsigned int edge_single_offset;
-	unsigned int pol_low_offset;
-	unsigned int pin_sel_mask;
-	struct irq_ctl_ops ops;
 };
 
-#define INIT_MESON_COMMON(irqs, init, sel)			\
-	.nr_hwirq = irqs,					\
-	.ops = {						\
-		.gpio_irq_init = init,				\
-		.gpio_irq_sel_pin = sel,			\
-	},
-
-#define INIT_MESON8_COMMON_DATA(irqs)				\
-	INIT_MESON_COMMON(irqs, meson_gpio_irq_init_dummy,	\
-			  meson8_gpio_irq_sel_pin)		\
-	.edge_single_offset = 0,				\
-	.pol_low_offset = 16,					\
-	.pin_sel_mask = 0xff,					\
-
-#define INIT_MESON_A1_COMMON_DATA(irqs)				\
-	INIT_MESON_COMMON(irqs, meson_a1_gpio_irq_init,		\
-			  meson_a1_gpio_irq_sel_pin)		\
-	.support_edge_both = true,				\
-	.edge_both_offset = 16,					\
-	.edge_single_offset = 8,				\
-	.pol_low_offset = 0,					\
-	.pin_sel_mask = 0x7f,					\
-
 static const struct meson_gpio_irq_params meson8_params = {
-	INIT_MESON8_COMMON_DATA(134)
+	.nr_hwirq = 134,
 };
 
 static const struct meson_gpio_irq_params meson8b_params = {
-	INIT_MESON8_COMMON_DATA(119)
+	.nr_hwirq = 119,
 };
 
 static const struct meson_gpio_irq_params gxbb_params = {
-	INIT_MESON8_COMMON_DATA(133)
+	.nr_hwirq = 133,
 };
 
 static const struct meson_gpio_irq_params gxl_params = {
-	INIT_MESON8_COMMON_DATA(110)
+	.nr_hwirq = 110,
 };
 
 static const struct meson_gpio_irq_params axg_params = {
-	INIT_MESON8_COMMON_DATA(100)
-};
-
-static const struct meson_gpio_irq_params sm1_params = {
-	INIT_MESON8_COMMON_DATA(100)
-	.support_edge_both = true,
-	.edge_both_offset = 8,
-};
-
-static const struct meson_gpio_irq_params a1_params = {
-	INIT_MESON_A1_COMMON_DATA(62)
+	.nr_hwirq = 100,
 };
 
 static const struct of_device_id meson_irq_gpio_matches[] = {
@@ -129,15 +74,12 @@ static const struct of_device_id meson_irq_gpio_matches[] = {
 	{ .compatible = "amlogic,meson-gxl-gpio-intc", .data = &gxl_params },
 	{ .compatible = "amlogic,meson-axg-gpio-intc", .data = &axg_params },
 	{ .compatible = "amlogic,meson-g12a-gpio-intc", .data = &axg_params },
-	{ .compatible = "amlogic,meson-sm1-gpio-intc", .data = &sm1_params },
-	{ .compatible = "amlogic,meson-a1-gpio-intc", .data = &a1_params },
 	{ }
 };
 
 struct meson_gpio_irq_controller {
-	const struct meson_gpio_irq_params *params;
+	unsigned int nr_hwirq;
 	void __iomem *base;
-	struct irq_domain *domain;
 	u32 channel_irqs[NUM_CHANNEL];
 	DECLARE_BITMAP(channel_map, NUM_CHANNEL);
 	spinlock_t lock;
@@ -146,56 +88,17 @@ struct meson_gpio_irq_controller {
 static void meson_gpio_irq_update_bits(struct meson_gpio_irq_controller *ctl,
 				       unsigned int reg, u32 mask, u32 val)
 {
-	unsigned long flags;
 	u32 tmp;
-
-	spin_lock_irqsave(&ctl->lock, flags);
 
 	tmp = readl_relaxed(ctl->base + reg);
 	tmp &= ~mask;
 	tmp |= val;
 	writel_relaxed(tmp, ctl->base + reg);
-
-	spin_unlock_irqrestore(&ctl->lock, flags);
 }
 
-static void meson_gpio_irq_init_dummy(struct meson_gpio_irq_controller *ctl)
+static unsigned int meson_gpio_irq_channel_to_reg(unsigned int channel)
 {
-}
-
-static void meson8_gpio_irq_sel_pin(struct meson_gpio_irq_controller *ctl,
-				    unsigned int channel, unsigned long hwirq)
-{
-	unsigned int reg_offset;
-	unsigned int bit_offset;
-
-	reg_offset = (channel < 4) ? REG_PIN_03_SEL : REG_PIN_47_SEL;
-	bit_offset = REG_PIN_SEL_SHIFT(channel);
-
-	meson_gpio_irq_update_bits(ctl, reg_offset,
-				   ctl->params->pin_sel_mask << bit_offset,
-				   hwirq << bit_offset);
-}
-
-static void meson_a1_gpio_irq_sel_pin(struct meson_gpio_irq_controller *ctl,
-				      unsigned int channel,
-				      unsigned long hwirq)
-{
-	unsigned int reg_offset;
-	unsigned int bit_offset;
-
-	bit_offset = ((channel % 2) == 0) ? 0 : 16;
-	reg_offset = REG_PIN_A1_SEL + ((channel / 2) << 2);
-
-	meson_gpio_irq_update_bits(ctl, reg_offset,
-				   ctl->params->pin_sel_mask << bit_offset,
-				   hwirq << bit_offset);
-}
-
-/* For a1 or later chips like a1 there is a switch to enable/disable irq */
-static void meson_a1_gpio_irq_init(struct meson_gpio_irq_controller *ctl)
-{
-	meson_gpio_irq_update_bits(ctl, REG_EDGE_POL, BIT(31), BIT(31));
+	return (channel < 4) ? REG_PIN_03_SEL : REG_PIN_47_SEL;
 }
 
 static int
@@ -203,15 +106,14 @@ meson_gpio_irq_request_channel(struct meson_gpio_irq_controller *ctl,
 			       unsigned long  hwirq,
 			       u32 **channel_hwirq)
 {
-	unsigned long flags;
-	unsigned int idx;
+	unsigned int reg, idx;
 
-	spin_lock_irqsave(&ctl->lock, flags);
+	spin_lock(&ctl->lock);
 
 	/* Find a free channel */
 	idx = find_first_zero_bit(ctl->channel_map, NUM_CHANNEL);
 	if (idx >= NUM_CHANNEL) {
-		spin_unlock_irqrestore(&ctl->lock, flags);
+		spin_unlock(&ctl->lock);
 		pr_err("No channel available\n");
 		return -ENOSPC;
 	}
@@ -219,13 +121,14 @@ meson_gpio_irq_request_channel(struct meson_gpio_irq_controller *ctl,
 	/* Mark the channel as used */
 	set_bit(idx, ctl->channel_map);
 
-	spin_unlock_irqrestore(&ctl->lock, flags);
-
 	/*
 	 * Setup the mux of the channel to route the signal of the pad
 	 * to the appropriate input of the GIC
 	 */
-	ctl->params->ops.gpio_irq_sel_pin(ctl, idx, hwirq);
+	reg = meson_gpio_irq_channel_to_reg(idx);
+	meson_gpio_irq_update_bits(ctl, reg,
+				   0xff << REG_PIN_SEL_SHIFT(idx),
+				   hwirq << REG_PIN_SEL_SHIFT(idx));
 
 	/*
 	 * Get the hwirq number assigned to this channel through
@@ -234,6 +137,8 @@ meson_gpio_irq_request_channel(struct meson_gpio_irq_controller *ctl,
 	 * it, using the table base.
 	 */
 	*channel_hwirq = &(ctl->channel_irqs[idx]);
+
+	spin_unlock(&ctl->lock);
 
 	pr_debug("hwirq %lu assigned to channel %d - irq %u\n",
 		 hwirq, idx, **channel_hwirq);
@@ -264,9 +169,7 @@ static int meson_gpio_irq_type_setup(struct meson_gpio_irq_controller *ctl,
 {
 	u32 val = 0;
 	unsigned int idx;
-	const struct meson_gpio_irq_params *params;
 
-	params = ctl->params;
 	idx = meson_gpio_irq_get_channel_idx(ctl, channel_hwirq);
 
 	/*
@@ -278,25 +181,21 @@ static int meson_gpio_irq_type_setup(struct meson_gpio_irq_controller *ctl,
 	 */
 	type &= IRQ_TYPE_SENSE_MASK;
 
-	/*
-	 * New controller support EDGE_BOTH trigger. This setting takes
-	 * precedence over the other edge/polarity settings
-	 */
-	if (type == IRQ_TYPE_EDGE_BOTH) {
-		if (!params->support_edge_both)
-			return -EINVAL;
+	if (type == IRQ_TYPE_EDGE_BOTH)
+		return -EINVAL;
 
-		val |= REG_BOTH_EDGE(params, idx);
-	} else {
-		if (type & (IRQ_TYPE_EDGE_RISING | IRQ_TYPE_EDGE_FALLING))
-			val |= REG_EDGE_POL_EDGE(params, idx);
+	if (type & (IRQ_TYPE_EDGE_RISING | IRQ_TYPE_EDGE_FALLING))
+		val |= REG_EDGE_POL_EDGE(idx);
 
-		if (type & (IRQ_TYPE_LEVEL_LOW | IRQ_TYPE_EDGE_FALLING))
-			val |= REG_EDGE_POL_LOW(params, idx);
-	}
+	if (type & (IRQ_TYPE_LEVEL_LOW | IRQ_TYPE_EDGE_FALLING))
+		val |= REG_EDGE_POL_LOW(idx);
+
+	spin_lock(&ctl->lock);
 
 	meson_gpio_irq_update_bits(ctl, REG_EDGE_POL,
-				   REG_EDGE_POL_MASK(params, idx), val);
+				   REG_EDGE_POL_MASK(idx), val);
+
+	spin_unlock(&ctl->lock);
 
 	return 0;
 }
@@ -313,7 +212,7 @@ static unsigned int meson_gpio_irq_type_output(unsigned int type)
 	 */
 	if (sense & (IRQ_TYPE_LEVEL_HIGH | IRQ_TYPE_LEVEL_LOW))
 		type |= IRQ_TYPE_LEVEL_HIGH;
-	else
+	else if (sense & (IRQ_TYPE_EDGE_RISING | IRQ_TYPE_EDGE_FALLING))
 		type |= IRQ_TYPE_EDGE_RISING;
 
 	return type;
@@ -438,17 +337,19 @@ static const struct irq_domain_ops meson_gpio_irq_domain_ops = {
 	.translate	= meson_gpio_irq_domain_translate,
 };
 
-static int meson_gpio_irq_parse_dt(struct device_node *node,
-				   struct meson_gpio_irq_controller *ctl)
+static int __init meson_gpio_irq_parse_dt(struct device_node *node,
+					  struct meson_gpio_irq_controller *ctl)
 {
 	const struct of_device_id *match;
+	const struct meson_gpio_irq_params *params;
 	int ret;
 
 	match = of_match_node(meson_irq_gpio_matches, node);
 	if (!match)
 		return -ENODEV;
 
-	ctl->params = match->data;
+	params = match->data;
+	ctl->nr_hwirq = params->nr_hwirq;
 
 	ret = of_property_read_variable_u32_array(node,
 						  "amlogic,channel-interrupts",
@@ -460,89 +361,65 @@ static int meson_gpio_irq_parse_dt(struct device_node *node,
 		return ret;
 	}
 
-	ctl->params->ops.gpio_irq_init(ctl);
-
 	return 0;
 }
 
-static int meson_gpio_intc_probe(struct platform_device *pdev)
+static int __init meson_gpio_irq_of_init(struct device_node *node,
+					 struct device_node *parent)
 {
-	struct device_node *node = pdev->dev.of_node, *parent;
+	struct irq_domain *domain, *parent_domain;
 	struct meson_gpio_irq_controller *ctl;
-	struct irq_domain *parent_domain;
-	struct resource *res;
 	int ret;
 
-	parent = of_irq_find_parent(node);
 	if (!parent) {
-		dev_err(&pdev->dev, "missing parent interrupt node\n");
+		pr_err("missing parent interrupt node\n");
 		return -ENODEV;
 	}
 
 	parent_domain = irq_find_host(parent);
 	if (!parent_domain) {
-		dev_err(&pdev->dev, "unable to obtain parent domain\n");
+		pr_err("unable to obtain parent domain\n");
 		return -ENXIO;
 	}
 
-	ctl = devm_kzalloc(&pdev->dev, sizeof(*ctl), GFP_KERNEL);
+	ctl = kzalloc(sizeof(*ctl), GFP_KERNEL);
 	if (!ctl)
 		return -ENOMEM;
 
 	spin_lock_init(&ctl->lock);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ctl->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(ctl->base))
-		return PTR_ERR(ctl->base);
+	ctl->base = of_iomap(node, 0);
+	if (!ctl->base) {
+		ret = -ENOMEM;
+		goto free_ctl;
+	}
 
 	ret = meson_gpio_irq_parse_dt(node, ctl);
 	if (ret)
-		return ret;
+		goto free_channel_irqs;
 
-	ctl->domain = irq_domain_create_hierarchy(parent_domain, 0,
-						  ctl->params->nr_hwirq,
-						  of_node_to_fwnode(node),
-						  &meson_gpio_irq_domain_ops,
-						  ctl);
-	if (!ctl->domain) {
-		dev_err(&pdev->dev, "failed to add domain\n");
-		return -ENODEV;
+	domain = irq_domain_create_hierarchy(parent_domain, 0, ctl->nr_hwirq,
+					     of_node_to_fwnode(node),
+					     &meson_gpio_irq_domain_ops,
+					     ctl);
+	if (!domain) {
+		pr_err("failed to add domain\n");
+		ret = -ENODEV;
+		goto free_channel_irqs;
 	}
 
-	platform_set_drvdata(pdev, ctl);
-
-	dev_info(&pdev->dev, "%d to %d gpio interrupt mux initialized\n",
-		 ctl->params->nr_hwirq, NUM_CHANNEL);
+	pr_info("%d to %d gpio interrupt mux initialized\n",
+		ctl->nr_hwirq, NUM_CHANNEL);
 
 	return 0;
+
+free_channel_irqs:
+	iounmap(ctl->base);
+free_ctl:
+	kfree(ctl);
+
+	return ret;
 }
 
-static int meson_gpio_intc_remove(struct platform_device *pdev)
-{
-	struct meson_gpio_irq_controller *ctl = platform_get_drvdata(pdev);
-
-	irq_domain_remove(ctl->domain);
-
-	return 0;
-}
-
-static const struct of_device_id meson_gpio_intc_of_match[] = {
-	{ .compatible = "amlogic,meson-gpio-intc", },
-	{},
-};
-MODULE_DEVICE_TABLE(of, meson_gpio_intc_of_match);
-
-static struct platform_driver meson_gpio_intc_driver = {
-	.probe  = meson_gpio_intc_probe,
-	.remove = meson_gpio_intc_remove,
-	.driver = {
-		.name = "meson-gpio-intc",
-		.of_match_table = meson_gpio_intc_of_match,
-	},
-};
-module_platform_driver(meson_gpio_intc_driver);
-
-MODULE_AUTHOR("Jerome Brunet <jbrunet@baylibre.com>");
-MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:meson-gpio-intc");
+IRQCHIP_DECLARE(meson_gpio_intc, "amlogic,meson-gpio-intc",
+		meson_gpio_irq_of_init);

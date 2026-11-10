@@ -1,5 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (C) 2003-2013 Jozsef Kadlecsik <kadlec@netfilter.org> */
+/* Copyright (C) 2003-2013 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
 
 /* Kernel module implementing an IP set type: the hash:ip,port,net type */
 
@@ -30,7 +34,7 @@
 #define IPSET_TYPE_REV_MAX	7 /* skbinfo support added */
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@netfilter.org>");
+MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
 IP_SET_MODULE_DESC("hash:ip,port,net", IPSET_TYPE_REV_MIN, IPSET_TYPE_REV_MAX);
 MODULE_ALIAS("ip_set_hash:ip,port,net");
 
@@ -59,7 +63,7 @@ struct hash_ipportnet4_elem {
 
 /* Common functions */
 
-static bool
+static inline bool
 hash_ipportnet4_data_equal(const struct hash_ipportnet4_elem *ip1,
 			   const struct hash_ipportnet4_elem *ip2,
 			   u32 *multi)
@@ -71,25 +75,25 @@ hash_ipportnet4_data_equal(const struct hash_ipportnet4_elem *ip1,
 	       ip1->proto == ip2->proto;
 }
 
-static int
+static inline int
 hash_ipportnet4_do_data_match(const struct hash_ipportnet4_elem *elem)
 {
 	return elem->nomatch ? -ENOTEMPTY : 1;
 }
 
-static void
+static inline void
 hash_ipportnet4_data_set_flags(struct hash_ipportnet4_elem *elem, u32 flags)
 {
 	elem->nomatch = !!((flags >> 16) & IPSET_FLAG_NOMATCH);
 }
 
-static void
+static inline void
 hash_ipportnet4_data_reset_flags(struct hash_ipportnet4_elem *elem, u8 *flags)
 {
 	swap(*flags, elem->nomatch);
 }
 
-static void
+static inline void
 hash_ipportnet4_data_netmask(struct hash_ipportnet4_elem *elem, u8 cidr)
 {
 	elem->ip2 &= ip_set_netmask(cidr);
@@ -116,7 +120,7 @@ nla_put_failure:
 	return true;
 }
 
-static void
+static inline void
 hash_ipportnet4_data_next(struct hash_ipportnet4_elem *next,
 			  const struct hash_ipportnet4_elem *d)
 {
@@ -159,12 +163,12 @@ static int
 hash_ipportnet4_uadt(struct ip_set *set, struct nlattr *tb[],
 		     enum ipset_adt adt, u32 *lineno, u32 flags, bool retried)
 {
-	struct hash_ipportnet4 *h = set->data;
+	const struct hash_ipportnet4 *h = set->data;
 	ipset_adtfn adtfn = set->variant->adt[adt];
 	struct hash_ipportnet4_elem e = { .cidr = HOST_MASK - 1 };
 	struct ip_set_ext ext = IP_SET_INIT_UEXT(set);
 	u32 ip = 0, ip_to = 0, p = 0, port, port_to;
-	u32 ip2_from = 0, ip2_to = 0, ip2, i = 0;
+	u32 ip2_from = 0, ip2_to = 0, ip2;
 	bool with_ports = false;
 	u8 cidr;
 	int ret;
@@ -278,15 +282,9 @@ hash_ipportnet4_uadt(struct ip_set *set, struct nlattr *tb[],
 		for (; p <= port_to; p++) {
 			e.port = htons(p);
 			do {
-				i++;
 				e.ip2 = htonl(ip2);
 				ip2 = ip_set_range_to_cidr(ip2, ip2_to, &cidr);
 				e.cidr = cidr - 1;
-				if (i > IPSET_MAX_RANGE) {
-					hash_ipportnet4_data_next(&h->next,
-								  &e);
-					return -ERANGE;
-				}
 				ret = adtfn(set, &e, &ext, &ext, flags);
 
 				if (ret && !ip_set_eexist(ret, flags))
@@ -314,7 +312,7 @@ struct hash_ipportnet6_elem {
 
 /* Common functions */
 
-static bool
+static inline bool
 hash_ipportnet6_data_equal(const struct hash_ipportnet6_elem *ip1,
 			   const struct hash_ipportnet6_elem *ip2,
 			   u32 *multi)
@@ -326,25 +324,25 @@ hash_ipportnet6_data_equal(const struct hash_ipportnet6_elem *ip1,
 	       ip1->proto == ip2->proto;
 }
 
-static int
+static inline int
 hash_ipportnet6_do_data_match(const struct hash_ipportnet6_elem *elem)
 {
 	return elem->nomatch ? -ENOTEMPTY : 1;
 }
 
-static void
+static inline void
 hash_ipportnet6_data_set_flags(struct hash_ipportnet6_elem *elem, u32 flags)
 {
 	elem->nomatch = !!((flags >> 16) & IPSET_FLAG_NOMATCH);
 }
 
-static void
+static inline void
 hash_ipportnet6_data_reset_flags(struct hash_ipportnet6_elem *elem, u8 *flags)
 {
 	swap(*flags, elem->nomatch);
 }
 
-static void
+static inline void
 hash_ipportnet6_data_netmask(struct hash_ipportnet6_elem *elem, u8 cidr)
 {
 	ip6_netmask(&elem->ip2, cidr);
@@ -371,7 +369,7 @@ nla_put_failure:
 	return true;
 }
 
-static void
+static inline void
 hash_ipportnet6_data_next(struct hash_ipportnet6_elem *next,
 			  const struct hash_ipportnet6_elem *d)
 {

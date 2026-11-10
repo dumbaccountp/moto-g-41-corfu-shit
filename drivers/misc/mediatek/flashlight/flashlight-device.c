@@ -5,23 +5,7 @@
 
 #include "flashlight-core.h"
 
-#if defined(CONFIG_MTK_FLASHLIGHT_AW36515)
-	const struct flashlight_device_id flashlight_id[] = {
-	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
-        {0, 0, 0, "flashlights-aw36515", 0, 1},
-//        {0, 1, 0, "flashlights-aw36515", 1, 0},
-};
-#elif defined(CONFIG_MTK_FLASHLIGHT_DEVONF)
-const struct flashlight_device_id flashlight_id[] = {
-	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
-	{0, 0, 0, "flashlights-devonf-pwm", 0, 0},
-};
-#elif defined(CONFIG_MTK_FLASHLIGHT_CANCUNF)
-const struct flashlight_device_id flashlight_id[] = {
-	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
-	{0, 0, 0, "flashlights-cancunf-pwm", 0, 0},
-};
-#elif defined(mt6739)
+#if defined(mt6739)
 const struct flashlight_device_id flashlight_id[] = {
 	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
 	{0, 0, 0, "flashlights-rt4505", 0, 0},
@@ -98,23 +82,18 @@ const struct flashlight_device_id flashlight_id[] = {
 	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
 	{0, 0, 0, "flashlights-lm3642", 0, 0},
 };
-#elif defined(CONFIG_MTK_FLASHLIGHT_AW36518)
-	const struct flashlight_device_id flashlight_id[] = {
+#elif defined(CONFIG_MTK_FLASHLIGHT_SYWT78)
+const struct flashlight_device_id flashlight_id[] = {
 	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
-        {0, 0, 0, "aw36518", 0, 0},
-        {0, 1, 0, "aw36518", 1, 0},
+	{0, 0, 0, "flashlights-sywt78", 0, 0},
 };
 #else
 const struct flashlight_device_id flashlight_id[] = {
 	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
-	{0, 0, 0, "flashlights-none", -1, 0},
-	{0, 1, 0, "flashlights-none", -1, 0},
-	{1, 0, 0, "flashlights-none", -1, 0},
-	{1, 1, 0, "flashlights-none", -1, 0},
-	{0, 0, 1, "flashlights-none", -1, 0},
-	{0, 1, 1, "flashlights-none", -1, 0},
-	{1, 0, 1, "flashlights-none", -1, 0},
-	{1, 1, 1, "flashlights-none", -1, 0},
+	{0, 0, 0, "flashlights_ocp8132", 0, 0},
+	{0, 0, 0, "flashlights-corfu-gpio", 0, 1},
+	{0, 0, 0, "flashlights-ocp81373", 0, 1},
+	{0, 0, 0, "flashlights-lm3644", 0, 1},
 };
 #endif
 

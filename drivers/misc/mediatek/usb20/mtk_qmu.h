@@ -6,7 +6,7 @@
 #ifndef _MTK_QMU_H_
 #define _MTK_QMU_H_
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 
 /* for musb_read/write api */
 #include "mtk_musb.h"
@@ -22,7 +22,7 @@
  */
 #define GPD_EXT_LEN (48)
 #define GPD_SZ (16)
-#define DFT_MAX_GPD_NUM 144
+#define DFT_MAX_GPD_NUM 36
 #ifndef MUSB_QMU_LIMIT_SUPPORT
 #define RXQ_NUM 8
 #define TXQ_NUM 8
@@ -49,7 +49,7 @@
 #define CFG_CS_CHECK
 /* #define CFG_EMPTY_CHECK */
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 struct tx_haddr {
 	u8 hiaddr;
 	u8 reserved;
@@ -75,7 +75,7 @@ union gpd_w1 {
 struct TGPD {
 	u8 flag;
 	u8 chksum;
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	union gpd_w1 gpd_w1;
 #else
 	u16 DataBufferLen; /*Rx Allow Length */
@@ -85,7 +85,7 @@ struct TGPD {
 	u32 pBuf;
 
 	u16 bufLen;
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	union gpd_b14 gpd_b14;
 #else
 	u8 ExtLength;
@@ -103,7 +103,7 @@ extern int mtk_host_qmu_concurrent;
 extern int mtk_host_qmu_pipe_msk;
 extern int mtk_host_qmu_force_isoc_restart;
 extern int mtk_host_active_dev_cnt;
-#if IS_ENABLED(CONFIG_MTK_UAC_POWER_SAVING)
+#ifdef CONFIG_MTK_UAC_POWER_SAVING
 extern unsigned int low_power_timer_total_trigger_cnt;
 extern unsigned int low_power_timer_total_wake_cnt;
 extern int low_power_timer_mode2_option;
@@ -361,7 +361,7 @@ u8 PDU_calcCksum(u8 *data, int len);
 #define TGPD_GET_FORMAT(_pd)  \
 	(((((struct TGPD *)_pd)->flag & TGPD_FORMAT_BDP)>>1))
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 #define TGPD_SET_DataBUF_LEN(_pd, _len)  \
 	(((struct TGPD *)_pd)->gpd_w1.DataBufferLen = _len)
 #define TGPD_ADD_DataBUF_LEN(_pd, _len)  \
@@ -376,7 +376,7 @@ u8 PDU_calcCksum(u8 *data, int len);
 #define TGPD_GET_DataBUF_LEN(_pd)       (((struct TGPD *)_pd)->DataBufferLen)
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 #define TGPD_SET_NEXT(_pd, _next)  \
 	(((struct TGPD *)_pd)->pNext = (u32)_next)
 #define TGPD_SET_NEXT_TXHI(_pd, _next)  \
@@ -450,7 +450,7 @@ u8 PDU_calcCksum(u8 *data, int len);
 #define TGPD_ADD_BUF_LEN(_pd, _len) (((struct TGPD *)_pd)->bufLen += _len)
 #define TGPD_GET_BUF_LEN(_pd)       (((struct TGPD *)_pd)->bufLen)
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 #define TGPD_SET_EXT_LEN(_pd, _len)  \
 	(((struct TGPD *)_pd)->gpd_b14.ExtLength = _len)
 #define TGPD_GET_EXT_LEN(_pd)  \

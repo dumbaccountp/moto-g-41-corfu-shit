@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2015 MediaTek Inc.
+ * Copyright (c) 2016 MediaTek Inc.
+ *
+ * Author: Ya-Wen Hsu <Ya-Wen.Hsu@mediatek.com>
+ *
  */
 
 /******************************************************************************
@@ -18,6 +21,7 @@
 /* #include <asm/io.h> */
 /* #include <asm/tcm.h> */
 #include <linux/proc_fs.h> /* proc file use */
+/*  */
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 /* #include <linux/io.h> */
@@ -28,15 +32,9 @@
 #include <linux/sched/clock.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
-#include <linux/pm_runtime.h>
-#include <linux/dma-mapping.h>
-#include <linux/dma-buf.h>
-#include <soc/mediatek/smi.h>
-#include <linux/suspend.h>
-#include <linux/rtc.h>
 
 /*#include <linux/xlog.h>		 For xlog_printk(). */
-
+/*  */
 /*#include <mach/hardware.h>*/
 /* #include <mach/mt6593_pll.h> */
 #include "camera_rsc.h"
@@ -46,36 +44,26 @@
 /* For clock mgr APIS. enable_clock()/disable_clock(). */
 /* #include <mach/mt_clkmgr.h> */
 /* #endif */
-#define CHECK_SERVICE_IF_0	0
-#define CHECK_SERVICE_IF_1	1
-#define NUM_BASEADDR 7
-
-#if CHECK_SERVICE_IF_0
 #include <mt-plat/sync_write.h> /* For mt65xx_reg_sync_writel(). */
-#endif
 /* For spm_enable_sodi()/spm_disable_sodi(). */
 /* #include <mach/mt_spm_idle.h> */
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
 
-#include "linux/soc/mediatek/mtk-cmdq-ext.h"
+#include "linux/soc/mediatek/mtk-cmdq.h"
 
 #ifdef CONFIG_MTK_IOMMU_V2
 #include <mach/mt_iommu.h>
 #else /* CONFIG_MTK_IOMMU_V2 */
-#if CHECK_SERVICE_IF_0
 #include <m4u.h>
-#endif
 #endif /* CONFIG_MTK_IOMMU_V2 */
-#if CHECK_SERVICE_IF_0
 #include "mach/pseudo_m4u.h"
+
 #include <smi_public.h>
-#endif
 #include "../engine_request.h"
 
 #define RSC_PMQOS_EN
-
 #if defined(RSC_PMQOS_EN) && defined(CONFIG_MTK_QOS_SUPPORT)
 #include <linux/pm_qos.h>
 #endif
@@ -87,7 +75,7 @@
 #include <linux/met_drv.h>
 #include <linux/mtk_ftrace.h>
 #endif
-#if CHECK_SERVICE_IF_0
+#if 0
 /* Another Performance Measure Usage */
 #include <linux/ftrace_event.h>
 #include <linux/kallsyms.h>
@@ -126,7 +114,6 @@ static unsigned long __read_mostly tracing_mark_write_addr;
 /* CCF */
 #if !defined(CONFIG_MTK_LEGACY) && defined(CONFIG_COMMON_CLK) /*CCF*/
 #include <linux/clk.h>
-
 struct RSC_CLK_STRUCT {
 /* TODO */
 #define SMI_CLK
@@ -144,7 +131,6 @@ struct RSC_CLK_STRUCT {
 	struct clk *CG_MM_LARB5;
 	struct clk *CG_IPESYS_LARB;
 #endif
-	struct clk *CG_IPESYS_LARB20;
 	struct clk *CG_IPESYS_RSC;
 };
 struct RSC_CLK_STRUCT rsc_clk;
@@ -194,12 +180,8 @@ struct RSC_CLK_STRUCT rsc_clk;
  ******************************************************************************/
 /* #define RSC_WR32(addr, data)    iowrite32(data, addr) // For other projects.
  */
-#define RSC_WR32(addr, data)    writel(data, addr)
-#define RSC_RD32(addr)          readl(addr)
-
-//#define RSC_WR32(addr, data) mt_reg_sync_writel(data, addr)
-//#define RSC_RD32(addr) ioread32(addr)
-
+#define RSC_WR32(addr, data) mt_reg_sync_writel(data, addr)
+#define RSC_RD32(addr) ioread32(addr)
 /*******************************************************************************
  *
  ******************************************************************************/
@@ -260,7 +242,9 @@ const struct ISR_TABLE RSC_IRQ_CB_TBL[RSC_IRQ_TYPE_AMOUNT] = {
 #endif
 };
 #endif
-
+/*
+ */
+/*  */
 typedef void (*tasklet_cb)(unsigned long);
 struct Tasklet_table {
 	tasklet_cb tkt_cb;
@@ -277,7 +261,7 @@ static struct Tasklet_table RSC_tasklet[RSC_IRQ_TYPE_AMOUNT] = {
 static struct work_struct logWork;
 static void logPrint(struct work_struct *data);
 
-struct wakeup_source RSC_wake_lock;
+//struct wakeup_source RSC_wake_lock;
 
 static DEFINE_MUTEX(gRscMutex);
 static DEFINE_MUTEX(gRscDequeMutex);
@@ -289,7 +273,6 @@ struct RSC_device {
 	void __iomem *regs;
 	struct device *dev;
 	int irq;
-	struct device *larb;
 };
 
 static struct RSC_device *RSC_devs;
@@ -336,14 +319,6 @@ enum RSC_REQUEST_STATE_ENUM {
 	RSC_REQUEST_STATE_TOTAL
 };
 
-/* tee_mmu */
-struct tee_mmu {
-	/* ION case only */
-	struct dma_buf        *dma_buf;
-	struct dma_buf_attachment *attach;
-	struct sg_table *sgt;
-};
-
 struct RSC_REQUEST_STRUCT {
 	enum RSC_REQUEST_STATE_ENUM State;
 	pid_t processID;       /* caller process ID */
@@ -351,17 +326,17 @@ struct RSC_REQUEST_STRUCT {
 
 	unsigned int
 		enqueReqNum;   /* to judge it belongs to which frame package */
-	signed int FrameWRIdx; /* Frame write Index */
-	signed int RrameRDIdx; /* Frame read Index */
+	unsigned int FrameWRIdx; /* Frame write Index */
+	unsigned int RrameRDIdx; /* Frame read Index */
 	enum RSC_FRAME_STATUS_ENUM
 		RscFrameStatus[_SUPPORT_MAX_RSC_FRAME_REQUEST_];
 	struct RSC_Config RscFrameConfig[_SUPPORT_MAX_RSC_FRAME_REQUEST_];
 };
 
 struct RSC_REQUEST_RING_STRUCT {
-	signed int WriteIdx;     /* enque how many request  */
-	signed int ReadIdx;      /* read which request index */
-	signed int HWProcessIdx; /* HWWriteIdx */
+	unsigned int WriteIdx;     /* enque how many request  */
+	unsigned int ReadIdx;      /* read which request index */
+	unsigned int HWProcessIdx; /* HWWriteIdx */
 	struct RSC_REQUEST_STRUCT
 		RSCReq_Struct[_SUPPORT_MAX_RSC_REQUEST_RING_SIZE_];
 };
@@ -409,8 +384,8 @@ struct RSC_INFO_STRUCT {
 	unsigned int DebugMask; /* Debug Mask */
 	signed int IrqNum;
 	struct RSC_IRQ_INFO_STRUCT IrqInfo;
-	signed int WriteReqIdx;
-	signed int ReadReqIdx;
+	unsigned int WriteReqIdx;
+	unsigned int ReadReqIdx;
 	pid_t ProcessID[_SUPPORT_MAX_RSC_FRAME_REQUEST_];
 };
 
@@ -448,14 +423,14 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
  *   for irq used,keep log until IRQ_LOG_PRINTER being involked,
  *   limited:
  *   each log must shorter than 512 bytes
- *   total log length in each irq/logtype can't over 1024 bytes
+ *  total log length in each irq/logtype can't over 1024 bytes
  */
-#if CHECK_SERVICE_IF_1
+#if 1
 #define IRQ_LOG_KEEPER(irq, ppb, logT, fmt, ...) do {\
 	char *ptr; \
 	char *pDes;\
 	int avaLen;\
-	int snprintf_ret = 0;\
+	int ret;\
 	unsigned int *ptr2 = &gSvLog[irq]._cnt[ppb][logT];\
 	unsigned int str_leng;\
 	unsigned int logi;\
@@ -473,10 +448,10 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
 		&(gSvLog[irq]._str[ppb][logT][gSvLog[irq]._cnt[ppb][logT]]);   \
 	avaLen = str_leng - 1 - gSvLog[irq]._cnt[ppb][logT];\
 	if (avaLen > 1) {\
-		snprintf_ret = snprintf((char *)(pDes), avaLen, fmt,\
+		ret = snprintf((char *)(pDes), avaLen, fmt,\
 			##__VA_ARGS__);   \
-		if (snprintf_ret < 0)\
-			LOG_ERR("snprintf encode fail!");\
+		if (ret < 0)\
+			LOG_ERR("snprintf error");\
 		if ('\0' != gSvLog[irq]._str[ppb][logT][str_leng - 1]) {\
 			LOG_ERR("log str over flow(%d)", irq);\
 		} \
@@ -541,9 +516,10 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
 			ptr = pDes = (char *)\
 			&(pSrc->_str[ppb][logT][pSrc->_cnt[ppb][logT]]);\
 			ptr2 = &(pSrc->_cnt[ppb][logT]);\
-			snprintf_ret = snprintf((char *)(pDes), avaLen, fmt, ##__VA_ARGS__);  \
-			if (snprintf_ret < 0)\
-				LOG_ERR("snprintf encode fail!");\
+			ret = snprintf((char *)(pDes), avaLen, fmt,\
+							##__VA_ARGS__);  \
+			if (ret < 0)\
+				LOG_ERR("snprintf error");\
 			while (*ptr++ != '\0') {\
 				(*ptr2)++;\
 			} \
@@ -556,13 +532,13 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
 "KEEPER", "[%s] " fmt, __func__, ##__VA_ARGS__)
 #endif
 
-#if CHECK_SERVICE_IF_1
+#if 1
 #define IRQ_LOG_PRINTER(irq, ppb_in, logT_in) do {\
 	struct SV_LOG_STR *pSrc = &gSvLog[irq];\
 	char *ptr;\
 	unsigned int i;\
-	signed int ppb = 0;\
-	signed int logT = 0;\
+	unsigned int ppb = 0;\
+	unsigned int logT = 0;\
 	if (ppb_in > 1) {\
 		ppb = 1;\
 	} else {\
@@ -570,7 +546,7 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
 	} \
 	if (logT_in > _LOG_ERR) {\
 		logT = _LOG_ERR;\
-	} else {\
+	} else{\
 		logT = logT_in;\
 	} \
 	ptr = pSrc->_str[ppb][logT];\
@@ -580,7 +556,7 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
 				if (ptr[NORMAL_STR_LEN*(i+1) - 1] != '\0') {\
 					ptr[NORMAL_STR_LEN*(i+1) - 1] = '\0';\
 					LOG_DBG("%s", &ptr[NORMAL_STR_LEN*i]);\
-				} else {\
+				} else{\
 					LOG_DBG("%s", &ptr[NORMAL_STR_LEN*i]);\
 					break;\
 				} \
@@ -591,7 +567,7 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
 			if (ptr[NORMAL_STR_LEN*(i+1) - 1] != '\0') {\
 				ptr[NORMAL_STR_LEN*(i+1) - 1] = '\0';\
 				LOG_INF("%s", &ptr[NORMAL_STR_LEN*i]);\
-			} else {\
+			} else{\
 				LOG_INF("%s", &ptr[NORMAL_STR_LEN*i]);\
 				break;\
 			} \
@@ -602,7 +578,7 @@ static struct SV_LOG_STR gSvLog[RSC_IRQ_TYPE_AMOUNT];
 			if (ptr[NORMAL_STR_LEN*(i+1) - 1] != '\0') {\
 				ptr[NORMAL_STR_LEN*(i+1) - 1] = '\0';\
 				LOG_ERR("%s", &ptr[NORMAL_STR_LEN*i]);\
-			} else {\
+			} else{\
 				LOG_ERR("%s", &ptr[NORMAL_STR_LEN*i]);\
 				break;\
 			} \
@@ -859,6 +835,7 @@ RSC_GetIRQState(unsigned int type, unsigned int userNumber, unsigned int stus,
 	unsigned int ret = 0;
 	unsigned long flags;
 
+	/*  */
 	spin_lock_irqsave(&(RSCInfo.SpinLockIrq[type]), flags);
 
 	if (stus & RSC_INT_ST) {
@@ -869,7 +846,7 @@ RSC_GetIRQState(unsigned int type, unsigned int userNumber, unsigned int stus,
 			type, userNumber, stus, whichReq, ProcessID);
 	}
 	spin_unlock_irqrestore(&(RSCInfo.SpinLockIrq[type]), flags);
-
+	/*  */
 	return ret;
 }
 
@@ -920,7 +897,7 @@ signed int rsc_enque_cb(struct frame *frames, void *req)
 						sizeof(struct RSC_Config));
 
 		pRscConfig = &_req->m_pRscConfig[f];
-#if CHECK_SERVICE_IF_0
+#if 0
 		LOG_ERR("[%s] request queued with  frame(%d)", __func__, f);
 		LOG_DBG("[%s] RSC_CTRL_REG:0x%x!\n", __func__,
 							pRscConfig->RSC_CTRL);
@@ -976,7 +953,7 @@ signed int rsc_deque_cb(struct frame *frames, void *req)
 									fcnt);
 
 		pRscConfig = &_req->m_pRscConfig[f];
-#if CHECK_SERVICE_IF_0
+#if 0
 		LOG_ERR(
 		"[%s] request queued with  frame(%d)", __func__, f);
 		LOG_DBG(
@@ -1027,84 +1004,20 @@ signed int rsc_deque_cb(struct frame *frames, void *req)
 	return 0;
 }
 
-#if CHECK_SERVICE_IF_0
-static bool mmu_get_dma_buffer(struct tee_mmu *mmu, int fd)
-{
-
-	struct dma_buf *buf;
-
-	buf = dma_buf_get(fd);
-	//LOG_INF("RSC_mmu_get_buffer:%x /BUF:%x\n", fd, buf);
-	if (IS_ERR(buf)) {
-		LOG_INF("[error buf]");
-		return false;
-	}
-	mmu->dma_buf = buf;
-	mmu->attach = dma_buf_attach(mmu->dma_buf, RSC_devs->dev);
-	if (IS_ERR(mmu->attach))
-		goto err_attach;
-
-	mmu->sgt = dma_buf_map_attachment(mmu->attach, DMA_BIDIRECTIONAL);
-	if (IS_ERR(mmu->sgt))
-		goto err_map;
-
-	return true;
-
-err_map:
-	dma_buf_detach(mmu->dma_buf, mmu->attach);
-	LOG_INF("[error MAP]");
-
-err_attach:
-	dma_buf_put(mmu->dma_buf);
-	LOG_INF("[error Attach]");
-
-	return false;
-}
-
-static void mmu_release(struct tee_mmu *mmu)
-{
-	if (mmu->dma_buf) {
-		dma_buf_unmap_attachment(mmu->attach, mmu->sgt, DMA_BIDIRECTIONAL);
-		dma_buf_detach(mmu->dma_buf, mmu->attach);
-		dma_buf_put(mmu->dma_buf);
-	}
-}
-
 void rsc_cmdq_cb_destroy(struct cmdq_cb_data data)
 {
-	if (data.data) {
-		int i = 0;
-		unsigned long *pkt_ptr = NULL;
-
-		for (i = 0; i < NUM_BASEADDR; i++)
-			mmu_release(((struct tee_mmu *)(data.data))+i);
-
-		pkt_ptr = (unsigned long *)(((struct tee_mmu *)data.data)+NUM_BASEADDR);
-
-		cmdq_pkt_destroy((struct cmdq_pkt *)(*pkt_ptr));
-		kfree((struct tee_mmu *)data.data);
-	}
+	cmdq_pkt_destroy((struct cmdq_pkt *)data.data);
 #if defined(RSC_PMQOS_EN) && defined(CONFIG_MTK_QOS_SUPPORT)
 	pm_qos_update_request(&rsc_pm_qos_request, 0);
 #endif
 }
 
-unsigned long FD_OFFSET_ADDR[NUM_BASEADDR];
-#endif
 signed int CmdqRSCHW(struct frame *frame)
 {
-	struct RSC_Config *pRscConfig = NULL;
-#if CHECK_SERVICE_IF_0
-	struct tee_mmu *records = NULL;
-	struct tee_mmu mmu;
-	unsigned int hw_array[NUM_BASEADDR];
-	unsigned int fd_array[NUM_BASEADDR];
-	unsigned int offset_array[NUM_BASEADDR];
-	int i = 0;
-#endif
-#if CHECK_SERVICE_IF_1
+	struct RSC_Config *pRscConfig;
+#if 1
 	struct cmdq_pkt *pkt;
-#if CHECK_SERVICE_IF_0
+#if 0
 	uint64_t engineFlag = (uint64_t)(1LL << CMDQ_ENG_RSC);
 #endif
 #if defined(RSC_PMQOS_EN) && defined(CONFIG_MTK_QOS_SUPPORT)
@@ -1145,86 +1058,41 @@ signed int CmdqRSCHW(struct frame *frame)
 	LOG_DBG("RSC_APLI_P_BASE_ADDR_REG:0x%x!\n",
 					pRscConfig->RSC_APLI_P_BASE_ADDR);
 
-#if CHECK_SERVICE_IF_1 // support cmdq mailmox
-
+#if 1 // support cmdq mailmox
 	pkt = cmdq_pkt_create(cmdq_clt);
+
 	cmdq_pkt_write(pkt, cmdq_base, RSC_INT_CTL_HW, 0x1, ~0);
+
 	cmdq_pkt_write(pkt, cmdq_base, RSC_CTRL_HW, pRscConfig->RSC_CTRL, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_SIZE_HW, pRscConfig->RSC_SIZE, ~0);
-#if CHECK_SERVICE_IF_0
-	if (!pRscConfig->IS_LEGACY) {
-		records = kzalloc(sizeof(struct tee_mmu) * NUM_BASEADDR
-					+ sizeof(unsigned long), GFP_KERNEL);
 
-		hw_array[0] = RSC_APLI_C_BASE_ADDR_HW;
-		hw_array[1] = RSC_APLI_P_BASE_ADDR_HW;
-		hw_array[2] = RSC_IMGI_C_BASE_ADDR_HW;
-		hw_array[3] = RSC_IMGI_P_BASE_ADDR_HW;
-		hw_array[4] = RSC_MVI_BASE_ADDR_HW;
-		hw_array[5] = RSC_MVO_BASE_ADDR_HW;
-		hw_array[6] = RSC_BVO_BASE_ADDR_HW;
-
-		fd_array[0] = pRscConfig->RSC_APLI_C_FD;
-		fd_array[1] = pRscConfig->RSC_APLI_P_FD;
-		fd_array[2] = pRscConfig->RSC_IMGI_C_FD;
-		fd_array[3] = pRscConfig->RSC_IMGI_P_FD;
-		fd_array[4] = pRscConfig->RSC_MVI_FD;
-		fd_array[5] = pRscConfig->RSC_MVO_FD;
-		fd_array[6] = pRscConfig->RSC_BVO_FD;
-
-		offset_array[0] = pRscConfig->RSC_APLI_C_OFFSET;
-		offset_array[1] = pRscConfig->RSC_APLI_P_OFFSET;
-		offset_array[2] = pRscConfig->RSC_IMGI_C_OFFSET;
-		offset_array[3] = pRscConfig->RSC_IMGI_P_OFFSET;
-		offset_array[4] = pRscConfig->RSC_MVI_OFFSET;
-		offset_array[5] = pRscConfig->RSC_MVO_OFFSET;
-		offset_array[6] = pRscConfig->RSC_BVO_OFFSET;
-
-		for (i = 0; i < NUM_BASEADDR; i++) {
-			unsigned int success = mmu_get_dma_buffer(&mmu, fd_array[i]);
-
-			if (success) {
-				dma_addr_t dma_addr;
-
-				dma_addr = sg_dma_address(mmu.sgt->sgl);
-				cmdq_pkt_write(pkt, cmdq_base, hw_array[i],
-					dma_addr + offset_array[i], ~0);
-				FD_OFFSET_ADDR[i] = dma_addr + offset_array[i];
-				memcpy(&records[i], &mmu, sizeof(struct tee_mmu));
-			}
-		}
-	} else {
-#endif
-		cmdq_pkt_write(pkt, cmdq_base, RSC_APLI_C_BASE_ADDR_HW,
-				pRscConfig->RSC_APLI_C_BASE_ADDR, ~0);
-		cmdq_pkt_write(pkt, cmdq_base, RSC_APLI_P_BASE_ADDR_HW,
-				pRscConfig->RSC_APLI_P_BASE_ADDR, ~0);
-		cmdq_pkt_write(pkt, cmdq_base, RSC_IMGI_C_BASE_ADDR_HW,
-				pRscConfig->RSC_IMGI_C_BASE_ADDR, ~0);
-		cmdq_pkt_write(pkt, cmdq_base, RSC_IMGI_P_BASE_ADDR_HW,
-				pRscConfig->RSC_IMGI_P_BASE_ADDR, ~0);
-		cmdq_pkt_write(pkt, cmdq_base, RSC_MVI_BASE_ADDR_HW,
-				pRscConfig->RSC_MVI_BASE_ADDR, ~0);
-		cmdq_pkt_write(pkt, cmdq_base, RSC_MVO_BASE_ADDR_HW,
-				pRscConfig->RSC_MVO_BASE_ADDR, ~0);
-		cmdq_pkt_write(pkt, cmdq_base, RSC_BVO_BASE_ADDR_HW,
-				pRscConfig->RSC_BVO_BASE_ADDR, ~0);
-#if CHECK_SERVICE_IF_0
-	}
-#endif
+	cmdq_pkt_write(pkt, cmdq_base, RSC_APLI_C_BASE_ADDR_HW,
+			pRscConfig->RSC_APLI_C_BASE_ADDR, ~0);
+	cmdq_pkt_write(pkt, cmdq_base, RSC_APLI_P_BASE_ADDR_HW,
+			pRscConfig->RSC_APLI_P_BASE_ADDR, ~0);
+	cmdq_pkt_write(pkt, cmdq_base, RSC_IMGI_C_BASE_ADDR_HW,
+			pRscConfig->RSC_IMGI_C_BASE_ADDR, ~0);
+	cmdq_pkt_write(pkt, cmdq_base, RSC_IMGI_P_BASE_ADDR_HW,
+			pRscConfig->RSC_IMGI_P_BASE_ADDR, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_IMGI_C_STRIDE_HW,
 			pRscConfig->RSC_IMGI_C_STRIDE, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_IMGI_P_STRIDE_HW,
 			pRscConfig->RSC_IMGI_P_STRIDE, ~0);
+
+	cmdq_pkt_write(pkt, cmdq_base, RSC_MVI_BASE_ADDR_HW,
+			pRscConfig->RSC_MVI_BASE_ADDR, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_MVI_STRIDE_HW,
 			pRscConfig->RSC_MVI_STRIDE, ~0);
+
+	cmdq_pkt_write(pkt, cmdq_base, RSC_MVO_BASE_ADDR_HW,
+			pRscConfig->RSC_MVO_BASE_ADDR, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_MVO_STRIDE_HW,
 			pRscConfig->RSC_MVO_STRIDE, ~0);
+	cmdq_pkt_write(pkt, cmdq_base, RSC_BVO_BASE_ADDR_HW,
+			pRscConfig->RSC_BVO_BASE_ADDR, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_BVO_STRIDE_HW,
 			pRscConfig->RSC_BVO_STRIDE, ~0);
-
 #ifdef RSC_TUNABLE
-
 	cmdq_pkt_write(pkt, cmdq_base, RSC_MV_OFFSET_HW,
 			pRscConfig->RSC_MV_OFFSET, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_GMV_OFFSET_HW,
@@ -1251,7 +1119,6 @@ signed int CmdqRSCHW(struct frame *frame)
 			pRscConfig->RSC_RAND_PNLTY_GAIN_CTRL0, ~0);
 	cmdq_pkt_write(pkt, cmdq_base, RSC_RAND_PNLTY_GAIN_CTRL_1_HW,
 			pRscConfig->RSC_RAND_PNLTY_GAIN_CTRL1, ~0);
-
 #endif
 	cmdq_pkt_write(pkt, cmdq_base, RSC_DCM_CTL_HW, 0x1111, ~0);
 
@@ -1280,11 +1147,9 @@ signed int CmdqRSCHW(struct frame *frame)
 	/* non-blocking API, Please  use cmdqRecFlushAsync() */
 	//cmdq_task_flush_async_destroy(handle);
 	/* flush and destroy in cmdq */
-	//pkt_addr = (unsigned long *)&records[NUM_BASEADDR];
-	//*pkt_addr = (unsigned long)pkt;
-	//cmdq_pkt_flush_threaded(pkt, rsc_cmdq_cb_destroy, (void *)records);
-	cmdq_pkt_flush(pkt);
-	cmdq_pkt_destroy(pkt);
+	cmdq_pkt_flush_threaded(pkt,
+		rsc_cmdq_cb_destroy, (void *)pkt);
+
 #else  // old cmdq function
 	cmdqRecCreate(CMDQ_SCENARIO_KERNEL_CONFIG_GENERAL, &handle);
 
@@ -1403,7 +1268,7 @@ static const struct engine_ops rsc_ops = {
 	.req_feedback_cb = rsc_feedback,
 };
 
-#if CHECK_SERVICE_IF_0 // old cmdq command no more use in this version
+#if 0 // old cmdq command no more use in this version
 #if defined(RSC_PMQOS_EN) && defined(CONFIG_MTK_QOS_SUPPORT)
 void cmdq_pm_qos_start(struct TaskStruct *task, struct TaskStruct *task_list[],
 								u32 size)
@@ -1437,9 +1302,9 @@ static signed int RSC_DumpReg(void)
 #else
 {
 	signed int Ret = 0;
-
+	/*  */
 	LOG_INF("- E.");
-
+	/*  */
 	LOG_INF("RSC Config Info\n");
 	/* RSC Config0 */
 	LOG_INF("[0x%08X %08X]\n", (unsigned int)(RSC_CTRL_HW),
@@ -1470,6 +1335,9 @@ static signed int RSC_DumpReg(void)
 		(unsigned int)RSC_RD32(RSC_BVO_BASE_ADDR_REG));
 	LOG_INF("[0x%08X %08X]\n", (unsigned int)(RSC_BVO_STRIDE_HW),
 		(unsigned int)RSC_RD32(RSC_BVO_STRIDE_REG));
+
+
+
 
 	LOG_INF("RSC Debug Info\n");
 	LOG_INF("[0x%08X %08X]\n", (unsigned int)(RSC_DBG_INFO_00_HW),
@@ -1503,9 +1371,9 @@ static signed int RSC_DumpReg(void)
 	LOG_INF("[0x%08X %08X]\n", (unsigned int)(RSC_DCM_STAUS_HW),
 		(unsigned int)RSC_RD32(RSC_DCM_STAUS_REG));
 
-	mt_irq_dump_status(RSCInfo.IrqNum);
 
 	LOG_INF("- X.");
+	/*  */
 	return Ret;
 }
 #endif
@@ -1516,18 +1384,8 @@ static inline void RSC_Prepare_Enable_ccf_clock(void)
 	int ret;
 	/* open order:CG_SCP_SYS_MM0>CG_MM_SMI_COMMON>CG_SCP_SYS_ISP>RSC clk */
 #ifdef SMI_CLK
-	//smi_bus_prepare_enable(SMI_LARB20, "camera_rsc");
+	smi_bus_prepare_enable(SMI_LARB20, "camera_rsc");
 #endif
-	pm_runtime_get_sync(RSC_devs->dev);
-
-	ret = mtk_smi_larb_get(RSC_devs->larb);
-	if (ret)
-		LOG_ERR("mtk_smi_larb_get larbvdec fail %d\n", ret);
-
-	ret = clk_prepare_enable(rsc_clk.CG_IPESYS_LARB20);
-	if (ret)
-		LOG_ERR("cannot prepare and enable CG_IPESYS_LARB20 clock\n");
-
 	ret = clk_prepare_enable(rsc_clk.CG_IPESYS_RSC);
 	if (ret)
 		LOG_ERR("cannot prepare and enable CG_IPESYS_RSC clock\n");
@@ -1538,11 +1396,8 @@ static inline void RSC_Disable_Unprepare_ccf_clock(void)
 {
 	/* close order:RSC clk>CG_SCP_SYS_ISP>CG_MM_SMI_COMMON>CG_SCP_SYS_MM0 */
 	clk_disable_unprepare(rsc_clk.CG_IPESYS_RSC);
-	clk_disable_unprepare(rsc_clk.CG_IPESYS_LARB20);
-	mtk_smi_larb_put(RSC_devs->larb);
 #ifdef SMI_CLK
-	//smi_bus_disable_unprepare(SMI_LARB20, "camera_rsc");
-	pm_runtime_put_sync(RSC_devs->dev);
+	smi_bus_disable_unprepare(SMI_LARB20, "camera_rsc");
 #endif
 }
 #endif
@@ -1565,15 +1420,15 @@ static inline int m4u_control_iommu_port(void)
 		sPort.Virtuality = RSC_MEM_USE_VIRTUL;
 		LOG_INF("config M4U Port ePortID=%d\n", sPort.ePortID);
 		#if defined(CONFIG_MTK_M4U) || defined(CONFIG_MTK_PSEUDO_M4U)
-		//ret = m4u_config_port(&sPort);
+		ret = m4u_config_port(&sPort);
 		if (ret == 0) {
 			LOG_INF("config M4U Port %s to %s SUCCESS\n",
-			//iommu_get_port_name(M4U_PORT_L20_IPE_RSC_RDMA0_DISP+i),
-						RSC_MEM_USE_VIRTUL ? "virtual" : "physical");
+			iommu_get_port_name(M4U_PORT_L20_IPE_RSC_RDMA0_DISP+i),
+			RSC_MEM_USE_VIRTUL ? "virtual" : "physical");
 		} else {
 			LOG_INF("config M4U Port %s to %s FAIL(ret=%d)\n",
-			//iommu_get_port_name(M4U_PORT_L20_IPE_RSC_RDMA0_DISP+i),
-						RSC_MEM_USE_VIRTUL ? "virtual" : "physical", ret);
+			iommu_get_port_name(M4U_PORT_L20_IPE_RSC_RDMA0_DISP+i),
+			RSC_MEM_USE_VIRTUL ? "virtual" : "physical", ret);
 			ret = -1;
 		}
 		#endif
@@ -1602,7 +1457,6 @@ static void RSC_EnableClock(bool En)
 		case 0:
 #if !defined(CONFIG_MTK_LEGACY) && defined(CONFIG_COMMON_CLK) /*CCF*/
 #ifndef EP_NO_CLKMGR
-
 			RSC_Prepare_Enable_ccf_clock();
 #else
 			/* Enable clock by hardcode:
@@ -1628,7 +1482,6 @@ static void RSC_EnableClock(bool En)
 		}
 		g_u4EnableClockCount++;
 		mutex_unlock(&gRscClkMutex);
-		//dma_set_mask_and_coherent(RSC_devs->dev, DMA_BIT_MASK(34));
 #ifdef CONFIG_MTK_IOMMU_V2
 		if (g_u4EnableClockCount == 1) {
 			ret = m4u_control_iommu_port();
@@ -1711,6 +1564,7 @@ static signed int RSC_ReadReg(struct RSC_REG_IO_STRUCT *pRegIo)
 {
 	unsigned int i;
 	signed int Ret = 0;
+	/*  */
 	struct RSC_REG_STRUCT reg;
 	/* unsigned int* pData = (unsigned int*)pRegIo->Data; */
 	struct RSC_REG_STRUCT *pData = (struct RSC_REG_STRUCT *) pRegIo->pData;
@@ -1730,6 +1584,7 @@ static signed int RSC_ReadReg(struct RSC_REG_IO_STRUCT *pRegIo)
 			goto EXIT;
 		}
 		/* pData++; */
+		/*  */
 		if ((ISP_RSC_BASE + reg.Addr >= ISP_RSC_BASE)
 		    && (ISP_RSC_BASE + reg.Addr <
 						(ISP_RSC_BASE + RSC_REG_RANGE))
@@ -1740,6 +1595,7 @@ static signed int RSC_ReadReg(struct RSC_REG_IO_STRUCT *pRegIo)
 			"Wrong address(0x%p)", (ISP_RSC_BASE + reg.Addr));
 			reg.Val = 0;
 		}
+		/*  */
 
 		if (put_user(reg.Val, (unsigned int *) &(pData->Val)) != 0) {
 			LOG_ERR("put_user failed");
@@ -1747,7 +1603,9 @@ static signed int RSC_ReadReg(struct RSC_REG_IO_STRUCT *pRegIo)
 			goto EXIT;
 		}
 		pData++;
+		/*  */
 	}
+	/*  */
 EXIT:
 	return Ret;
 }
@@ -1767,9 +1625,11 @@ static signed int RSC_WriteRegToHw(struct RSC_REG_STRUCT *pReg,
 	dbgWriteReg = RSCInfo.DebugMask & RSC_DBG_WRITE_REG;
 	spin_unlock(&(RSCInfo.SpinLockRSC));
 
+	/*  */
 	if (dbgWriteReg)
 		LOG_DBG("- E.\n");
 
+	/*  */
 	for (i = 0; i < Count; i++) {
 		if (dbgWriteReg) {
 			LOG_DBG("Addr(0x%lx), Val(0x%x)\n",
@@ -1787,6 +1647,7 @@ static signed int RSC_WriteRegToHw(struct RSC_REG_STRUCT *pReg,
 		}
 	}
 
+	/*  */
 	return Ret;
 }
 
@@ -1805,7 +1666,7 @@ static signed int RSC_WriteReg(struct RSC_REG_IO_STRUCT *pRegIo)
 	 */
 	/* unsigned char* pData = NULL; */
 	struct RSC_REG_STRUCT *pData = NULL;
-
+	/*  */
 	if (RSCInfo.DebugMask & RSC_DBG_WRITE_REG)
 		LOG_DBG("Data(0x%p), Count(%d)\n", (pRegIo->pData),
 							(pRegIo->Count));
@@ -1819,6 +1680,7 @@ static signed int RSC_WriteReg(struct RSC_REG_IO_STRUCT *pRegIo)
 		Ret = -ENOMEM;
 		goto EXIT;
 	}
+	/*  */
 	if ((pRegIo->pData == NULL) || (pRegIo->Count == 0) ||
 		(pRegIo->Count > (RSC_REG_RANGE>>2))) {
 		LOG_ERR("RSC WriteReg pData is NULL or Count:%d is larger!!",
@@ -1834,9 +1696,9 @@ static signed int RSC_WriteReg(struct RSC_REG_IO_STRUCT *pRegIo)
 		Ret = -EFAULT;
 		goto EXIT;
 	}
-
+	/*  */
 	Ret = RSC_WriteRegToHw(pData, pRegIo->Count);
-
+	/*  */
 EXIT:
 	if (pData != NULL) {
 		kfree(pData);
@@ -1860,9 +1722,17 @@ static signed int RSC_WaitIrq(struct RSC_WAIT_IRQ_STRUCT *WaitIrq)
 	unsigned long flags; /* old: unsigned int flags;*/
 	unsigned int irqStatus;
 	/*int cnt = 0;*/
-	struct timespec64 time_getrequest;
+	struct timeval time_getrequest;
+	unsigned long long sec = 0;
+	unsigned long usec = 0;
 
-	ktime_get_ts64(&time_getrequest);
+	/* do_gettimeofday(&time_getrequest); */
+	sec = cpu_clock(0);	/* ns */
+	do_div(sec, 1000);	/* usec */
+	usec = do_div(sec, 1000000);	/* sec and usec */
+	time_getrequest.tv_usec = usec;
+	time_getrequest.tv_sec = sec;
+
 
 	/* Debug interrupt */
 	if (RSCInfo.DebugMask & RSC_DBG_INT) {
@@ -2037,6 +1907,9 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 	unsigned long flags;
 	/* old: unsigned int flags;*//* FIX to avoid build warning */
 
+
+
+	/*  */
 	if (pFile->private_data == NULL) {
 		LOG_WRN("private_data NULL,(process, pid, tgid)=(%s, %d, %d)",
 			current->comm,
@@ -2044,8 +1917,9 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 		return -EFAULT;
 	}
 
+	/*  */
 	pUserInfo = (struct RSC_USER_INFO_STRUCT *) (pFile->private_data);
-
+	/*  */
 	switch (Cmd) {
 	case RSC_RESET:
 		{
@@ -2055,6 +1929,7 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 			break;
 		}
 
+		/*  */
 	case RSC_DUMP_REG:
 		{
 			Ret = RSC_DumpReg();
@@ -2071,12 +1946,11 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 			spin_unlock_irqrestore(
 				&(RSCInfo.SpinLockIrq[RSC_IRQ_TYPE_INT_RSC_ST]),
 									flags);
-			if (currentPPB < LOG_PPNUM && currentPPB > 0) {
-				IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, currentPPB,
+
+			IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, currentPPB,
 								_LOG_INF);
-				IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, currentPPB,
+			IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, currentPPB,
 								_LOG_ERR);
-			}
 			break;
 		}
 	case RSC_READ_REGISTER:
@@ -2107,8 +1981,9 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 		{
 			if (copy_from_user(&IrqInfo, (void *)Param,
 				sizeof(struct RSC_WAIT_IRQ_STRUCT)) == 0) {
-
-				if (IrqInfo.Type >= RSC_IRQ_TYPE_AMOUNT) {
+				/*  */
+				if ((IrqInfo.Type >= RSC_IRQ_TYPE_AMOUNT) ||
+							(IrqInfo.Type < 0)) {
 					Ret = -EFAULT;
 					LOG_ERR("invalid type(%d)",
 								IrqInfo.Type);
@@ -2123,13 +1998,12 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 						IRQ_USER_NUM_MAX);
 						IrqInfo.UserKey = 0;
 				}
-/*
+
 				LOG_INF(
 				"IRQ clear(%d), type(%d), userKey(%d), timeout(%d), status(%d)\n",
 					IrqInfo.Clear, IrqInfo.Type,
 					IrqInfo.UserKey, IrqInfo.Timeout,
 					IrqInfo.Status);
-*/
 				IrqInfo.ProcessID = pUserInfo->Pid;
 				Ret = RSC_WaitIrq(&IrqInfo);
 
@@ -2151,13 +2025,15 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 				LOG_DBG("RSC_CLEAR_IRQ Type(%d)",
 								ClearIrq.Type);
 
-				if (ClearIrq.Type >= RSC_IRQ_TYPE_AMOUNT) {
+				if ((ClearIrq.Type >= RSC_IRQ_TYPE_AMOUNT) ||
+							(ClearIrq.Type < 0)) {
 					Ret = -EFAULT;
 					LOG_ERR("invalid type(%d)",
 								ClearIrq.Type);
 					goto EXIT;
 				}
 
+				/*  */
 				if ((ClearIrq.UserKey >= IRQ_USER_NUM_MAX)
 				    || (ClearIrq.UserKey < 0)) {
 					LOG_ERR("errUserEnum(%d)",
@@ -2188,15 +2064,6 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 			/* enqueNum */
 			if (copy_from_user(&enqueNum, (void *)Param,
 							sizeof(int)) == 0) {
-
-				if (g_RSC_ReqRing.WriteIdx < 0 ||
-					g_RSC_ReqRing.WriteIdx >=
-					_SUPPORT_MAX_RSC_REQUEST_RING_SIZE_) {
-					LOG_ERR("[RSC_ENQUE] WriteIdx OOB: %d",
-						g_RSC_ReqRing.WriteIdx);
-					break;
-				}
-
 				if (RSC_REQUEST_STATE_EMPTY ==
 				    g_RSC_ReqRing.RSCReq_Struct[
 							g_RSC_ReqRing.WriteIdx].
@@ -2253,23 +2120,15 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 				spin_lock_irqsave(
 				&(RSCInfo.SpinLockIrq[RSC_IRQ_TYPE_INT_RSC_ST]),
 						  flags);
-				if (g_RSC_ReqRing.WriteIdx < 0 ||
-				g_RSC_ReqRing.WriteIdx >= _SUPPORT_MAX_RSC_REQUEST_RING_SIZE_) {
-					LOG_ERR("[RSC_ENQUE] WriteIdx OOB: %d",
-						g_RSC_ReqRing.WriteIdx);
-					break;
-				}
 				if ((RSC_REQUEST_STATE_EMPTY ==
 				     g_RSC_ReqRing.RSCReq_Struct[
 					g_RSC_ReqRing.WriteIdx].State)
-					&& (g_RSC_ReqRing
+				    && (g_RSC_ReqRing
 					.RSCReq_Struct[g_RSC_ReqRing.WriteIdx]
 								.FrameWRIdx <
 					g_RSC_ReqRing.RSCReq_Struct[
 						g_RSC_ReqRing.WriteIdx]
-								.enqueReqNum)
-					&& (g_RSC_ReqRing.RSCReq_Struct[g_RSC_ReqRing.WriteIdx]
-					.FrameWRIdx) >= 0) {
+								.enqueReqNum)) {
 					g_RSC_ReqRing.RSCReq_Struct[
 						g_RSC_ReqRing.WriteIdx]
 					    .RscFrameStatus[g_RSC_ReqRing
@@ -2394,11 +2253,6 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 		}
 	case RSC_DEQUE_NUM:
 		{
-			if (g_RSC_ReqRing.ReadIdx < 0 ||
-				g_RSC_ReqRing.ReadIdx >= _SUPPORT_MAX_RSC_REQUEST_RING_SIZE_) {
-				LOG_ERR("[RSC_DEQUE_NUM] ReadId OOB: %d", g_RSC_ReqRing.ReadIdx);
-				break;
-			}
 			if (RSC_REQUEST_STATE_FINISHED ==
 			    g_RSC_ReqRing.RSCReq_Struct[g_RSC_ReqRing.ReadIdx]
 			    .State) {
@@ -2432,28 +2286,13 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 		{
 			spin_lock_irqsave(
 			&(RSCInfo.SpinLockIrq[RSC_IRQ_TYPE_INT_RSC_ST]), flags);
-			if (g_RSC_ReqRing.ReadIdx < 0 ||
-				g_RSC_ReqRing.ReadIdx >= _SUPPORT_MAX_RSC_REQUEST_RING_SIZE_) {
-				LOG_ERR("[RSC_DEQUE] ReadId OOB: %d", g_RSC_ReqRing.ReadIdx);
-				break;
-			}
-
-			if (g_RSC_ReqRing.RSCReq_Struct[g_RSC_ReqRing.ReadIdx].enqueReqNum < 0 ||
-				g_RSC_ReqRing.RSCReq_Struct[g_RSC_ReqRing.ReadIdx].enqueReqNum >=
-				_SUPPORT_MAX_RSC_FRAME_REQUEST_) {
-				LOG_ERR("[RSC_DEQUE] enqueReqNum OOB: %d",
-				g_RSC_ReqRing.RSCReq_Struct[g_RSC_ReqRing.ReadIdx].enqueReqNum);
-				break;
-			}
 			if ((RSC_REQUEST_STATE_FINISHED ==
 			     g_RSC_ReqRing.RSCReq_Struct[g_RSC_ReqRing.ReadIdx]
 			     .State)
 			    && (g_RSC_ReqRing.RSCReq_Struct[
 				g_RSC_ReqRing.ReadIdx].RrameRDIdx <
 				g_RSC_ReqRing.RSCReq_Struct[
-					g_RSC_ReqRing.ReadIdx].enqueReqNum)
-				&& (g_RSC_ReqRing.RSCReq_Struct[
-				g_RSC_ReqRing.ReadIdx].RrameRDIdx >= 0)) {
+					g_RSC_ReqRing.ReadIdx].enqueReqNum)) {
 				if (RSC_FRAME_STATUS_FINISHED ==
 				    g_RSC_ReqRing.RSCReq_Struct[
 							g_RSC_ReqRing.ReadIdx]
@@ -2584,7 +2423,7 @@ static long RSC_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
 			break;
 		}
 	}
-
+	/*  */
 EXIT:
 	if (Ret != 0) {
 		LOG_ERR("Fail Cmd(%d), Pid(%d), (proc, pid, tgid)=(%s, %d, %d)",
@@ -2592,7 +2431,7 @@ EXIT:
 			pUserInfo->Pid, current->comm, current->pid,
 								current->tgid);
 	}
-
+	/*  */
 	return Ret;
 }
 
@@ -2835,6 +2674,8 @@ static signed int RSC_open(struct inode *pInode, struct file *pFile)
 
 	LOG_DBG("- E. UserCount: %d.", RSCInfo.UserCount);
 
+
+	/*  */
 	spin_lock(&(RSCInfo.SpinLockRSCRef));
 
 	pFile->private_data = NULL;
@@ -2850,7 +2691,7 @@ static signed int RSC_open(struct inode *pInode, struct file *pFile)
 		pUserInfo->Pid = current->pid;
 		pUserInfo->Tid = current->tgid;
 	}
-
+	/*  */
 	if (RSCInfo.UserCount > 0) {
 		RSCInfo.UserCount++;
 		spin_unlock(&(RSCInfo.SpinLockRSCRef));
@@ -2867,7 +2708,7 @@ static signed int RSC_open(struct inode *pInode, struct file *pFile)
 	}
 
 	/* do wait queue head init when re-enter in camera */
-
+	/*  */
 	for (i = 0; i < _SUPPORT_MAX_RSC_REQUEST_RING_SIZE_; i++) {
 		/* RSC */
 		g_RSC_ReqRing.RSCReq_Struct[i].processID = 0x0;
@@ -2891,6 +2732,7 @@ static signed int RSC_open(struct inode *pInode, struct file *pFile)
 	RSC_EnableClock(MTRUE);
 	g_SuspendCnt = 0;
 	LOG_INF("RSC open g_u4EnableClockCount: %d", g_u4EnableClockCount);
+	/*  */
 
 	for (i = 0; i < RSC_IRQ_TYPE_AMOUNT; i++)
 		RSCInfo.IrqInfo.Status[i] = 0;
@@ -2907,7 +2749,7 @@ static signed int RSC_open(struct inode *pInode, struct file *pFile)
     /* In EP, Add RSC_DBG_WRITE_REG for debug. Should remove it after EP */
 	RSCInfo.DebugMask = (RSC_DBG_INT | RSC_DBG_DBGLOG | RSC_DBG_WRITE_REG);
 #endif
-
+	/*  */
 	register_requests(&rsc_reqs, sizeof(struct RSC_Config));
 	set_engine_ops(&rsc_reqs, &rsc_ops);
 
@@ -2932,13 +2774,14 @@ static signed int RSC_release(struct inode *pInode, struct file *pFile)
 
 	LOG_DBG("- E. UserCount: %d.", RSCInfo.UserCount);
 
+	/*  */
 	if (pFile->private_data != NULL) {
 		pUserInfo =
 			(struct  RSC_USER_INFO_STRUCT *) pFile->private_data;
 		kfree(pFile->private_data);
 		pFile->private_data = NULL;
 	}
-
+	/*  */
 	spin_lock(&(RSCInfo.SpinLockRSCRef));
 	RSCInfo.UserCount--;
 
@@ -2950,7 +2793,7 @@ static signed int RSC_release(struct inode *pInode, struct file *pFile)
 		goto EXIT;
 	} else
 		spin_unlock(&(RSCInfo.SpinLockRSCRef));
-
+	/*  */
 	LOG_INF("Curr UsrCnt(%d), (process, pid, tgid)=(%s, %d, %d), last user",
 		RSCInfo.UserCount, current->comm, current->pid, current->tgid);
 
@@ -2959,6 +2802,7 @@ static signed int RSC_release(struct inode *pInode, struct file *pFile)
 	RSC_EnableClock(MFALSE);
 	LOG_DBG("RSC release g_u4EnableClockCount: %d", g_u4EnableClockCount);
 
+	/*  */
 	unregister_requests(&rsc_reqs);
 
 
@@ -2973,25 +2817,25 @@ EXIT:
 /*******************************************************************************
  *
  ******************************************************************************/
+/*
 static signed int RSC_mmap(struct file *pFile, struct vm_area_struct *pVma)
 {
 	unsigned long length = 0;
-	unsigned long pfn = 0x0;
+	unsigned int pfn = 0x0;
 
 	length = pVma->vm_end - pVma->vm_start;
-
 	pVma->vm_page_prot = pgprot_noncached(pVma->vm_page_prot);
 	pfn = pVma->vm_pgoff << PAGE_SHIFT;
 
 	LOG_INF(
-		"mmap:vm_pgoff(0x%lx) pfn(0x%lx) phy(0x%lx) vm_start(0x%lx) vm_end(0x%lx) length(0x%lx)",
+		"mmap:vm_pgoff(0x%lx) pfn(0x%x) phy(0x%lx) vm_start(0x%lx) vm_end(0x%lx) length(0x%lx)",
 		pVma->vm_pgoff, pfn, pVma->vm_pgoff << PAGE_SHIFT,
 			pVma->vm_start, pVma->vm_end, length);
 
 	switch (pfn) {
 	case RSC_BASE_HW:
 		if (length > RSC_REG_RANGE) {
-			LOG_ERR("mmap err:mod:0x%lx len:0x%lx,REG_RANGE:0x%x",
+			LOG_ERR("mmap err:mod:0x%x len(0x%lx),REG_RANGE(0x%x)!",
 				pfn, length, RSC_REG_RANGE);
 			return -EAGAIN;
 		}
@@ -3009,7 +2853,7 @@ static signed int RSC_mmap(struct file *pFile, struct vm_area_struct *pVma)
 
 	return 0;
 }
-
+*/
 /*******************************************************************************
  *
  ******************************************************************************/
@@ -3023,7 +2867,7 @@ static const struct file_operations RSCFileOper = {
 	.open = RSC_open,
 	.release = RSC_release,
 	/* .flush   = mt_RSC_flush, */
-	.mmap = RSC_mmap,
+	/* .mmap = RSC_mmap, */
 	.unlocked_ioctl = RSC_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = RSC_ioctl_compat,
@@ -3036,13 +2880,13 @@ static const struct file_operations RSCFileOper = {
 static inline void RSC_UnregCharDev(void)
 {
 	LOG_DBG("- E.");
-
+	/*  */
 	/* Release char driver */
 	if (pRSCCharDrv != NULL) {
 		cdev_del(pRSCCharDrv);
 		pRSCCharDrv = NULL;
 	}
-
+	/*  */
 	unregister_chrdev_region(RSCDevNo, 1);
 }
 
@@ -3052,9 +2896,9 @@ static inline void RSC_UnregCharDev(void)
 static inline signed int RSC_RegCharDev(void)
 {
 	signed int Ret = 0;
-
+	/*  */
 	LOG_DBG("- E.");
-
+	/*  */
 	Ret = alloc_chrdev_region(&RSCDevNo, 0, 1, RSC_DEV_NAME);
 	if (Ret < 0) {
 		LOG_ERR("alloc_chrdev_region failed, %d", Ret);
@@ -3069,7 +2913,7 @@ static inline signed int RSC_RegCharDev(void)
 	}
 	/* Attatch file operation. */
 	cdev_init(pRSCCharDrv, &RSCFileOper);
-
+	/*  */
 	pRSCCharDrv->owner = THIS_MODULE;
 	/* Add to system */
 	Ret = cdev_add(pRSCCharDrv, RSCDevNo, 1);
@@ -3077,10 +2921,12 @@ static inline signed int RSC_RegCharDev(void)
 		LOG_ERR("Attatch file operation failed, %d", Ret);
 		goto EXIT;
 	}
-
+	/*  */
 EXIT:
 	if (Ret < 0)
 		RSC_UnregCharDev();
+
+	/*  */
 
 	LOG_DBG("- X.");
 	return Ret;
@@ -3092,14 +2938,13 @@ EXIT:
 static signed int RSC_probe(struct platform_device *pDev)
 {
 	signed int Ret = 0;
-	struct device_node *node = NULL;
-	struct platform_device *pdev = NULL;
 	/*struct resource *pRes = NULL;*/
 	signed int i = 0;
 	unsigned char n;
 	unsigned int irq_info[3];
 	struct device *dev = NULL;
-	struct RSC_device *_rsc_dev = NULL;
+	struct RSC_device *_rsc_dev;
+
 
 #ifdef CONFIG_OF
 	struct RSC_device *RSC_dev;
@@ -3126,7 +2971,7 @@ static signed int RSC_probe(struct platform_device *pDev)
 
 	RSC_dev = &(RSC_devs[nr_RSC_devs - 1]);
 	RSC_dev->dev = &pDev->dev;
-	dma_set_mask_and_coherent(RSC_devs->dev, DMA_BIT_MASK(34));
+
 	/* iomap registers */
 	RSC_dev->regs = of_iomap(pDev->dev.of_node, 0);
 
@@ -3136,19 +2981,6 @@ static signed int RSC_probe(struct platform_device *pDev)
 			nr_RSC_devs, pDev->dev.of_node->name);
 		return -ENOMEM;
 	}
-
-	/*temperate: power for larb20*/
-	node = of_parse_phandle(RSC_dev->dev->of_node, "mediatek,larb", 0);
-	if (!node)
-		return -EINVAL;
-	pdev = of_find_device_by_node(node);
-	if (WARN_ON(!pdev)) {
-		of_node_put(node);
-		return -EINVAL;
-	}
-	of_node_put(node);
-
-	RSC_devs->larb = &pdev->dev;
 
 #if defined(CONFIG_MTK_IOMMU_PGTABLE_EXT) && \
 	(CONFIG_MTK_IOMMU_PGTABLE_EXT > 32)
@@ -3163,7 +2995,6 @@ static signed int RSC_probe(struct platform_device *pDev)
 
 	/* get IRQ ID and request IRQ */
 	RSC_dev->irq = irq_of_parse_and_map(pDev->dev.of_node, 0);
-	RSCInfo.IrqNum = RSC_dev->irq;
 
 	if (RSC_dev->irq > 0) {
 		LOG_INF("- E. RSC setup irq.\n");
@@ -3230,14 +3061,8 @@ static signed int RSC_probe(struct platform_device *pDev)
 #ifndef EP_NO_CLKMGR
 #if !defined(CONFIG_MTK_LEGACY) && defined(CONFIG_COMMON_CLK) /*CCF*/
 		    /*CCF: Grab clock pointer (struct clk*) */
-		rsc_clk.CG_IPESYS_LARB20 = devm_clk_get(&pDev->dev, "RSC_CLK_IPE_LARB20");
-
-		if (IS_ERR(rsc_clk.CG_IPESYS_LARB20)) {
-			LOG_ERR("cannot get CG_IPESYS_LARB20 clock\n");
-			return PTR_ERR(rsc_clk.CG_IPESYS_LARB20);
-		}
-
-		rsc_clk.CG_IPESYS_RSC = devm_clk_get(&pDev->dev, "RSC_CLK_IPE_RSC");
+		rsc_clk.CG_IPESYS_RSC = devm_clk_get(&pDev->dev,
+							"RSC_CLK_IPE_RSC");
 
 		if (IS_ERR(rsc_clk.CG_IPESYS_RSC)) {
 			LOG_ERR("cannot get CG_IPESYS_RSC clock\n");
@@ -3262,7 +3087,6 @@ static signed int RSC_probe(struct platform_device *pDev)
 				RSC_DEV_NAME, Ret);
 			goto EXIT;
 		}
-		pm_runtime_enable(RSC_devs->dev);
 
 		/* Init spinlocks */
 		spin_lock_init(&(RSCInfo.SpinLockRSCRef));
@@ -3270,6 +3094,7 @@ static signed int RSC_probe(struct platform_device *pDev)
 		for (n = 0; n < RSC_IRQ_TYPE_AMOUNT; n++)
 			spin_lock_init(&(RSCInfo.SpinLockIrq[n]));
 
+		/*  */
 		init_waitqueue_head(&RSCInfo.WaitQueueHead);
 		INIT_WORK(&RSCInfo.ScheduleRscWork, RSC_ScheduleWork);
 		RSCInfo.wkqueue = create_singlethread_workqueue("RSC-CMDQ-WQ");
@@ -3290,13 +3115,13 @@ static signed int RSC_probe(struct platform_device *pDev)
 		spin_lock(&(RSCInfo.SpinLockRSCRef));
 		RSCInfo.UserCount = 0;
 		spin_unlock(&(RSCInfo.SpinLockRSCRef));
-
+		/*  */
 		RSCInfo.IrqInfo.Mask[RSC_IRQ_TYPE_INT_RSC_ST] = INT_ST_MASK_RSC;
 
 #if defined(RSC_PMQOS_EN) && defined(CONFIG_MTK_QOS_SUPPORT)
 		pm_qos_add_request(&rsc_pm_qos_request,
 			PM_QOS_MM_MEMORY_BANDWIDTH, PM_QOS_DEFAULT_VALUE);
-#if CHECK_SERVICE_IF_0   // old cmdq command and no more use
+#if 0   // old cmdq command and no more use
 		cmdqCoreRegisterTaskCycleCB(CMDQ_GROUP_RSC, cmdq_pm_qos_start,
 							cmdq_pm_qos_stop);
 #endif
@@ -3305,11 +3130,10 @@ static signed int RSC_probe(struct platform_device *pDev)
 
 		/* init cmdq */
 		cmdq_base = NULL;
-
 		cmdq_base = cmdq_register_device(&pDev->dev);
 		cmdq_clt = cmdq_mbox_create(&pDev->dev, 0);
-		cmdq_event_id = cmdq_dev_get_event(&pDev->dev, "rsc_eof");
-
+		cmdq_event_id =
+			cmdq_dev_get_event(&pDev->dev, "rsc_eof");
 	}
 
 EXIT:
@@ -3330,7 +3154,7 @@ static signed int RSC_remove(struct platform_device *pDev)
 	/*struct resource *pRes;*/
 	signed int IrqNum;
 	int i;
-
+	/*  */
 	LOG_DBG("- E.");
 
 	/* wait for unfinished works in the workqueue. */
@@ -3348,7 +3172,7 @@ static signed int RSC_remove(struct platform_device *pDev)
 	/* kill tasklet */
 	for (i = 0; i < RSC_IRQ_TYPE_AMOUNT; i++)
 		tasklet_kill(RSC_tasklet[i].pRSC_tkt);
-#if CHECK_SERVICE_IF_0
+#if 0
 	/* free all registered irq(child nodes) */
 	RSC_UnRegister_AllregIrq();
 	/* free father nodes of irq user list */
@@ -3379,11 +3203,12 @@ static signed int RSC_remove(struct platform_device *pDev)
 		}
 	}
 #endif
-
+	/*  */
 	device_destroy(pRSCClass, RSCDevNo);
-
+	/*  */
 	class_destroy(pRSCClass);
 	pRSCClass = NULL;
+	/*  */
 
 #if defined(RSC_PMQOS_EN) && defined(CONFIG_MTK_QOS_SUPPORT)
 	pm_qos_remove_request(&rsc_pm_qos_request);
@@ -3399,6 +3224,17 @@ static signed int bPass1_On_In_Resume_TG1;
 
 static signed int RSC_suspend(struct platform_device *pDev, pm_message_t Mesg)
 {
+	/*signed int ret = 0;*/
+
+	LOG_DBG("bPass1_On_In_Resume_TG1(%d)\n", bPass1_On_In_Resume_TG1);
+	if (g_u4EnableClockCount > 0) {
+		RSC_EnableClock(MFALSE);
+		g_SuspendCnt++;
+	}
+	bPass1_On_In_Resume_TG1 = 0;
+	LOG_INF("%s:g_u4EnableClockCount(%d) g_SuspendCnt(%d).\n", __func__,
+				g_u4EnableClockCount, g_SuspendCnt);
+
 	return 0;
 }
 
@@ -3407,51 +3243,19 @@ static signed int RSC_suspend(struct platform_device *pDev, pm_message_t Mesg)
  ******************************************************************************/
 static signed int RSC_resume(struct platform_device *pDev)
 {
+	LOG_DBG("bPass1_On_In_Resume_TG1(%d).\n", bPass1_On_In_Resume_TG1);
+	if (g_SuspendCnt > 0) {
+		RSC_EnableClock(MTRUE);
+		g_SuspendCnt--;
+	}
+	LOG_INF("%s:g_u4EnableClockCount(%d) g_SuspendCnt(%d).\n", __func__,
+				g_u4EnableClockCount, g_SuspendCnt);
 	return 0;
 }
 
 /*---------------------------------------------------------------------------*/
-#if IS_ENABLED(CONFIG_PM)
+#ifdef CONFIG_PM
 /*---------------------------------------------------------------------------*/
-static int rsc_suspend_pm_event(struct notifier_block *notifier,
-			unsigned long pm_event, void *unused)
-{
-	struct timespec64 ts;
-	struct rtc_time tm;
-
-	ktime_get_ts64(&ts);
-	rtc_time64_to_tm(ts.tv_sec, &tm);
-
-	switch (pm_event) {
-	case PM_HIBERNATION_PREPARE:
-		return NOTIFY_DONE;
-	case PM_RESTORE_PREPARE:
-		return NOTIFY_DONE;
-	case PM_POST_HIBERNATION:
-		return NOTIFY_DONE;
-	case PM_SUSPEND_PREPARE: /*enter suspend*/
-		LOG_DBG("bPass1_On_In_Resume_TG1(%d)\n", bPass1_On_In_Resume_TG1);
-		if (g_u4EnableClockCount > 0) {
-			RSC_EnableClock(MFALSE);
-			g_SuspendCnt++;
-		}
-		bPass1_On_In_Resume_TG1 = 0;
-		LOG_INF("%s:g_u4EnableClockCount(%d) g_SuspendCnt(%d).\n", __func__,
-					g_u4EnableClockCount, g_SuspendCnt);
-		return NOTIFY_DONE;
-	case PM_POST_SUSPEND:    /*after resume*/
-		LOG_DBG("bPass1_On_In_Resume_TG1(%d).\n", bPass1_On_In_Resume_TG1);
-		if (g_SuspendCnt > 0) {
-			RSC_EnableClock(MTRUE);
-			g_SuspendCnt--;
-		}
-		LOG_INF("%s:g_u4EnableClockCount(%d) g_SuspendCnt(%d).\n", __func__,
-					g_u4EnableClockCount, g_SuspendCnt);
-		return NOTIFY_DONE;
-	}
-	return NOTIFY_OK;
-}
-
 int RSC_pm_suspend(struct device *device)
 {
 	struct platform_device *pdev = to_platform_device(device);
@@ -3533,19 +3337,13 @@ static struct platform_driver RSCDriver = {
 #ifdef CONFIG_OF
 		   .of_match_table = RSC_of_ids,
 #endif
-#if IS_ENABLED(CONFIG_PM)
+#ifdef CONFIG_PM
 		   .pm = &RSC_pm_ops,
 #endif
 		}
 };
 
-#if IS_ENABLED(CONFIG_PM)
-static struct notifier_block rsc_suspend_pm_notifier_func = {
-	.notifier_call = rsc_suspend_pm_event,
-	.priority = 0,
-};
-#endif
-
+#ifdef RSC_PROCFS
 static int rsc_dump_read(struct seq_file *m, void *v)
 {
 	int i, j;
@@ -3678,11 +3476,10 @@ static int rsc_reg_read(struct seq_file *m, void *v)
 	return 0;
 }
 
-#if CHECK_SERVICE_IF_0
+
 static ssize_t rsc_reg_write(struct file *file, const char __user *buffer,
 						size_t count, loff_t *data)
 {
-
 	char desc[128];
 	int len = 0;
 	/*char *pEnd;*/
@@ -3706,7 +3503,7 @@ static ssize_t rsc_reg_write(struct file *file, const char __user *buffer,
 		pszTmp = strstr(addrSzBuf, "0x");
 		if (pszTmp == NULL) {
 			/*if (1 != sscanf(addrSzBuf, "%d", &addr))*/
-#if CHECK_SERVICE_IF_0
+#if 0
 			if (kstrtoint(addrSzBuf, 0, &addr) != 0)
 				LOG_ERR("scan decimal addr is wrong !!:%s",
 								addrSzBuf);
@@ -3726,7 +3523,7 @@ static ssize_t rsc_reg_write(struct file *file, const char __user *buffer,
 		pszTmp = strstr(valSzBuf, "0x");
 		if (pszTmp == NULL) {
 			/*if (1 != sscanf(valSzBuf, "%d", &val))*/
-#if CHECK_SERVICE_IF_0
+#if 0
 			if (kstrtoint(valSzBuf, 0, &val) != 0)
 				LOG_ERR("scan decimal value is wrong !!:%s",
 								valSzBuf);
@@ -3758,7 +3555,7 @@ static ssize_t rsc_reg_write(struct file *file, const char __user *buffer,
 		pszTmp = strstr(addrSzBuf, "0x");
 		if (pszTmp == NULL) {
 			/*if (1 != sscanf(addrSzBuf, "%d", &addr))*/
-#if CHECK_SERVICE_IF_0
+#if 0
 			if (kstrtoint(addrSzBuf, 0, &addr) != 0)
 				LOG_ERR("scan decimal addr is wrong !!:%s",
 								addrSzBuf);
@@ -3790,7 +3587,7 @@ static ssize_t rsc_reg_write(struct file *file, const char __user *buffer,
 
 	return count;
 }
-#endif
+
 static int proc_rsc_reg_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, rsc_reg_read, NULL);
@@ -3800,15 +3597,16 @@ static const struct file_operations rsc_reg_proc_fops = {
 	.owner = THIS_MODULE,
 	.open = proc_rsc_reg_open,
 	.read = seq_read,
-	//.write = rsc_reg_write,
+	.write = rsc_reg_write,
 };
+#endif
 
 
 /*******************************************************************************
  *
  ******************************************************************************/
 
-#if CHECK_SERVICE_IF_0
+#if 0
 int32_t RSC_ClockOnCallback(uint64_t engineFlag)
 {
 	/* LOG_DBG("RSC_ClockOnCallback"); */
@@ -3851,22 +3649,22 @@ static signed int __init RSC_Init(void)
 	void *tmp;
 	/* FIX-ME: linux-3.10 procfs API changed */
 	/* use proc_create */
-#if CHECK_SERVICE_IF_0
+#if 0
 	struct proc_dir_entry *proc_entry;
 	struct proc_dir_entry *isp_rsc_dir;
 #endif
 
 	int i;
-
+	/*  */
 	LOG_DBG("- E.");
-
+	/*  */
 	Ret = platform_driver_register(&RSCDriver);
 	if (Ret < 0) {
 		LOG_ERR("platform_driver_register fail");
 		return Ret;
 	}
 
-#if CHECK_SERVICE_IF_0
+#if 0
 	struct device_node *node = NULL;
 
 	node = of_find_compatible_node(NULL, NULL, "mediatek,RSC");
@@ -3882,7 +3680,7 @@ static signed int __init RSC_Init(void)
 	LOG_DBG("ISP_RSC_BASE: %lx\n", ISP_RSC_BASE);
 #endif
 
-#if CHECK_SERVICE_IF_0
+#if 0
 	isp_rsc_dir = proc_mkdir("rsc", NULL);
 	if (!isp_rsc_dir) {
 		LOG_ERR("[%s]: fail to mkdir /proc/rsc\n", __func__);
@@ -3934,7 +3732,7 @@ static signed int __init RSC_Init(void)
 		tmp = (void *)((char *)tmp + NORMAL_STR_LEN);	/* overflow */
 	}
 
-#if CHECK_SERVICE_IF_0
+#if 0
 	/* Cmdq */
 	/* Register RSC callback */
 	LOG_DBG("register rsc callback for CMDQ");
@@ -3942,14 +3740,6 @@ static signed int __init RSC_Init(void)
 			   RSC_ClockOnCallback,
 			   RSC_DumpCallback, RSC_ResetCallback,
 							RSC_ClockOffCallback);
-#endif
-
-#if IS_ENABLED(CONFIG_PM)
-	Ret = register_pm_notifier(&rsc_suspend_pm_notifier_func);
-	if (Ret) {
-		pr_debug("[Camera RSC] Failed to register PM notifier.\n");
-		return Ret;
-	}
 #endif
 	LOG_DBG("- X. Ret: %d.", Ret);
 	return Ret;
@@ -3963,16 +3753,17 @@ static void __exit RSC_Exit(void)
 	/*int i;*/
 
 	LOG_DBG("- E.");
-
+	/*  */
 	platform_driver_unregister(&RSCDriver);
-
-#if CHECK_SERVICE_IF_0
+	/*  */
+#if 0
 	/* Cmdq */
 	/* Unregister RSC callback */
 	cmdqCoreRegisterCB(CMDQ_GROUP_RSC, NULL, NULL, NULL, NULL);
 #endif
 	kfree(pLog_kmalloc);
 
+	/*  */
 }
 
 
@@ -4035,14 +3826,12 @@ static irqreturn_t ISP_Irq_RSC(signed int Irq, void *DeviceId)
 		wake_up_interruptible(&RSCInfo.WaitQueueHead);
 
 	/* dump log, use tasklet */
-	if (m_CurrentPPB < LOG_PPNUM && m_CurrentPPB > 0) {
-		IRQ_LOG_KEEPER(
+	IRQ_LOG_KEEPER(
 		RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_INF,
 		"%s:%d, reg 0x%x : 0x%x, bResulst:%d, RscHWSta:0x%x, RscIrqCnt:0x%x, WriteReqIdx:0x%x, ReadReqIdx:0x%x\n",
 		       __func__, Irq, RSC_INT_STATUS_HW, RscStatus, bResulst,
 			RscStatus, RSCInfo.IrqInfo.RscIrqCnt,
 		       RSCInfo.WriteReqIdx, RSCInfo.ReadReqIdx);
-	}
 	/* IRQ_LOG_KEEPER(RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_INF,
 	 * "RscHWSta:0x%x, RscHWSta:0x%x, DpeDveSta0:0x%x\n",
 	 * DveStatus, RscStatus, DpeDveSta0);
@@ -4053,7 +3842,7 @@ static irqreturn_t ISP_Irq_RSC(signed int Irq, void *DeviceId)
 	#endif
 
 	if (RscStatus & RSC_INT_ST)
-#if CHECK_SERVICE_IF_1
+#if 1
 		schedule_work(&logWork);
 #else
 		tasklet_schedule(RSC_tasklet[RSC_IRQ_TYPE_INT_RSC_ST].pRSC_tkt);
@@ -4063,11 +3852,10 @@ static irqreturn_t ISP_Irq_RSC(signed int Irq, void *DeviceId)
 
 static void ISP_TaskletFunc_RSC(unsigned long data)
 {
-	if (m_CurrentPPB < LOG_PPNUM && m_CurrentPPB > 0) {
-		IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_DBG);
-		IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_INF);
-		IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_ERR);
-	}
+	IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_DBG);
+	IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_INF);
+	IRQ_LOG_PRINTER(RSC_IRQ_TYPE_INT_RSC_ST, m_CurrentPPB, _LOG_ERR);
+
 }
 
 static void logPrint(struct work_struct *data)

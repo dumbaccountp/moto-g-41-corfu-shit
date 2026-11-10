@@ -6,34 +6,47 @@
 #include <linux/init.h>
 #include <linux/kern_levels.h>
 #include <linux/linkage.h>
-#include <linux/ratelimit_types.h>
+#include <linux/cache.h>
 
 extern const char linux_banner[];
+extern const char *linux_banner_ptr;
 extern const char linux_proc_banner[];
 
-extern int oops_in_progress;	/* If set, an oops, panic(), BUG() or die() is in progress */
-
 #define PRINTK_MAX_SINGLE_HEADER_LEN 2
-#ifdef CONFIG_MTK_PRINTK_DEBUG
-#include <linux/cache.h>
-int get_printk_wake_up_time(unsigned long long *t0, unsigned long long *t1);
-void set_printk_uart_status(int value);
+
+#ifdef CONFIG_MTK_AEE_FEATURE
+void aee_wdt_zap_locks(void);
 #endif
 
-
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
+#ifdef CONFIG_LOG_TOO_MUCH_WARNING
 #ifndef KBUILD_MODNAME
 #define KBUILD_MODNAME "unknown module"
 #endif
 #define KLOG_MODNAME		"[name:"KBUILD_MODNAME"&]"
-#else
-#define KLOG_MODNAME		""
+void set_detect_count(int count);
+int get_detect_count(void);
+void set_logtoomuch_enable(int value);
+int get_logtoomuch_enable(void);
 #endif
+
+#ifdef CONFIG_PRINTK_MTK_UART_CONSOLE
+/*
+ * 0: uart printk enable
+ * 1: uart printk disable
+ * 2: uart printk always enable
+ * 2 only set in lk phase by cmline
+ */
+extern int printk_disable_uart;
+#endif
+
+
+
 static inline int printk_get_level(const char *buffer)
 {
 	if (buffer[0] == KERN_SOH_ASCII && buffer[1]) {
 		switch (buffer[1]) {
 		case '0' ... '7':
+		case 'd':	/* KERN_DEFAULT */
 		case 'c':	/* KERN_CONT */
 			return buffer[1];
 		}
@@ -97,8 +110,6 @@ static inline void console_verbose(void)
 #define DEVKMSG_STR_MAX_SIZE 10
 extern char devkmsg_log_str[];
 struct ctl_table;
-
-extern int suppress_printk;
 
 struct va_format {
 	const char *fmt;
@@ -174,16 +185,19 @@ static inline void printk_nmi_direct_enter(void) { }
 static inline void printk_nmi_direct_exit(void) { }
 #endif /* PRINTK_NMI */
 
-struct dev_printk_info;
-
 #ifdef CONFIG_PRINTK
-asmlinkage __printf(4, 0)
+asmlinkage __printf(5, 0)
 int vprintk_emit(int facility, int level,
-		 const struct dev_printk_info *dev_info,
+		 const char *dict, size_t dictlen,
 		 const char *fmt, va_list args);
 
 asmlinkage __printf(1, 0)
 int vprintk(const char *fmt, va_list args);
+
+asmlinkage __printf(5, 6) __cold
+int printk_emit(int facility, int level,
+		const char *dict, size_t dictlen,
+		const char *fmt, ...);
 
 asmlinkage __printf(1, 2) __cold
 int printk(const char *fmt, ...);
@@ -207,7 +221,7 @@ extern int printk_delay_msec;
 extern int dmesg_restrict;
 
 extern int
-devkmsg_sysctl_set_loglvl(struct ctl_table *table, int write, void *buf,
+devkmsg_sysctl_set_loglvl(struct ctl_table *table, int write, void __user *buf,
 			  size_t *lenp, loff_t *ppos);
 
 extern void wake_up_klogd(void);
@@ -219,7 +233,6 @@ void __init setup_log_buf(int early);
 __printf(1, 2) void dump_stack_set_arch_desc(const char *fmt, ...);
 void dump_stack_print_info(const char *log_lvl);
 void show_regs_print_info(const char *log_lvl);
-extern asmlinkage void dump_stack_lvl(const char *log_lvl) __cold;
 extern asmlinkage void dump_stack(void) __cold;
 extern void printk_safe_flush(void);
 extern void printk_safe_flush_on_panic(void);
@@ -283,11 +296,7 @@ static inline void show_regs_print_info(const char *log_lvl)
 {
 }
 
-static inline void dump_stack_lvl(const char *log_lvl)
-{
-}
-
-static inline void dump_stack(void)
+static inline asmlinkage void dump_stack(void)
 {
 }
 
@@ -302,204 +311,92 @@ static inline void printk_safe_flush_on_panic(void)
 
 extern int kptr_restrict;
 
-/**
- * pr_fmt - used by the pr_*() macros to generate the printk format string
- * @fmt: format string passed from a pr_*() macro
- *
- * This macro can be used to generate a unified format string for pr_*()
- * macros. A common use is to prefix all pr_*() messages in a file with a common
- * string. For example, defining this at the top of a source file:
- *
- *        #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
- *
- * would prefix all pr_info, pr_emerg... messages in the file with the module
- * name.
- */
 #ifndef pr_fmt
 #define pr_fmt(fmt) fmt
 #endif
 
-/**
- * pr_emerg - Print an emergency-level message
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_EMERG loglevel. It uses pr_fmt() to
- * generate the format string.
+/*
+ * These can be used to print at the various log levels.
+ * All of these will print unconditionally, although note that pr_debug()
+ * and other debug macros are compiled out unless either DEBUG is defined
+ * or CONFIG_DYNAMIC_DEBUG is set.
  */
-#if defined(CONFIG_MTK_PRINTK_DEBUG) && \
-	(defined(CONFIG_DYNAMIC_DEBUG) || \
-	defined(CONFIG_DYNAMIC_DEBUG_CORE))
+/* -------printk too much patch------ */
+#if defined CONFIG_LOG_TOO_MUCH_WARNING \
+	&& defined CONFIG_DYNAMIC_DEBUG
 #define pr_emerg(fmt, ...) \
-	dynamic_pr_emerg(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_emerg(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #define pr_alert(fmt, ...) \
-	dynamic_pr_alert(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_alert(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #define pr_crit(fmt, ...) \
-	dynamic_pr_crit(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_crit(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #define pr_err(fmt, ...) \
-	dynamic_pr_err(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_err(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #define pr_warning(fmt, ...) \
-	dynamic_pr_warn(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_warn(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #define pr_warn(fmt, ...) \
-	dynamic_pr_warn(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_warn(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #define pr_notice(fmt, ...) \
-	dynamic_pr_notice(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_notice(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #define pr_info(fmt, ...) \
-	dynamic_pr_info(KLOG_MODNAME fmt, ##__VA_ARGS__)
+	dynamic_pr_info(KLOG_MODNAME fmt, ##__VA_ARGS__) \
 
 #else
 #define pr_emerg(fmt, ...) \
 	printk(KERN_EMERG pr_fmt(fmt), ##__VA_ARGS__)
-/**
- * pr_alert - Print an alert-level message
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_ALERT loglevel. It uses pr_fmt() to
- * generate the format string.
- */
 #define pr_alert(fmt, ...) \
 	printk(KERN_ALERT pr_fmt(fmt), ##__VA_ARGS__)
-/**
- * pr_crit - Print a critical-level message
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_CRIT loglevel. It uses pr_fmt() to
- * generate the format string.
- */
 #define pr_crit(fmt, ...) \
 	printk(KERN_CRIT pr_fmt(fmt), ##__VA_ARGS__)
-/**
- * pr_err - Print an error-level message
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_ERR loglevel. It uses pr_fmt() to
- * generate the format string.
- */
 #define pr_err(fmt, ...) \
 	printk(KERN_ERR pr_fmt(fmt), ##__VA_ARGS__)
-/**
- * pr_warn - Print a warning-level message
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_WARNING loglevel. It uses pr_fmt()
- * to generate the format string.
- */
-#define pr_warn(fmt, ...) \
+#define pr_warning(fmt, ...) \
 	printk(KERN_WARNING pr_fmt(fmt), ##__VA_ARGS__)
-/**
- * pr_notice - Print a notice-level message
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_NOTICE loglevel. It uses pr_fmt() to
- * generate the format string.
- */
+#define pr_warn pr_warning
 #define pr_notice(fmt, ...) \
 	printk(KERN_NOTICE pr_fmt(fmt), ##__VA_ARGS__)
-/**
- * pr_info - Print an info-level message
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_INFO loglevel. It uses pr_fmt() to
- * generate the format string.
- */
 #define pr_info(fmt, ...) \
 	printk(KERN_INFO pr_fmt(fmt), ##__VA_ARGS__)
 #endif
 
-/**
- * pr_cont - Continues a previous log message in the same line.
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_CONT loglevel. It should only be
- * used when continuing a log message with no newline ('\n') enclosed. Otherwise
- * it defaults back to KERN_DEFAULT loglevel.
+/*
+ * Like KERN_CONT, pr_cont() should only be used when continuing
+ * a line with no newline ('\n') enclosed. Otherwise it defaults
+ * back to KERN_DEFAULT.
  */
 #define pr_cont(fmt, ...) \
 	printk(KERN_CONT fmt, ##__VA_ARGS__)
 
-/**
- * pr_devel - Print a debug-level message conditionally
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to a printk with KERN_DEBUG loglevel if DEBUG is
- * defined. Otherwise it does nothing.
- *
- * It uses pr_fmt() to generate the format string.
- */
+/* pr_devel() should produce zero code unless DEBUG is defined */
 #ifdef DEBUG
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_devel(fmt, ...) \
-	printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#else
 #define pr_devel(fmt, ...) \
 	printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
-#endif
-#else
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_devel(fmt, ...) \
-	no_printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
 #else
 #define pr_devel(fmt, ...) \
 	no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
-#endif
 #endif
 
 
 /* If you are writing a driver, please use dev_dbg instead */
-#if defined(CONFIG_DYNAMIC_DEBUG) || \
-	(defined(CONFIG_DYNAMIC_DEBUG_CORE) && defined(DYNAMIC_DEBUG_MODULE))
+#if defined(CONFIG_DYNAMIC_DEBUG)
 #include <linux/dynamic_debug.h>
 
-/**
- * pr_debug - Print a debug-level message conditionally
- * @fmt: format string
- * @...: arguments for the format string
- *
- * This macro expands to dynamic_pr_debug() if CONFIG_DYNAMIC_DEBUG is
- * set. Otherwise, if DEBUG is defined, it's equivalent to a printk with
- * KERN_DEBUG loglevel. If DEBUG is not defined it does nothing.
- *
- * It uses pr_fmt() to generate the format string (dynamic_pr_debug() uses
- * pr_fmt() internally).
- */
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_debug(fmt, ...)			\
-	dynamic_pr_debug(KLOG_MODNAME fmt, ##__VA_ARGS__)
-#else
-#define pr_debug(fmt, ...)			\
-	dynamic_pr_debug(fmt, ##__VA_ARGS__)
-#endif
-#elif defined(DEBUG)
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
+/* dynamic_pr_debug() uses pr_fmt() internally so we don't need it here */
 #define pr_debug(fmt, ...) \
-	printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#else
+	dynamic_pr_debug(fmt, ##__VA_ARGS__)
+#elif defined(DEBUG)
 #define pr_debug(fmt, ...) \
 	printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
-#endif
-#else
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_debug(fmt, ...) \
-	no_printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
 #else
 #define pr_debug(fmt, ...) \
 	no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
-#endif
 #endif
 
 /*
@@ -509,7 +406,7 @@ extern int kptr_restrict;
 #ifdef CONFIG_PRINTK
 #define printk_once(fmt, ...)					\
 ({								\
-	static bool __section(".data.once") __print_once;	\
+	static bool __print_once __read_mostly;			\
 	bool __ret_print_once = !__print_once;			\
 								\
 	if (!__print_once) {					\
@@ -520,7 +417,7 @@ extern int kptr_restrict;
 })
 #define printk_deferred_once(fmt, ...)				\
 ({								\
-	static bool __section(".data.once") __print_once;	\
+	static bool __print_once __read_mostly;			\
 	bool __ret_print_once = !__print_once;			\
 								\
 	if (!__print_once) {					\
@@ -536,40 +433,6 @@ extern int kptr_restrict;
 	no_printk(fmt, ##__VA_ARGS__)
 #endif
 
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_emerg_once(fmt, ...)					\
-	printk_once(KERN_EMERG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_alert_once(fmt, ...)					\
-	printk_once(KERN_ALERT KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_crit_once(fmt, ...)					\
-	printk_once(KERN_CRIT KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_err_once(fmt, ...)					\
-	printk_once(KERN_ERR KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_warn_once(fmt, ...)					\
-	printk_once(KERN_WARNING KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_notice_once(fmt, ...)				\
-	printk_once(KERN_NOTICE KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_info_once(fmt, ...)					\
-	printk_once(KERN_INFO KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-
-#if defined(DEBUG)
-#define pr_devel_once(fmt, ...)					\
-	printk_once(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#else
-#define pr_devel_once(fmt, ...)					\
-	no_printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#endif
-
-/* If you are writing a driver, please use dev_dbg instead */
-#if defined(DEBUG)
-#define pr_debug_once(fmt, ...)					\
-	printk_once(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#else
-#define pr_debug_once(fmt, ...)					\
-	no_printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#endif
-
-#else
 #define pr_emerg_once(fmt, ...)					\
 	printk_once(KERN_EMERG pr_fmt(fmt), ##__VA_ARGS__)
 #define pr_alert_once(fmt, ...)					\
@@ -584,7 +447,8 @@ extern int kptr_restrict;
 	printk_once(KERN_NOTICE pr_fmt(fmt), ##__VA_ARGS__)
 #define pr_info_once(fmt, ...)					\
 	printk_once(KERN_INFO pr_fmt(fmt), ##__VA_ARGS__)
-/* no pr_cont_once, don't do that... */
+#define pr_cont_once(fmt, ...)					\
+	printk_once(KERN_CONT pr_fmt(fmt), ##__VA_ARGS__)
 
 #if defined(DEBUG)
 #define pr_devel_once(fmt, ...)					\
@@ -602,7 +466,7 @@ extern int kptr_restrict;
 #define pr_debug_once(fmt, ...)					\
 	no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
 #endif
-#endif
+
 /*
  * ratelimited messages with local ratelimit_state,
  * no local ratelimit_state used in the !PRINTK case
@@ -622,31 +486,6 @@ extern int kptr_restrict;
 	no_printk(fmt, ##__VA_ARGS__)
 #endif
 
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_emerg_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_EMERG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_alert_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_ALERT KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_crit_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_CRIT KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_err_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_ERR KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_warn_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_WARNING KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_notice_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_NOTICE KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_info_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_INFO KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-/* no pr_cont_ratelimited, don't do that... */
-
-#if defined(DEBUG)
-#define pr_devel_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#else
-#define pr_devel_ratelimited(fmt, ...)					\
-	no_printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#endif
-#else
 #define pr_emerg_ratelimited(fmt, ...)					\
 	printk_ratelimited(KERN_EMERG pr_fmt(fmt), ##__VA_ARGS__)
 #define pr_alert_ratelimited(fmt, ...)					\
@@ -670,11 +509,9 @@ extern int kptr_restrict;
 #define pr_devel_ratelimited(fmt, ...)					\
 	no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
 #endif
-#endif
 
 /* If you are writing a driver, please use dev_dbg instead */
-#if defined(CONFIG_DYNAMIC_DEBUG) || \
-	(defined(CONFIG_DYNAMIC_DEBUG_CORE) && defined(DYNAMIC_DEBUG_MODULE))
+#if defined(CONFIG_DYNAMIC_DEBUG)
 /* descriptor check is first to prevent flooding with "callbacks suppressed" */
 #define pr_debug_ratelimited(fmt, ...)					\
 do {									\
@@ -682,26 +519,16 @@ do {									\
 				      DEFAULT_RATELIMIT_INTERVAL,	\
 				      DEFAULT_RATELIMIT_BURST);		\
 	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, pr_fmt(fmt));		\
-	if (DYNAMIC_DEBUG_BRANCH(descriptor) &&				\
+	if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT) &&	\
 	    __ratelimit(&_rs))						\
 		__dynamic_pr_debug(&descriptor, pr_fmt(fmt), ##__VA_ARGS__);	\
 } while (0)
 #elif defined(DEBUG)
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_debug_ratelimited(fmt, ...)					\
-	printk_ratelimited(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
-#else
 #define pr_debug_ratelimited(fmt, ...)					\
 	printk_ratelimited(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
-#endif
-#else
-#if defined(CONFIG_MTK_PRINTK_DEBUG)
-#define pr_debug_ratelimited(fmt, ...) \
-	no_printk(KERN_DEBUG KLOG_MODNAME pr_fmt(fmt), ##__VA_ARGS__)
 #else
 #define pr_debug_ratelimited(fmt, ...) \
 	no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
-#endif
 #endif
 
 extern const struct file_operations kmsg_fops;
@@ -718,6 +545,13 @@ extern int hex_dump_to_buffer(const void *buf, size_t len, int rowsize,
 extern void print_hex_dump(const char *level, const char *prefix_str,
 			   int prefix_type, int rowsize, int groupsize,
 			   const void *buf, size_t len, bool ascii);
+#if defined(CONFIG_DYNAMIC_DEBUG)
+#define print_hex_dump_bytes(prefix_str, prefix_type, buf, len)	\
+	dynamic_hex_dump(prefix_str, prefix_type, 16, 1, buf, len, true)
+#else
+extern void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
+				 const void *buf, size_t len);
+#endif /* defined(CONFIG_DYNAMIC_DEBUG) */
 #else
 static inline void print_hex_dump(const char *level, const char *prefix_str,
 				  int prefix_type, int rowsize, int groupsize,
@@ -731,8 +565,7 @@ static inline void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
 
 #endif
 
-#if defined(CONFIG_DYNAMIC_DEBUG) || \
-	(defined(CONFIG_DYNAMIC_DEBUG_CORE) && defined(DYNAMIC_DEBUG_MODULE))
+#if defined(CONFIG_DYNAMIC_DEBUG)
 #define print_hex_dump_debug(prefix_str, prefix_type, rowsize,	\
 			     groupsize, buf, len, ascii)	\
 	dynamic_hex_dump(prefix_str, prefix_type, rowsize,	\
@@ -749,20 +582,5 @@ static inline void print_hex_dump_debug(const char *prefix_str, int prefix_type,
 {
 }
 #endif
-
-/**
- * print_hex_dump_bytes - shorthand form of print_hex_dump() with default params
- * @prefix_str: string to prefix each line with;
- *  caller supplies trailing spaces for alignment if desired
- * @prefix_type: controls whether prefix of an offset, address, or none
- *  is printed (%DUMP_PREFIX_OFFSET, %DUMP_PREFIX_ADDRESS, %DUMP_PREFIX_NONE)
- * @buf: data blob to dump
- * @len: number of bytes in the @buf
- *
- * Calls print_hex_dump(), with log level of KERN_DEBUG,
- * rowsize of 16, groupsize of 1, and ASCII output included.
- */
-#define print_hex_dump_bytes(prefix_str, prefix_type, buf, len)	\
-	print_hex_dump_debug(prefix_str, prefix_type, 16, 1, buf, len, true)
 
 #endif

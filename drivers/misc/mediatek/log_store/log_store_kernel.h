@@ -15,7 +15,6 @@
 #define LOG_EMMC_SIG (0x785690ef)
 #define FLAG_DISABLE 0X44495341 // acsii-DISA
 #define FLAG_ENABLE 0X454E454E // acsii-ENEN
-#define FLAG_INVALID 0xdeaddead
 #define KEDUMP_ENABLE (1)
 #define KEDUMP_DISABLE (0)
 
@@ -79,15 +78,10 @@ struct sram_log_header {
 	u32 gz_log_addr;
 	u32 gz_log_len;
 	u32 reserve[41];        // reserve 41 * 4 char size	u32 reserve[37];
-	/* reserve[0] sram_log record log size */
-	/* reserve[1] save block size for kernel use */
-	/* reserve[2] pmic save boot phase enable/disable */
-	/* reserve[3] save history boot phase */
 } __packed;
 #define SRAM_RECORD_LOG_SIZE 0X00
 #define SRAM_BLOCK_SIZE 0x01
 #define SRAM_PMIC_BOOT_PHASE 0x02
-#define SRAM_HISTORY_BOOT_PHASE 0x03
 
 
 /* emmc last block struct */
@@ -127,11 +121,6 @@ struct emmc_log {
 	u32 end;
 };
 
-struct mem_desc_ls {
-	unsigned int addr;
-	unsigned int size;
-};
-
 #define LOG_PLLK 0x01
 #define LOG_PL 0x02
 #define LOG_KERNEL 0x03
@@ -145,13 +134,7 @@ struct mem_desc_ls {
 #define BOOT_PHASE_PL_COLD_REBOOT 0X05
 #define BOOT_PHASE_SUSPEND 0x06
 #define BOOT_PHASE_RESUME 0X07
-#define BOOT_PHASE_PRE_SUSPEND 0x08
-#define BOOT_PHASE_EXIT_RESUME 0X09
 
-bool get_pmic_interface(void);
-u32 set_pmic_boot_phase(u32 boot_phase);
-u32 get_pmic_boot_phase(void);
-void store_log_to_emmc_enable(bool value);
 #if IS_ENABLED(CONFIG_MTK_DRAM_LOG_STORE)
 void log_store_bootup(void);
 void store_log_to_emmc_enable(bool value);
@@ -173,11 +156,6 @@ int set_emmc_config(int type, int value);
 int read_emmc_config(struct log_emmc_header *log_header);
 u32 get_last_boot_phase(void);
 void set_boot_phase(u32 step);
-void log_store_bootup(void);
-void store_printk_buff(void);
-int dt_get_log_store(struct mem_desc_ls *data);
-void disable_early_log(void);
-void *get_sram_header(void);
 #else
 
 static inline void  log_store_bootup(void)
@@ -212,23 +190,6 @@ static inline u32 get_last_boot_phase(void)
 }
 static inline void set_boot_phase(u32 step)
 {
-}
-static inline void log_store_bootup(void)
-{
-}
-static inline void store_printk_buff(void)
-{
-}
-static inline int dt_get_log_store(struct mem_desc_ls *data)
-{
-	return 0;
-}
-static inline void disable_early_log(void)
-{
-}
-static inline void *get_sram_header(void)
-{
-	return NULL;
 }
 #endif
 #endif

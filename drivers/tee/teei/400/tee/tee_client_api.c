@@ -119,18 +119,12 @@ TEEC_Result TEEC_InitializeContext(const char *name, struct TEEC_Context *ctx)
 	char devname[128];
 	struct file *fd;
 	size_t n;
-	int ret = 0;
 
 	if (!ctx)
 		return TEEC_ERROR_BAD_PARAMETERS;
 
 	for (n = 0; n < TEEC_MAX_DEV_SEQ; n++) {
-		ret = snprintf(devname, sizeof(devname), "/dev/isee_tee%zu", n);
-		if (ret <= 0) {
-			IMSG_ERROR("snprintf failed ret = %d\n", ret);
-			continue;
-		}
-
+		snprintf(devname, sizeof(devname), "/dev/isee_tee%zu", n);
 		fd = teec_open_dev(devname, name);
 		if (!IS_ERR_OR_NULL(fd)) {
 			ctx->fd = fd;
@@ -658,10 +652,10 @@ TEEC_Result TEEC_RegisterSharedMemory(struct TEEC_Context *ctx,
 	if (!s)
 		s = 8;
 
-	tee_ctx = ctx->fd->private_data;
-
 	mutex_lock(&tee_ctx->mutex);
 
+	tee_ctx = ctx->fd->private_data;
+	mutex_lock(&tee_ctx->mutex);
 	tee_shm = isee_shm_kalloc(tee_ctx, s, TEE_SHM_DMA_KERN_BUF | TEE_SHM_MAPPED);
 	if (IS_ERR(shm)) {
 		IMSG_ERROR("%s:%d Failed to get tee_shm!\n", __func__, __LINE__);
@@ -774,6 +768,5 @@ void TEEC_ReleaseSharedMemory(struct TEEC_SharedMemory *shm)
 	shm->registered_fd = -1;
 
 	mutex_unlock(&tee_ctx->mutex);
-
 }
 EXPORT_SYMBOL(TEEC_ReleaseSharedMemory);

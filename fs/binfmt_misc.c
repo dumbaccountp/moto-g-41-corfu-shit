@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * binfmt_misc.c
  *
@@ -23,7 +22,6 @@
 #include <linux/pagemap.h>
 #include <linux/namei.h>
 #include <linux/mount.h>
-#include <linux/fs_context.h>
 #include <linux/syscalls.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
@@ -44,10 +42,10 @@ static LIST_HEAD(entries);
 static int enabled = 1;
 
 enum {Enabled, Magic};
-#define MISC_FMT_PRESERVE_ARGV0 (1UL << 31)
-#define MISC_FMT_OPEN_BINARY (1UL << 30)
-#define MISC_FMT_CREDENTIALS (1UL << 29)
-#define MISC_FMT_OPEN_FILE (1UL << 28)
+#define MISC_FMT_PRESERVE_ARGV0 (1 << 31)
+#define MISC_FMT_OPEN_BINARY (1 << 30)
+#define MISC_FMT_CREDENTIALS (1 << 29)
+#define MISC_FMT_OPEN_FILE (1 << 28)
 
 typedef struct {
 	struct list_head list;
@@ -134,6 +132,7 @@ static int load_misc_binary(struct linux_binprm *bprm)
 	Node *fmt;
 	struct file *interp_file = NULL;
 	int retval;
+	int fd_binary = -1;
 
 	retval = -ENOEXEC;
 	if (!enabled)
@@ -159,25 +158,51 @@ static int load_misc_binary(struct linux_binprm *bprm)
 			goto ret;
 	}
 
-	if (fmt->flags & MISC_FMT_OPEN_BINARY)
-		bprm->have_execfd = 1;
+	if (fmt->flags & MISC_FMT_OPEN_BINARY) {
 
+		/* if the binary should be opened on behalf of the
+		 * interpreter than keep it open and assign descriptor
+		 * to it
+		 */
+		fd_binary = get_unused_fd_flags(0);
+		if (fd_binary < 0) {
+			retval = fd_binary;
+			goto ret;
+		}
+		fd_install(fd_binary, bprm->file);
+
+		/* if the binary is not readable than enforce mm->dumpable=0
+		   regardless of the interpreter's permissions */
+		would_dump(bprm, bprm->file);
+
+		allow_write_access(bprm->file);
+		bprm->file = NULL;
+
+		/* mark the bprm that fd should be passed to interp */
+		bprm->interp_flags |= BINPRM_FLAGS_EXECFD;
+		bprm->interp_data = fd_binary;
+
+	} else {
+		allow_write_access(bprm->file);
+		fput(bprm->file);
+		bprm->file = NULL;
+	}
 	/* make argv[1] be the path to the binary */
-	retval = copy_string_kernel(bprm->interp, bprm);
+	retval = copy_strings_kernel(1, &bprm->interp, bprm);
 	if (retval < 0)
-		goto ret;
+		goto error;
 	bprm->argc++;
 
 	/* add the interp as argv[0] */
-	retval = copy_string_kernel(fmt->interpreter, bprm);
+	retval = copy_strings_kernel(1, &fmt->interpreter, bprm);
 	if (retval < 0)
-		goto ret;
+		goto error;
 	bprm->argc++;
 
 	/* Update interp in case binfmt_script needs it. */
 	retval = bprm_change_interp(fmt->interpreter, bprm);
 	if (retval < 0)
-		goto ret;
+		goto error;
 
 	if (fmt->flags & MISC_FMT_OPEN_FILE) {
 		interp_file = file_clone_open(fmt->interp_file);
@@ -188,16 +213,38 @@ static int load_misc_binary(struct linux_binprm *bprm)
 	}
 	retval = PTR_ERR(interp_file);
 	if (IS_ERR(interp_file))
-		goto ret;
+		goto error;
 
-	bprm->interpreter = interp_file;
-	if (fmt->flags & MISC_FMT_CREDENTIALS)
-		bprm->execfd_creds = 1;
+	bprm->file = interp_file;
+	if (fmt->flags & MISC_FMT_CREDENTIALS) {
+		loff_t pos = 0;
 
-	retval = 0;
+		/*
+		 * No need to call prepare_binprm(), it's already been
+		 * done.  bprm->buf is stale, update from interp_file.
+		 */
+		memset(bprm->buf, 0, BINPRM_BUF_SIZE);
+		retval = kernel_read(bprm->file, bprm->buf, BINPRM_BUF_SIZE,
+				&pos);
+	} else
+		retval = prepare_binprm(bprm);
+
+	if (retval < 0)
+		goto error;
+
+	retval = search_binary_handler(bprm);
+	if (retval < 0)
+		goto error;
+
 ret:
 	dput(fmt->dentry);
 	return retval;
+error:
+	if (fd_binary > 0)
+		ksys_close(fd_binary);
+	bprm->interp_flags = 0;
+	bprm->interp_data = 0;
+	goto ret;
 }
 
 /* Command parsers */
@@ -772,7 +819,7 @@ static const struct super_operations s_ops = {
 	.evict_inode	= bm_evict_inode,
 };
 
-static int bm_fill_super(struct super_block *sb, struct fs_context *fc)
+static int bm_fill_super(struct super_block *sb, void *data, int silent)
 {
 	int err;
 	static const struct tree_descr bm_files[] = {
@@ -787,19 +834,10 @@ static int bm_fill_super(struct super_block *sb, struct fs_context *fc)
 	return err;
 }
 
-static int bm_get_tree(struct fs_context *fc)
+static struct dentry *bm_mount(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_tree_single(fc, bm_fill_super);
-}
-
-static const struct fs_context_operations bm_context_ops = {
-	.get_tree	= bm_get_tree,
-};
-
-static int bm_init_fs_context(struct fs_context *fc)
-{
-	fc->ops = &bm_context_ops;
-	return 0;
+	return mount_single(fs_type, flags, data, bm_fill_super);
 }
 
 static struct linux_binfmt misc_format = {
@@ -810,7 +848,7 @@ static struct linux_binfmt misc_format = {
 static struct file_system_type bm_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "binfmt_misc",
-	.init_fs_context = bm_init_fs_context,
+	.mount		= bm_mount,
 	.kill_sb	= kill_litter_super,
 };
 MODULE_ALIAS_FS("binfmt_misc");
@@ -832,4 +870,3 @@ static void __exit exit_misc_binfmt(void)
 core_initcall(init_misc_binfmt);
 module_exit(exit_misc_binfmt);
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(ANDROID_GKI_VFS_EXPORT_ONLY);

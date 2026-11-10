@@ -133,6 +133,10 @@ static inline bool fsg_lun_is_open(struct fsg_lun *curlun)
 /* Maximal number of LUNs supported in mass storage function */
 #define FSG_MAX_LUNS	16
 
+#ifdef CONFIG_USB_CONFIGFS_MTK_FASTMETA
+#define LUN_NAME_LEN	8
+#endif
+
 enum fsg_buffer_state {
 	BUF_STATE_SENDING = -2,
 	BUF_STATE_RECEIVING,
@@ -171,6 +175,11 @@ enum data_direction {
 	DATA_DIR_TO_HOST,
 	DATA_DIR_NONE
 };
+
+static inline u32 get_unaligned_be24(u8 *buf)
+{
+	return 0xffffff & (u32) get_unaligned_be32(buf - 1);
+}
 
 static inline struct fsg_lun *fsg_lun_from_dev(struct device *dev)
 {

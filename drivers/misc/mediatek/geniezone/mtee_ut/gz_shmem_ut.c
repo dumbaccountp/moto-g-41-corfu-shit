@@ -15,6 +15,7 @@
  *    ecosystem, ex: M-TEE, Trusty, GlobalPlatform, ...)
  */
 
+
 #include "gz_shmem_ut.h"
 #include <linux/string.h>
 #include <linux/slab.h>

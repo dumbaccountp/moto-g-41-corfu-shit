@@ -18,6 +18,7 @@
 #include <linux/kernel.h>
 #include <linux/ptrace.h>
 
+#include <asm/pgtable.h>
 
 void die(const char *str, struct pt_regs *fp, unsigned long err);
 
@@ -51,7 +52,7 @@ asmlinkage int do_page_fault(struct pt_regs *regs, unsigned long address,
 	printk(" at virtual address %08lx\n", address);
 	if (!user_mode(regs))
 		die("Oops", regs, error_code);
-	make_task_dead(SIGKILL);
+	do_exit(SIGKILL);
 
 	return 1;
 }

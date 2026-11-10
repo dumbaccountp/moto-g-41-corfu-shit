@@ -6,6 +6,7 @@
  *  Author: Michael HSiao <michael.hsiao@mediatek.com>
  */
 
+
 /*****************************************************************************
  * Header Files
  *****************************************************************************/
@@ -13,11 +14,11 @@
 #include "vow_scp.h"
 #include "vow.h"
 #include "vow_assert.h"
-#if IS_ENABLED(CONFIG_MTK_TINYSYS_SCP_SUPPORT)
+#ifdef CONFIG_MTK_TINYSYS_SCP_SUPPORT
 #include "scp.h"
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_TINYSYS_SCP_SUPPORT)
+#ifdef CONFIG_MTK_TINYSYS_SCP_SUPPORT
 static int vow_ipi_recv_handler(unsigned int id,
 				void *prdata,
 				void *data,
@@ -42,7 +43,7 @@ bool (*ipi_tx_ack_handle)(unsigned int a, unsigned int b);
  ****************************************************************************/
 unsigned int vow_check_scp_status(void)
 {
-#if IS_ENABLED(CONFIG_MTK_TINYSYS_SCP_SUPPORT)
+#ifdef CONFIG_MTK_TINYSYS_SCP_SUPPORT
 	return is_scp_ready(SCP_A_ID);
 #else
 	return 0;
@@ -52,7 +53,7 @@ unsigned int vow_check_scp_status(void)
 void vow_ipi_register(void (*ipi_rx_call)(unsigned int, void *),
 		      bool (*ipi_tx_ack_call)(unsigned int, unsigned int))
 {
-#if IS_ENABLED(CONFIG_MTK_TINYSYS_SCP_SUPPORT)
+#ifdef CONFIG_MTK_TINYSYS_SCP_SUPPORT
 	mtk_ipi_register(&scp_ipidev, IPI_IN_AUDIO_VOW_1,
 			(void *)vow_ipi_recv_handler, NULL,
 			 &vow_ipi_receive);
@@ -64,7 +65,7 @@ void vow_ipi_register(void (*ipi_rx_call)(unsigned int, void *),
 	ipi_tx_ack_handle = ipi_tx_ack_call;
 }
 
-#if IS_ENABLED(CONFIG_MTK_TINYSYS_SCP_SUPPORT)
+#ifdef CONFIG_MTK_TINYSYS_SCP_SUPPORT
 static int vow_ipi_recv_handler(unsigned int id,
 				void *prdata,
 				void *data,
@@ -98,7 +99,7 @@ bool vow_ipi_send(unsigned int msg_id,
 		  unsigned int *payload,
 		  unsigned int need_ack)
 {
-#if IS_ENABLED(CONFIG_MTK_TINYSYS_SCP_SUPPORT)
+#ifdef CONFIG_MTK_TINYSYS_SCP_SUPPORT
 	bool ret = false;
 	int ipi_result = -1;
 	unsigned int retry_time = VOW_IPI_SEND_CNT_TIMEOUT;
@@ -164,7 +165,7 @@ RESEND_IPI:
 			break;
 		} else {
 			if (retry_cnt == retry_time) { // already retry max times
-				VOWDRV_DEBUG("%s() ERROR, ipi_id(%d) Fail %d after retry cnt =%d\n",
+				VOWDRV_DEBUG("%s() ERROR, ipi_id(%d) Fail after retry cnt =%d\n",
 						 __func__,
 						 msg_id,
 						 ipi_result,
@@ -205,7 +206,7 @@ RESEND_IPI:
 	(void) payload_len;
 	(void) payload;
 	(void) need_ack;
-	VOWDRV_DEBUG("%s(), vow: SCP no support\n\r", __func__);
+	VOWDRV_DEBUG("vow:SCP no support\n\r");
 	return false;
 #endif
 }

@@ -96,9 +96,10 @@ ssize_t conn_dbg_dev_read(struct file *filp, char __user *buffer,
 
 	return 0;
 }
-static const struct file_operations gConnDbgDevFops = {
-	.read = conn_dbg_dev_read,
+
+const struct file_operations gConnDbgDevFops = {
 	.write = conn_dbg_dev_write,
+	.read = conn_dbg_dev_read,
 };
 
 static int conn_dbg_dev_init(void)

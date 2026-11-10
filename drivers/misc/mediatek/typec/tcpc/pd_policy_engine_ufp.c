@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #include "inc/pd_core.h"
@@ -64,7 +64,7 @@ void pe_ufp_vdm_attention_request_entry(
 	VDM_STATE_NORESP_CMD(pd_port);
 
 	switch (pd_port->mode_svid) {
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 	case USB_SID_DISPLAYPORT:
 		pd_dpm_ufp_send_dp_attention(pd_port);
 		break;
@@ -80,7 +80,7 @@ void pe_ufp_vdm_attention_request_entry(
  * ALT Mode
  */
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 
 void pe_ufp_vdm_dp_status_update_entry(struct pd_port *pd_port)
 {
@@ -98,7 +98,7 @@ void pe_ufp_vdm_dp_configure_entry(struct pd_port *pd_port)
  * SVMD/UVDM
  */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 
 void pe_ufp_uvdm_recv_entry(struct pd_port *pd_port)
 {

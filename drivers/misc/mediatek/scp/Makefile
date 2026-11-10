@@ -11,5 +11,9 @@
 # GNU General Public License for more details.
 #
 
-obj-y += rv/
+obj-$(CONFIG_MTK_TINYSYS_SCP_CM4_SUPPORT) += cm4/
+obj-$(CONFIG_MTK_TINYSYS_SCP_RV_SUPPORT) += rv/
+
+ccflags-y  += -I$(srctree)/drivers/misc/mediatek/include/
+
 

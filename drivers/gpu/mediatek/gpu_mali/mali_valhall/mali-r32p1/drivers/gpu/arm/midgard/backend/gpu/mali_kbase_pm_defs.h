@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
  * (C) COPYRIGHT 2014-2021 ARM Limited. All rights reserved.
@@ -115,7 +115,7 @@ struct kbasep_pm_metrics {
 #else
 	u32 busy_cl[2];
 	u32 busy_gl;
-#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 	u32 busy_gl_plus[3];
 #endif
 #endif
@@ -569,7 +569,7 @@ struct kbase_pm_policy {
 	 */
 	bool (*get_core_active)(struct kbase_device *kbdev);
 
-	/**
+	/*
 	 * Function called when a power event occurs
 	 *
 	 * @kbdev: The kbase device structure for the device (must be a

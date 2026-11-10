@@ -1,8 +1,11 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/cacheflush.h
  *
  *  Copyright (C) 1999-2002 Russell King
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 #ifndef _ASMARM_CACHEFLUSH_H
 #define _ASMARM_CACHEFLUSH_H
@@ -150,6 +153,12 @@ extern void __cpuc_coherent_kern_range(unsigned long, unsigned long);
 extern int  __cpuc_coherent_user_range(unsigned long, unsigned long);
 extern void __cpuc_flush_dcache_area(void *, size_t);
 
+extern void __flush_dcache_user_area(void *addr, size_t len);
+extern void __clean_dcache_user_area(void *addr, size_t len);
+extern void __inval_dcache_user_area(void *addr, size_t len);
+extern void __flush_dcache_area(void *addr, size_t len);
+extern void __clean_dcache_area_poc(void *addr, size_t len);
+extern void __inval_dcache_area(void *addr, size_t len);
 /*
  * These are private to the dma-mapping API.  Do not use directly.
  * Their sole purpose is to ensure that data held in the cache
@@ -258,11 +267,11 @@ extern void flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr
 #define flush_cache_dup_mm(mm) flush_cache_mm(mm)
 
 /*
- * flush_icache_user_range is used when we want to ensure that the
+ * flush_cache_user_range is used when we want to ensure that the
  * Harvard caches are synchronised for the user space address range.
  * This is used for the ARM private sys_cacheflush system call.
  */
-#define flush_icache_user_range(s,e)	__cpuc_coherent_user_range(s,e)
+#define flush_cache_user_range(s,e)	__cpuc_coherent_user_range(s,e)
 
 /*
  * Perform necessary cache operations to ensure that data previously
@@ -317,6 +326,9 @@ extern void flush_kernel_dcache_page(struct page *);
 
 #define flush_dcache_mmap_lock(mapping)		xa_lock_irq(&mapping->i_pages)
 #define flush_dcache_mmap_unlock(mapping)	xa_unlock_irq(&mapping->i_pages)
+
+#define flush_icache_user_range(vma,page,addr,len) \
+	flush_dcache_page(page)
 
 /*
  * We don't appear to need to do anything here.  In fact, if we did, we'd
@@ -472,12 +484,5 @@ static inline void __sync_cache_range_r(volatile void *p, size_t size)
 
 void flush_uprobe_xol_access(struct page *page, unsigned long uaddr,
 			     void *kaddr, unsigned long len);
-
-
-#ifdef CONFIG_CPU_ICACHE_MISMATCH_WORKAROUND
-void check_cpu_icache_size(int cpuid);
-#else
-static inline void check_cpu_icache_size(int cpuid) { }
-#endif
 
 #endif

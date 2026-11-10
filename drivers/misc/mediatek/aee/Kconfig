@@ -1,6 +1,7 @@
 config MTK_AEE_FEATURE
 	tristate "Enable Android Exception Enhancement"
 	select FIQ_GLUE if !TRUSTONIC_TEE_SUPPORT && !ARM_PSCI && !TRUSTY
+	select TRACER_SNAPSHOT
 	select FTRACE
 	help
 	  AEE (Android Exception Engine) that designed by  Mediatek is an
@@ -28,23 +29,6 @@ config MTK_AEE_IPANIC
 	  combined with aee. It will do some hook function and get some
 	  kernel panic information for debug.
 
-config MTK_AEE_HANGDET
-	tristate "Enable AEE Kernel Hang Detector"
-	depends on MTK_AEE_FEATURE
-	help
-	  MTK_AEE_HANGDET is the kernel config of hang detector feature
-	  designed by MTK, which is the mechanism to check if each cpu
-	  is alived. When cpu hang is detected, raise excetpion.
-	  Avoid system_server is blocked.
-
-config MTK_AVOID_TRUNCATE_COREDUMP
-	tristate "Enable AEE coredump and signal enhance patch"
-	help
-	  MTK_AVOID_TRUNCATE_COREDUMP is the kernel config, avoid truncating
-	  coredump after receiving signal 9. And ensure coredump file is complete
-	  when occurring suspend issue. Beyond that, it will avoid task race condition
-	  issue after NE task early exit, which will cause aed KE issue.
-
 config MTK_AEE_UT
 	tristate "control AED debug file"
 	help
@@ -52,3 +36,11 @@ config MTK_AEE_UT
 	  aed-debug.c is AEE UT test case file, just for generate some vendor
 	  exception to test AEE dump flow, include in KE, HWT, HW_reboot, EE,
 	  and kernelAPI exception
+
+config MTK_AEE_HANGDET
+	tristate "Enable AEE Kernel Hang Detector"
+	depends on MTK_AEE_FEATURE
+	help
+	  MTK_AEE_HANGDET is the kernel config of hang detector feature
+	  designed by MTK, which is the mechanism to check if each cpu
+	  is alived. When cpu hang is detected, raise excetpion.

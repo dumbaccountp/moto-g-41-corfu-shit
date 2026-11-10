@@ -6,8 +6,6 @@
 #include <linux/bug.h>
 #include <linux/mm_types.h>
 
-#ifdef CONFIG_MMU
-
 /*
  * swapcache pages are stored in the swapper_space radix tree.  We want to
  * get good packing density in that tree, so the index should be dense in
@@ -20,18 +18,9 @@
  *
  * swp_entry_t's are *never* stored anywhere in their arch-dependent format.
  */
-#define SWP_TYPE_SHIFT	(BITS_PER_XA_VALUE - MAX_SWAPFILES_SHIFT)
-#define SWP_OFFSET_MASK	((1UL << SWP_TYPE_SHIFT) - 1)
-
-/* Clear all flags but only keep swp_entry_t related information */
-static inline pte_t pte_swp_clear_flags(pte_t pte)
-{
-	if (pte_swp_soft_dirty(pte))
-		pte = pte_swp_clear_soft_dirty(pte);
-	if (pte_swp_uffd_wp(pte))
-		pte = pte_swp_clear_uffd_wp(pte);
-	return pte;
-}
+#define SWP_TYPE_SHIFT(e)	((sizeof(e.val) * 8) - \
+			(MAX_SWAPFILES_SHIFT + RADIX_TREE_EXCEPTIONAL_SHIFT))
+#define SWP_OFFSET_MASK(e)	((1UL << SWP_TYPE_SHIFT(e)) - 1)
 
 /*
  * Store a type+offset into a swp_entry_t in an arch-independent format
@@ -40,7 +29,8 @@ static inline swp_entry_t swp_entry(unsigned long type, pgoff_t offset)
 {
 	swp_entry_t ret;
 
-	ret.val = (type << SWP_TYPE_SHIFT) | (offset & SWP_OFFSET_MASK);
+	ret.val = (type << SWP_TYPE_SHIFT(ret)) |
+			(offset & SWP_OFFSET_MASK(ret));
 	return ret;
 }
 
@@ -50,7 +40,7 @@ static inline swp_entry_t swp_entry(unsigned long type, pgoff_t offset)
  */
 static inline unsigned swp_type(swp_entry_t entry)
 {
-	return (entry.val >> SWP_TYPE_SHIFT);
+	return (entry.val >> SWP_TYPE_SHIFT(entry));
 }
 
 /*
@@ -59,14 +49,16 @@ static inline unsigned swp_type(swp_entry_t entry)
  */
 static inline pgoff_t swp_offset(swp_entry_t entry)
 {
-	return entry.val & SWP_OFFSET_MASK;
+	return entry.val & SWP_OFFSET_MASK(entry);
 }
 
+#ifdef CONFIG_MMU
 /* check whether a pte points to a swap entry */
 static inline int is_swap_pte(pte_t pte)
 {
 	return !pte_none(pte) && !pte_present(pte);
 }
+#endif
 
 /*
  * Convert the arch-dependent pte representation of a swp_entry_t into an
@@ -76,7 +68,8 @@ static inline swp_entry_t pte_to_swp_entry(pte_t pte)
 {
 	swp_entry_t arch_entry;
 
-	pte = pte_swp_clear_flags(pte);
+	if (pte_swp_soft_dirty(pte))
+		pte = pte_swp_clear_soft_dirty(pte);
 	arch_entry = __pte_to_swp_entry(pte);
 	return swp_entry(__swp_type(arch_entry), __swp_offset(arch_entry));
 }
@@ -97,13 +90,16 @@ static inline swp_entry_t radix_to_swp_entry(void *arg)
 {
 	swp_entry_t entry;
 
-	entry.val = xa_to_value(arg);
+	entry.val = (unsigned long)arg >> RADIX_TREE_EXCEPTIONAL_SHIFT;
 	return entry;
 }
 
 static inline void *swp_to_radix_entry(swp_entry_t entry)
 {
-	return xa_mk_value(entry.val);
+	unsigned long value;
+
+	value = entry.val << RADIX_TREE_EXCEPTIONAL_SHIFT;
+	return (void *)(value | RADIX_TREE_EXCEPTIONAL_ENTRY);
 }
 
 #if IS_ENABLED(CONFIG_DEVICE_PRIVATE)
@@ -138,6 +134,12 @@ static inline struct page *device_private_entry_to_page(swp_entry_t entry)
 {
 	return pfn_to_page(swp_offset(entry));
 }
+
+vm_fault_t device_private_entry_fault(struct vm_area_struct *vma,
+		       unsigned long addr,
+		       swp_entry_t entry,
+		       unsigned int flags,
+		       pmd_t *pmdp);
 #else /* CONFIG_DEVICE_PRIVATE */
 static inline swp_entry_t make_device_private_entry(struct page *page, bool write)
 {
@@ -166,6 +168,15 @@ static inline unsigned long device_private_entry_to_pfn(swp_entry_t entry)
 static inline struct page *device_private_entry_to_page(swp_entry_t entry)
 {
 	return NULL;
+}
+
+static inline vm_fault_t device_private_entry_fault(struct vm_area_struct *vma,
+				     unsigned long addr,
+				     swp_entry_t entry,
+				     unsigned int flags,
+				     pmd_t *pmdp)
+{
+	return VM_FAULT_SIGBUS;
 }
 #endif /* CONFIG_DEVICE_PRIVATE */
 
@@ -265,8 +276,6 @@ static inline swp_entry_t pmd_to_swp_entry(pmd_t pmd)
 
 	if (pmd_swp_soft_dirty(pmd))
 		pmd = pmd_swp_clear_soft_dirty(pmd);
-	if (pmd_swp_uffd_wp(pmd))
-		pmd = pmd_swp_clear_uffd_wp(pmd);
 	arch_entry = __pmd_to_swp_entry(pmd);
 	return swp_entry(__swp_type(arch_entry), __swp_offset(arch_entry));
 }
@@ -372,5 +381,4 @@ static inline int non_swap_entry(swp_entry_t entry)
 }
 #endif
 
-#endif /* CONFIG_MMU */
 #endif /* _LINUX_SWAPOPS_H */

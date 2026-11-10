@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2019 MediaTek Inc.
+ * Copyright (c) 2021 MediaTek Inc.
  */
 
 #ifndef __MTK_GPUFREQ_COMMON_H__
@@ -23,6 +23,11 @@ struct gpu_assert_info {
 	enum g_exception_enum exception_type;
 	char exception_string[1024];
 };
+
+// to check if aee service is running
+#ifdef CONFIG_MTK_AEE_AED
+extern int aee_mode;
+#endif
 
 void gpu_assert(bool cond, enum g_exception_enum except_type,
 	const char *except_str, ...);

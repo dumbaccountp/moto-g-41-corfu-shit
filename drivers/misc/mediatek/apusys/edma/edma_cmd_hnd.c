@@ -15,15 +15,14 @@
 #include <linux/spinlock.h>
 #include <linux/delay.h>
 #include <linux/jiffies.h>
-#include <linux/sched/clock.h>
 
 #include "edma_driver.h"
 #include "edma_cmd_hnd.h"
-
 #include "apusys_power.h"
 #include "edma_dbgfs.h"
 #include "edma_plat_internal.h"
 
+#define NO_INTERRUPT		0
 #define EDMA_POWEROFF_TIME_DEFAULT 2000
 
 static inline void lock_command(struct edma_sub *edma_sub)
@@ -196,7 +195,6 @@ int edma_power_off(struct edma_sub *edma_sub, u8 force)
 
 			if (edma_device->power_state != EDMA_POWER_OFF) {
 				ret = apu_device_power_suspend(EDMA, 1);
-
 				pr_notice("%s: force power off!!\n", __func__);
 				if (!ret) {
 					LOG_INF("%s power off success\n",
@@ -223,7 +221,7 @@ int edma_power_off(struct edma_sub *edma_sub, u8 force)
 	return ret;
 
 }
-#ifndef EDMA_IOCTRL
+
 void edma_setup_ext_mode_request(struct edma_request *req,
 			       struct edma_ext *edma_ext,
 			       unsigned int type)
@@ -236,9 +234,6 @@ void edma_setup_ext_mode_request(struct edma_request *req,
 	req->desp_iommu_en = edma_ext->desp_iommu_en;
 	req->cmd_result = 0;
 }
-
-#endif
-
 
 int edma_execute(struct edma_sub *edma_sub, struct edma_ext *edma_ext)
 {

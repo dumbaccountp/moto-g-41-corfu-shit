@@ -1,29 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0-only
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2016 InforceComputing
- * Author: Vinay Simha BN <simhavcs@gmail.com>
- *
- * Copyright (C) 2016 Linaro Ltd
- * Author: Sumit Semwal <sumit.semwal@linaro.org>
- *
- * From internet archives, the panel for Nexus 7 2nd Gen, 2013 model is a
- * JDI model LT070ME05000, and its data sheet is at:
- * http://panelone.net/en/7-0-inch/JDI_LT070ME05000_7.0_inch-datasheet
- */
-
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 #include <linux/backlight.h>
-#include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
 
-#include <video/mipi_display.h>
-
+#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_mipi_dsi.h>
-#include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
+
+#include <video/mipi_display.h>
 
 static const char * const regulator_names[] = {
 	"vddp",
@@ -183,7 +173,8 @@ static int jdi_panel_disable(struct drm_panel *panel)
 	if (!jdi->enabled)
 		return 0;
 
-	backlight_disable(jdi->backlight);
+	jdi->backlight->props.power = FB_BLANK_POWERDOWN;
+	backlight_update_status(jdi->backlight);
 
 	jdi->enabled = false;
 
@@ -279,7 +270,8 @@ static int jdi_panel_enable(struct drm_panel *panel)
 	if (jdi->enabled)
 		return 0;
 
-	backlight_enable(jdi->backlight);
+	jdi->backlight->props.power = FB_BLANK_UNBLANK;
+	backlight_update_status(jdi->backlight);
 
 	jdi->enabled = true;
 
@@ -296,30 +288,30 @@ static const struct drm_display_mode default_mode = {
 		.vsync_start = 1920 + 3,
 		.vsync_end = 1920 + 3 + 5,
 		.vtotal = 1920 + 3 + 5 + 6,
+		.vrefresh = 60,
 		.flags = 0,
 };
 
-static int jdi_panel_get_modes(struct drm_panel *panel,
-			       struct drm_connector *connector)
+static int jdi_panel_get_modes(struct drm_panel *panel)
 {
 	struct drm_display_mode *mode;
 	struct jdi_panel *jdi = to_jdi_panel(panel);
 	struct device *dev = &jdi->dsi->dev;
 
-	mode = drm_mode_duplicate(connector->dev, &default_mode);
+	mode = drm_mode_duplicate(panel->drm, &default_mode);
 	if (!mode) {
 		dev_err(dev, "failed to add mode %ux%ux@%u\n",
 			default_mode.hdisplay, default_mode.vdisplay,
-			drm_mode_vrefresh(&default_mode));
+			default_mode.vrefresh);
 		return -ENOMEM;
 	}
 
 	drm_mode_set_name(mode);
 
-	drm_mode_probed_add(connector, mode);
+	drm_mode_probed_add(panel->connector, mode);
 
-	connector->display_info.width_mm = 95;
-	connector->display_info.height_mm = 151;
+	panel->connector->display_info.width_mm = 95;
+	panel->connector->display_info.height_mm = 151;
 
 	return 1;
 }
@@ -437,12 +429,13 @@ static int jdi_panel_add(struct jdi_panel *jdi)
 		return ret;
 	}
 
-	drm_panel_init(&jdi->base, &jdi->dsi->dev, &jdi_panel_funcs,
-		       DRM_MODE_CONNECTOR_DSI);
+	drm_panel_init(&jdi->base);
+	jdi->base.funcs = &jdi_panel_funcs;
+	jdi->base.dev = &jdi->dsi->dev;
 
-	drm_panel_add(&jdi->base);
+	ret = drm_panel_add(&jdi->base);
 
-	return 0;
+	return ret;
 }
 
 static void jdi_panel_del(struct jdi_panel *jdi)
@@ -490,6 +483,7 @@ static int jdi_panel_remove(struct mipi_dsi_device *dsi)
 		dev_err(&dsi->dev, "failed to detach from DSI host: %d\n",
 			ret);
 
+	drm_panel_detach(&jdi->base);
 	jdi_panel_del(jdi);
 
 	return 0;

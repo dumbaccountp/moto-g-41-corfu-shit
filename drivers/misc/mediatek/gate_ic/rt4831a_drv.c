@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2021 MediaTek Inc.
- */
+* Copyright (c) 2019 MediaTek Inc.
+*/
 
 #include <linux/gpio/consumer.h>
 #include <linux/kernel.h>
@@ -16,9 +16,12 @@
 
 #include "gate_i2c.h"
 
-#if IS_ENABLED(CONFIG_LEDS_MTK)
+#ifdef CONFIG_LEDS_MTK_PWM
+#include <leds-mtk-pwm.h>
 #define CONFIG_LEDS_BRIGHTNESS_CHANGED
-#include <linux/leds-mtk.h>
+#elif defined CONFIG_LEDS_MTK_I2C
+#include <leds-mtk-i2c.h>
+#define CONFIG_LEDS_BRIGHTNESS_CHANGED
 #endif
 
 /*****************************************************************************
@@ -63,7 +66,6 @@ static const struct of_device_id _gate_ic_i2c_of_match[] = {
 	{
 		.compatible = "mediatek,gate-ic-i2c",
 	 },
-	{}
 };
 
 static struct i2c_client *_gate_ic_i2c_client;
@@ -85,7 +87,7 @@ static void _gate_ic_backlight_enable(void)
 	/*BL enable*/
 	struct gate_ic_client *gate_client = i2c_get_clientdata(_gate_ic_i2c_client);
 
-	pr_info("%s+\n", __func__);
+	pr_info("Backlight enable\n");
 
 	if (gate_client->pwm_enable) {
 		_gate_ic_i2c_write_bytes(BACKLIGHT_CONFIG_1, 0x6B);
@@ -94,7 +96,6 @@ static void _gate_ic_backlight_enable(void)
 		if (!atomic_read(&gate_client->backlight_status))
 			_gate_ic_backlight_set(0);
 	}
-
 	_gate_ic_i2c_write_bytes(BACKLIGHT_CONFIG_2, 0x9D);
 	_gate_ic_i2c_write_bytes(BACKLIGHT_OPTION_1, 0x06);
 	_gate_ic_i2c_write_bytes(BACKLIGHT_OPTION_2, 0xB7);
@@ -113,7 +114,7 @@ int _backlight_changed_event(struct notifier_block *nb, unsigned long event,
 	led_conf = (struct led_conf_info *)v;
 
 	switch (event) {
-	case LED_BRIGHTNESS_CHANGED:
+	case 1:
 		if (led_conf->cdev.brightness > 0)
 			atomic_set(&gate_client->backlight_status, 1);
 		else
@@ -135,7 +136,7 @@ static struct notifier_block leds_init_notifier = {
  * Extern Area
  *****************************************************************************/
 
-int _gate_ic_backlight_set(unsigned int hw_level)
+void _gate_ic_backlight_set(unsigned int hw_level)
 {
 	int level_l, level_h;
 	struct i2c_client *client = _gate_ic_i2c_client;
@@ -153,7 +154,6 @@ int _gate_ic_backlight_set(unsigned int hw_level)
 	if (ret < 0)
 		pr_info("ERROR %d!! i2c write data fail 0x%0x, 0x%0x, 0x%0x !!\n",
 				ret, cmd_buf[0], cmd_buf[1], cmd_buf[2]);
-	return ret;
 }
 EXPORT_SYMBOL_GPL(_gate_ic_backlight_set);
 
@@ -208,20 +208,13 @@ void _gate_ic_Power_on(void)
 {
 	struct gate_ic_client *gate_client = i2c_get_clientdata(_gate_ic_i2c_client);
 
-	pr_info("%s+: status = (%d, %d)\n", __func__,
+	pr_info("Status: %d, %d\n",
 		atomic_read(&gate_client->gate_ic_power_status),
 		atomic_read(&gate_client->backlight_status));
 
 	if (IS_ERR(gate_client->pinctrl)) {
 		pr_info("ERROR!! pinctrl is error!\n");
 	} else if (!atomic_read(&gate_client->gate_ic_power_status)) {
-		gate_client->pinctrl = devm_gpiod_get(gate_client->dev, "gate-power",
-				   GPIOD_OUT_HIGH);
-		if (IS_ERR(gate_client->pinctrl)) {
-			pr_info("ERROR!! Failed to get gpio: %d\n",
-				PTR_ERR(gate_client->pinctrl));
-			return;
-		}
 		gpiod_set_value(gate_client->pinctrl, 1);
 		devm_gpiod_put(gate_client->dev, gate_client->pinctrl);
 
@@ -235,7 +228,7 @@ void _gate_ic_Power_off(void)
 {
 	struct gate_ic_client *gate_client = i2c_get_clientdata(_gate_ic_i2c_client);
 
-	pr_info("%s+: status = (%d, %d)\n", __func__,
+	pr_info("Status: %d, %d\n",
 		atomic_read(&gate_client->gate_ic_power_status),
 		atomic_read(&gate_client->backlight_status));
 
@@ -243,13 +236,6 @@ void _gate_ic_Power_off(void)
 		pr_info("ERROR!! pinctrl is error!\n");
 	} else if (atomic_read(&gate_client->gate_ic_power_status) &&
 			!atomic_read(&gate_client->backlight_status)) {
-		gate_client->pinctrl = devm_gpiod_get(gate_client->dev, "gate-power",
-				   GPIOD_OUT_HIGH);
-		if (IS_ERR(gate_client->pinctrl)) {
-			pr_info("ERROR!! Failed to get gpio: %d\n",
-				PTR_ERR(gate_client->pinctrl));
-			return;
-		}
 		gpiod_set_value(gate_client->pinctrl, 0);
 		devm_gpiod_put(gate_client->dev, gate_client->pinctrl);
 
@@ -260,19 +246,20 @@ EXPORT_SYMBOL_GPL(_gate_ic_Power_off);
 
 void _gate_ic_i2c_panel_bias_enable(unsigned int power_status)
 {
-	pr_info("%s+\n", __func__);
+
+	pr_info("Panel bias enable\n");
 
 	if (power_status) {
 		_gate_ic_i2c_write_bytes(DISPLAY_BIAS_CONFIGURATION_2, 0x11);
 		_gate_ic_i2c_write_bytes(DISPLAY_BIAS_CONFIGURATION_3, 0x00);
-		/* set bias to 5.4v */
+		/*set bias to 5.4v*/
 		_gate_ic_i2c_write_bytes(LCM_BIAS, 0x24);
 		_gate_ic_i2c_write_bytes(VPOS_BIAS, 0x1c);
 		_gate_ic_i2c_write_bytes(VNEG_BIAS, 0x1c);
 		/* set dsv FPWM mode */
 		_gate_ic_i2c_write_bytes(0xF0, 0x69);
 		_gate_ic_i2c_write_bytes(0xB1, 0x6c);
-		/* bias enable */
+		/*bias enable*/
 		_gate_ic_i2c_write_bytes(DISPLAY_BIAS_CONFIGURATION_1, 0x9e);
 	} else {
 		_gate_ic_i2c_write_bytes(DISPLAY_BIAS_CONFIGURATION_1, 0x18);
@@ -292,7 +279,7 @@ static int _gate_ic_i2c_probe(struct i2c_client *client,
 	int status;
 	int pwm_enable;
 
-	pr_info("%s+: client name=%s addr=0x%x\n",
+	pr_info("%s NT: info==>name=%s addr=0x%x\n",
 		__func__, client->name, client->addr);
 
 	gate_client = devm_kzalloc(&client->dev, sizeof(struct gate_ic_client), GFP_KERNEL);
@@ -309,7 +296,6 @@ static int _gate_ic_i2c_probe(struct i2c_client *client,
 		pr_info("ERROR!! Failed to enable gpio: %d\n", status);
 		return status;
 	}
-	devm_gpiod_put(gate_client->dev, gate_client->pinctrl);
 	i2c_set_clientdata(client, gate_client);
 	_gate_ic_i2c_client = client;
 	atomic_set(&gate_client->gate_ic_power_status, 1);
@@ -326,7 +312,7 @@ static int _gate_ic_i2c_probe(struct i2c_client *client,
 	mtk_leds_register_notifier(&leds_init_notifier);
 #endif
 
-	pr_info("%s-: pwm-enable is %d", __func__, pwm_enable);
+	pr_info("Probe success! pwm-enable is %d", pwm_enable);
 
 	return 0;
 }
@@ -335,8 +321,7 @@ static int _gate_ic_i2c_remove(struct i2c_client *client)
 {
 	struct gate_ic_client *gate_client;
 
-	pr_info("%s+\n", __func__);
-
+	pr_info("Gate ic remove\n");
 	gate_client = i2c_get_clientdata(client);
 
 	i2c_unregister_device(client);

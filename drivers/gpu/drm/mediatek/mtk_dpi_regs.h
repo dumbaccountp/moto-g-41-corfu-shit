@@ -1,8 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2014 MediaTek Inc.
- * Author: Jie Qiu <jie.qiu@mediatek.com>
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 #ifndef __MTK_DPI_REGS_H
 #define __MTK_DPI_REGS_H
 
@@ -215,6 +214,6 @@
 #define ESAV_CODE2			(0xFFF << 0)
 #define ESAV_CODE3_MSB			BIT(16)
 
-#define EDGE_SEL_EN			BIT(5)
+#define DPI_H_FRE_CON		0xE0
 #define H_FRE_2N			BIT(25)
 #endif /* __MTK_DPI_REGS_H */

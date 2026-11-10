@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * budget-core.c: driver for the SAA7146 based Budget DVB cards
  *
@@ -13,6 +12,21 @@
  *	     Michael Dreher <michael@5dot1.de>,
  *	     Oliver Endriss <o.endriss@gmx.de>,
  *	     Andreas 'randy' Weinberger
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
+ * GNU General Public License for more details.
+ *
+ * To obtain the license, point your browser to
+ * http://www.gnu.org/copyleft/gpl.html
+ *
  *
  * the project's page is at https://linuxtv.org
  */
@@ -171,9 +185,9 @@ static int budget_read_fe_status(struct dvb_frontend *fe,
 	return ret;
 }
 
-static void vpeirq(struct tasklet_struct *t)
+static void vpeirq(unsigned long data)
 {
-	struct budget *budget = from_tasklet(budget, t, vpe_tasklet);
+	struct budget *budget = (struct budget *) data;
 	u8 *mem = (u8 *) (budget->grabbing);
 	u32 olddma = budget->ttbp;
 	u32 newdma = saa7146_read(budget->dev, PCI_VDP3);
@@ -495,12 +509,10 @@ int ttpci_budget_init(struct budget *budget, struct saa7146_dev *dev,
 	if (bi->type != BUDGET_FS_ACTIVY)
 		saa7146_write(dev, GPIO_CTRL, 0x500000);	/* GPIO 3 = 1 */
 
-	strscpy(budget->i2c_adap.name, budget->card->name,
-		sizeof(budget->i2c_adap.name));
+	strlcpy(budget->i2c_adap.name, budget->card->name, sizeof(budget->i2c_adap.name));
 
 	saa7146_i2c_adapter_prepare(dev, &budget->i2c_adap, SAA7146_I2C_BUS_BIT_RATE_120);
-	strscpy(budget->i2c_adap.name, budget->card->name,
-		sizeof(budget->i2c_adap.name));
+	strcpy(budget->i2c_adap.name, budget->card->name);
 
 	if (i2c_add_adapter(&budget->i2c_adap) < 0) {
 		ret = -ENOMEM;
@@ -519,7 +531,7 @@ int ttpci_budget_init(struct budget *budget, struct saa7146_dev *dev,
 	/* upload all */
 	saa7146_write(dev, GPIO_CTRL, 0x000000);
 
-	tasklet_setup(&budget->vpe_tasklet, vpeirq);
+	tasklet_init(&budget->vpe_tasklet, vpeirq, (unsigned long) budget);
 
 	/* frontend power on */
 	if (bi->type != BUDGET_FS_ACTIVY)

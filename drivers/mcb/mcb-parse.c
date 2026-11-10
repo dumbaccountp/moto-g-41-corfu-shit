@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/types.h>
 #include <linux/ioport.h>
 #include <linux/slab.h>
@@ -108,7 +107,7 @@ static int chameleon_parse_gdd(struct mcb_bus *bus,
 	return 0;
 
 err:
-	put_device(&mdev->dev);
+	mcb_free_dev(mdev);
 
 	return ret;
 }
@@ -253,4 +252,4 @@ free_header:
 
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(chameleon_parse_cells, MCB);
+EXPORT_SYMBOL_GPL(chameleon_parse_cells);

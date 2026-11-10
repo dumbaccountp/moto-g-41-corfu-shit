@@ -1,6 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright(c) 2017 Intel Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
  *
  * This code is based in part on work published here:
  *
@@ -34,10 +42,11 @@
 #include <asm/vsyscall.h>
 #include <asm/cmdline.h>
 #include <asm/pti.h>
+#include <asm/pgtable.h>
+#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/desc.h>
 #include <asm/sections.h>
-#include <asm/set_memory.h>
 
 #undef pr_fmt
 #define pr_fmt(fmt)     "Kernel/User page tables isolation: " fmt
@@ -69,7 +78,7 @@ static void __init pti_print_if_secure(const char *reason)
 		pr_info("%s\n", reason);
 }
 
-static enum pti_mode {
+enum pti_mode {
 	PTI_AUTO = 0,
 	PTI_FORCE_OFF,
 	PTI_FORCE_ON
@@ -429,36 +438,11 @@ static void __init pti_clone_p4d(unsigned long addr)
 }
 
 /*
- * Clone the CPU_ENTRY_AREA and associated data into the user space visible
- * page table.
+ * Clone the CPU_ENTRY_AREA into the user space visible page table.
  */
 static void __init pti_clone_user_shared(void)
 {
-	unsigned int cpu;
-
 	pti_clone_p4d(CPU_ENTRY_AREA_BASE);
-
-	for_each_possible_cpu(cpu) {
-		/*
-		 * The SYSCALL64 entry code needs to be able to find the
-		 * thread stack and needs one word of scratch space in which
-		 * to spill a register.  All of this lives in the TSS, in
-		 * the sp1 and sp2 slots.
-		 *
-		 * This is done for all possible CPUs during boot to ensure
-		 * that it's propagated to all mms.
-		 */
-
-		unsigned long va = (unsigned long)&per_cpu(cpu_tss_rw, cpu);
-		phys_addr_t pa = per_cpu_ptr_to_phys((void *)va);
-		pte_t *target_pte;
-
-		target_pte = pti_user_pagetable_walk_pte(va);
-		if (WARN_ON(!target_pte))
-			return;
-
-		*target_pte = pfn_pte(pa >> PAGE_SHIFT, PAGE_KERNEL);
-	}
 }
 
 #else /* CONFIG_X86_64 */
@@ -491,12 +475,12 @@ static void __init pti_setup_espfix64(void)
 }
 
 /*
- * Clone the populated PMDs of the entry text and force it RO.
+ * Clone the populated PMDs of the entry and irqentry text and force it RO.
  */
 static void pti_clone_entry_text(void)
 {
 	pti_clone_pgtable((unsigned long) __entry_text_start,
-			  (unsigned long) __entry_text_end,
+			  (unsigned long) __irqentry_text_end,
 			  PTI_CLONE_PMD);
 
 	/*
@@ -557,6 +541,13 @@ static inline bool pti_kernel_image_global_ok(void)
 }
 
 /*
+ * This is the only user for these and it is not arch-generic
+ * like the other set_memory.h functions.  Just extern them.
+ */
+extern int set_memory_nonglobal(unsigned long addr, int numpages);
+extern int set_memory_global(unsigned long addr, int numpages);
+
+/*
  * For some configurations, map all of kernel text into the user page
  * tables.  This reduces TLB misses, especially on non-PCID systems.
  */
@@ -593,7 +584,7 @@ static void pti_clone_kernel_text(void)
 	set_memory_global(start, (end_global - start) >> PAGE_SHIFT);
 }
 
-static void pti_set_kernel_image_nonglobal(void)
+void pti_set_kernel_image_nonglobal(void)
 {
 	/*
 	 * The identity map is created with PMDs, regardless of the
@@ -617,7 +608,7 @@ static void pti_set_kernel_image_nonglobal(void)
  */
 void __init pti_init(void)
 {
-	if (!boot_cpu_has(X86_FEATURE_PTI))
+	if (!static_cpu_has(X86_FEATURE_PTI))
 		return;
 
 	pr_info("enabled\n");

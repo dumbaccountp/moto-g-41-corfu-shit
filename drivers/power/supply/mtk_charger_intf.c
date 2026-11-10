@@ -61,19 +61,12 @@
 #include <linux/of_platform.h>
 
 #include "mtk_charger.h"
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-#include "sgm415xx.h"
-#endif
+
 int get_uisoc(struct mtk_charger *info)
 {
 	union power_supply_propval prop;
 	struct power_supply *bat_psy = NULL;
 	int ret;
-
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 
 	bat_psy = info->bat_psy;
 
@@ -82,7 +75,7 @@ int get_uisoc(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 50;
@@ -96,7 +89,6 @@ int get_uisoc(struct mtk_charger *info)
 		ret);
 	return ret;
 }
-EXPORT_SYMBOL(get_uisoc);
 
 int get_battery_voltage(struct mtk_charger *info)
 {
@@ -104,10 +96,6 @@ int get_battery_voltage(struct mtk_charger *info)
 	struct power_supply *bat_psy = NULL;
 	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -115,7 +103,6 @@ int get_battery_voltage(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
@@ -135,13 +122,8 @@ int get_battery_temperature(struct mtk_charger *info)
 {
 	union power_supply_propval prop;
 	struct power_supply *bat_psy = NULL;
-	int ret = 0;
-	int tmp_ret = 0;
+	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -149,12 +131,12 @@ int get_battery_temperature(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 27;
 	} else {
-		tmp_ret = power_supply_get_property(bat_psy,
+		ret = power_supply_get_property(bat_psy,
 			POWER_SUPPLY_PROP_TEMP, &prop);
 		ret = prop.intval / 10;
 	}
@@ -168,13 +150,8 @@ int get_battery_current(struct mtk_charger *info)
 {
 	union power_supply_propval prop;
 	struct power_supply *bat_psy = NULL;
-	int ret = 0;
-	int tmp_ret = 0;
+	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -182,12 +159,12 @@ int get_battery_current(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 0;
 	} else {
-		tmp_ret = power_supply_get_property(bat_psy,
+		ret = power_supply_get_property(bat_psy,
 			POWER_SUPPLY_PROP_CURRENT_NOW, &prop);
 		ret = prop.intval / 1000;
 	}
@@ -203,24 +180,18 @@ static int get_pmic_vbus(struct mtk_charger *info, int *vchr)
 	static struct power_supply *chg_psy;
 	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (chg_psy == NULL)
-		chg_psy = power_supply_get_by_name("usb_vbus");
-#else
 	if (chg_psy == NULL)
 		chg_psy = power_supply_get_by_name("mtk_charger_type");
-#endif
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		chr_err("%s Couldn't get chg_psy\n", __func__);
+		pr_notice("%s Couldn't get chg_psy\n", __func__);
 		ret = -1;
 	} else {
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_VOLTAGE_NOW, &prop);
 	}
-
 	*vchr = prop.intval;
 
-	chr_debug("%s vbus:%d\n", __func__,
+	pr_notice("%s vbus:%d\n", __func__,
 		prop.intval);
 	return ret;
 }
@@ -242,21 +213,6 @@ int get_vbus(struct mtk_charger *info)
 
 	return vchr;
 }
-EXPORT_SYMBOL(get_vbus);
-
-int get_ibat(struct mtk_charger *info)
-{
-	int ret = 0;
-	int ibat = 0;
-
-	if (info == NULL)
-		return -EINVAL;
-	ret = charger_dev_get_ibat(info->chg1_dev, &ibat);
-	if (ret < 0)
-		chr_err("%s: get ibat failed: %d\n", __func__, ret);
-
-	return ibat / 1000;
-}
 
 int get_ibus(struct mtk_charger *info)
 {
@@ -267,7 +223,7 @@ int get_ibus(struct mtk_charger *info)
 		return -EINVAL;
 	ret = charger_dev_get_ibus(info->chg1_dev, &ibus);
 	if (ret < 0)
-		chr_err("%s: get ibus failed: %d\n", __func__, ret);
+		pr_notice("%s: get ibus failed: %d\n", __func__, ret);
 
 	return ibus / 1000;
 }
@@ -276,13 +232,8 @@ bool is_battery_exist(struct mtk_charger *info)
 {
 	union power_supply_propval prop;
 	struct power_supply *bat_psy = NULL;
-	int ret = 0;
-	int tmp_ret = 0;
+	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -290,12 +241,12 @@ bool is_battery_exist(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 1;
 	} else {
-		tmp_ret = power_supply_get_property(bat_psy,
+		ret = power_supply_get_property(bat_psy,
 			POWER_SUPPLY_PROP_PRESENT, &prop);
 		ret = prop.intval;
 	}
@@ -307,82 +258,38 @@ bool is_battery_exist(struct mtk_charger *info)
 
 bool is_charger_exist(struct mtk_charger *info)
 {
-	union power_supply_propval prop,wlc_prop;
-	static struct power_supply *chg_psy, *wl_psy;
-	int ret = 0;
-	int tmp_ret = 0;
+	union power_supply_propval prop;
+	static struct power_supply *chg_psy;
+	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	chg_psy = power_supply_get_by_name("sgm4154x-charger");
-#else
 	chg_psy = info->chg_psy;
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		chr_err("%s Couldn't get chg_psy\n", __func__);
-
-
 		chr_err("%s retry to get chg_psy\n", __func__);
 		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");
 		info->chg_psy = chg_psy;
 	}
-#endif
+
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		pr_notice("%s Couldn't get chg_psy\n", __func__);
-		prop.intval = 0;
+		ret = -1;
 	} else {
-		tmp_ret = power_supply_get_property(chg_psy,
+		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ONLINE, &prop);
 		ret = prop.intval;
-		if (ret)
-			return ret;
 	}
 
-	wl_psy = power_supply_get_by_name("wireless");
-	if (wl_psy == NULL || IS_ERR(wl_psy)) {
-		chr_err("%s Couldn't get wl_psy\n", __func__);
-		wlc_prop.intval = 0;
-	} else {
-		ret = power_supply_get_property(wl_psy,
-			POWER_SUPPLY_PROP_ONLINE, &wlc_prop);
-		ret = wlc_prop.intval;
-	}
-	chr_err("%s:%d\n", __func__,
+	chr_debug("%s:%d\n", __func__,
 		ret);
 	return ret;
 }
 
 int get_charger_type(struct mtk_charger *info)
 {
-	union power_supply_propval prop = {0};
-	union power_supply_propval prop2 = {0};
-	union power_supply_propval prop3 = {0};
-	union power_supply_propval prop_wls;
-	static struct power_supply *wl_psy;
+	union power_supply_propval prop, prop2, prop3;
 	static struct power_supply *chg_psy;
 	int ret;
-	if (info->wireless_online) {
-		if (wl_psy == NULL || IS_ERR(wl_psy)) {
-			chr_err("%s retry to get wl_psy\n", __func__);
-			wl_psy = power_supply_get_by_name("wireless");
-		}
-		if (wl_psy == NULL || IS_ERR(wl_psy)) {
-			chr_err("%s Couldn't get wl_psy\n", __func__);
-			prop_wls.intval = POWER_SUPPLY_TYPE_UNKNOWN;
-		} else {
-			ret = power_supply_get_property(wl_psy,
-			POWER_SUPPLY_PROP_TYPE, &prop_wls);
-			chr_err("%s type:%d ret:%d\n", __func__, prop_wls.intval,ret);
-			if (POWER_SUPPLY_TYPE_WIRELESS == prop_wls.intval) {
-				chr_err("%s event, wireless online,type:%d\n", __func__, prop_wls.intval);
-			} else {
-				prop_wls.intval = POWER_SUPPLY_TYPE_UNKNOWN;
-			}
-		}
-	}
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	chg_psy = power_supply_get_by_name("sgm4154x-charger");
-#else
 	chg_psy = info->chg_psy;
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
@@ -390,10 +297,9 @@ int get_charger_type(struct mtk_charger *info)
 		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");
 		info->chg_psy = chg_psy;
 	}
-#endif
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		chr_err("%s Couldn't get chg_psy\n", __func__);
+		pr_notice("%s Couldn't get chg_psy\n", __func__);
 	} else {
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ONLINE, &prop);
@@ -404,59 +310,21 @@ int get_charger_type(struct mtk_charger *info)
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_USB_TYPE, &prop3);
 
-		if (prop.intval == 0 ||
-		    (prop2.intval == POWER_SUPPLY_TYPE_USB &&
-		    prop3.intval == POWER_SUPPLY_USB_TYPE_UNKNOWN))
+		if (prop.intval == 0)
 			prop2.intval = POWER_SUPPLY_TYPE_UNKNOWN;
+		else if (prop2.intval == POWER_SUPPLY_TYPE_USB &&
+		    prop3.intval == POWER_SUPPLY_USB_TYPE_UNKNOWN)
+			prop2.intval = POWER_SUPPLY_TYPE_UNKNOWN;
+		else if (prop2.intval == POWER_SUPPLY_TYPE_USB &&
+		    prop3.intval == POWER_SUPPLY_USB_TYPE_DCP)
+			prop2.intval = POWER_SUPPLY_TYPE_USB_FLOAT;
 	}
 
-	chr_err("%s online:%d type:%d usb_type:%d\n", __func__,
+	pr_notice("%s online:%d type:%d usb_type:%d\n", __func__,
 		prop.intval,
 		prop2.intval,
 		prop3.intval);
 
-	if((info->mmi.factory_mode == true) && info->wireless_online && (POWER_SUPPLY_TYPE_UNKNOWN != prop_wls.intval))
-		return prop_wls.intval;
-	if(POWER_SUPPLY_TYPE_UNKNOWN != prop2.intval)
-		return prop2.intval;
-	else if(POWER_SUPPLY_TYPE_UNKNOWN != prop_wls.intval)
-		return prop_wls.intval;
-	else
-		return POWER_SUPPLY_TYPE_UNKNOWN;
-}
-
-int get_usb_type(struct mtk_charger *info)
-{
-	union power_supply_propval prop = {0};
-	union power_supply_propval prop2 = {0};
-	static struct power_supply *chg_psy;
-	int ret;
-
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	chg_psy = power_supply_get_by_name("sgm4154x-charger");
-#else
-	chg_psy = info->chg_psy;
-
-	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		chr_err("%s retry to get chg_psy\n", __func__);
-		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev,
-						       "charger");
-		info->chg_psy = chg_psy;
-	}
-#endif
-
-	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		chr_err("%s Couldn't get chg_psy\n", __func__);
-	} else {
-
-		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_ONLINE, &prop);
-		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_USB_TYPE, &prop2);
-	}
-	chr_err("%s online:%d usb_type:%d\n", __func__,
-		prop.intval,
-		prop2.intval);
 	return prop2.intval;
 }
 
@@ -541,7 +409,7 @@ int get_charger_zcv(struct mtk_charger *info,
 #define PMIC_RG_VCDT_HV_EN_MASK		0x1
 #define PMIC_RG_VCDT_HV_EN_SHIFT	11
 
-static void pmic_set_register_value(struct regmap *map,
+static void pmic_set_register_value1(struct regmap *map,
 	unsigned int addr,
 	unsigned int mask,
 	unsigned int shift,
@@ -553,7 +421,7 @@ static void pmic_set_register_value(struct regmap *map,
 		val << shift);
 }
 
-unsigned int pmic_get_register_value(struct regmap *map,
+unsigned int pmic_get_register_value1(struct regmap *map,
 	unsigned int addr,
 	unsigned int mask,
 	unsigned int shift)
@@ -595,7 +463,7 @@ int disable_hw_ovp(struct mtk_charger *info, int en)
 
 	regmap = chip->regmap;
 
-	pmic_set_register_value(regmap,
+	pmic_set_register_value1(regmap,
 		PMIC_RG_VCDT_HV_EN_ADDR,
 		PMIC_RG_VCDT_HV_EN_SHIFT,
 		PMIC_RG_VCDT_HV_EN_MASK,

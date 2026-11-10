@@ -202,6 +202,7 @@ static int _btif_tx_fifo_reset(struct _MTK_BTIF_INFO_STR_ *p_btif_info)
 static void _btif_set_default_setting(void)
 {
 	struct device_node *node = NULL;
+	unsigned int irq_info[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 	unsigned int phy_base;
 
 	if (!g_btif[0].private_data) {
@@ -216,13 +217,18 @@ static void _btif_set_default_setting(void)
 		mtk_btif_info.base = (unsigned long)of_iomap(node, 0);
 		BTIF_INFO_FUNC("get btif irq(%d),register base(0x%lx)\n",
 			mtk_btif_info.p_irq->irq_id, mtk_btif_info.base);
-
-		/* get the IRQ flags */
-		mtk_btif_info.p_irq->irq_flags = irq_get_trigger_type(mtk_btif_info.p_irq->irq_id);
-		BTIF_INFO_FUNC("get interrupt flag(0x%x)\n",
-				mtk_btif_info.p_irq->irq_flags);
 	} else {
 		BTIF_ERR_FUNC("get btif device node fail\n");
+	}
+
+	/* get the interrupt line behaviour */
+	if (of_property_read_u32_array(node, "interrupts", irq_info,
+			ARRAY_SIZE(irq_info))) {
+		BTIF_ERR_FUNC("get interrupt flag from DTS fail\n");
+	} else {
+		mtk_btif_info.p_irq->irq_flags = irq_info[2];
+		BTIF_INFO_FUNC("get interrupt flag(0x%x)\n",
+				mtk_btif_info.p_irq->irq_flags);
 	}
 
 	if (of_property_read_u32_index(node, "reg", 1, &phy_base))

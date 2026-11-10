@@ -33,21 +33,11 @@ zpci_attr(pchid, "0x%04x\n", pchid);
 zpci_attr(pfgid, "0x%02x\n", pfgid);
 zpci_attr(vfn, "0x%04x\n", vfn);
 zpci_attr(pft, "0x%02x\n", pft);
-zpci_attr(port, "%d\n", port);
 zpci_attr(uid, "0x%x\n", uid);
 zpci_attr(segment0, "0x%02x\n", pfip[0]);
 zpci_attr(segment1, "0x%02x\n", pfip[1]);
 zpci_attr(segment2, "0x%02x\n", pfip[2]);
 zpci_attr(segment3, "0x%02x\n", pfip[3]);
-
-static ssize_t mio_enabled_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));
-
-	return sprintf(buf, zpci_use_mio(zdev) ? "1\n" : "0\n");
-}
-static DEVICE_ATTR_RO(mio_enabled);
 
 static ssize_t recover_store(struct device *dev, struct device_attribute *attr,
 			     const char *buf, size_t count)
@@ -89,7 +79,7 @@ static ssize_t recover_store(struct device *dev, struct device_attribute *attr,
 		ret = zpci_enable_device(zdev);
 		if (ret)
 			goto out;
-		pci_rescan_bus(zdev->zbus->bus);
+		pci_rescan_bus(zdev->bus);
 	}
 out:
 	pci_unlock_rescan_remove();
@@ -143,11 +133,9 @@ static struct attribute *zpci_dev_attrs[] = {
 	&dev_attr_pchid.attr,
 	&dev_attr_pfgid.attr,
 	&dev_attr_pft.attr,
-	&dev_attr_port.attr,
 	&dev_attr_vfn.attr,
 	&dev_attr_uid.attr,
 	&dev_attr_recover.attr,
-	&dev_attr_mio_enabled.attr,
 	NULL,
 };
 static struct attribute_group zpci_attr_group = {

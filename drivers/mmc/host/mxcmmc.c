@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/mmc/host/mxcmmc.c - Freescale i.MX MMCI driver
  *
@@ -11,6 +10,11 @@
  *  Copyright (C) 2006 Pavel Pisa, PiKRON <ppisa@pikron.com>
  *
  *  derived from pxamci.c by Russell King
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
  */
 
 #include <linux/module.h>
@@ -27,12 +31,14 @@
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/dmaengine.h>
 #include <linux/types.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_dma.h>
+#include <linux/of_gpio.h>
 #include <linux/mmc/slot-gpio.h>
 
 #include <asm/dma.h>
@@ -714,6 +720,7 @@ static void mxcmci_cmd_done(struct mxcmci_host *host, unsigned int stat)
 static irqreturn_t mxcmci_irq(int irq, void *devid)
 {
 	struct mxcmci_host *host = devid;
+	unsigned long flags;
 	bool sdio_irq;
 	u32 stat;
 
@@ -725,9 +732,9 @@ static irqreturn_t mxcmci_irq(int irq, void *devid)
 
 	dev_dbg(mmc_dev(host->mmc), "%s: 0x%08x\n", __func__, stat);
 
-	spin_lock(&host->lock);
+	spin_lock_irqsave(&host->lock, flags);
 	sdio_irq = (stat & STATUS_SDIO_INT_ACTIVE) && host->use_sdio;
-	spin_unlock(&host->lock);
+	spin_unlock_irqrestore(&host->lock, flags);
 
 	if (mxcmci_use_dma(host) && (stat & (STATUS_WRITE_OP_DONE)))
 		mxcmci_writel(host, STATUS_WRITE_OP_DONE, MMC_REG_STATUS);
@@ -1010,8 +1017,10 @@ static int mxcmci_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "failed to get IRQ: %d\n", irq);
 		return irq;
+	}
 
 	mmc = mmc_alloc_host(sizeof(*host), &pdev->dev);
 	if (!mmc)
@@ -1121,16 +1130,7 @@ static int mxcmci_probe(struct platform_device *pdev)
 	mxcmci_writel(host, host->default_irq_mask, MMC_REG_INT_CNTR);
 
 	if (!host->pdata) {
-		host->dma = dma_request_chan(&pdev->dev, "rx-tx");
-		if (IS_ERR(host->dma)) {
-			if (PTR_ERR(host->dma) == -EPROBE_DEFER) {
-				ret = -EPROBE_DEFER;
-				goto out_clk_put;
-			}
-
-			/* Ignore errors to fall back to PIO mode */
-			host->dma = NULL;
-		}
+		host->dma = dma_request_slave_channel(&pdev->dev, "rx-tx");
 	} else {
 		res = platform_get_resource(pdev, IORESOURCE_DMA, 0);
 		if (res) {
@@ -1167,9 +1167,7 @@ static int mxcmci_probe(struct platform_device *pdev)
 
 	timer_setup(&host->watchdog, mxcmci_watchdog, 0);
 
-	ret = mmc_add_host(mmc);
-	if (ret)
-		goto out_free_dma;
+	mmc_add_host(mmc);
 
 	return 0;
 
@@ -1246,7 +1244,6 @@ static struct platform_driver mxcmci_driver = {
 	.id_table	= mxcmci_devtype,
 	.driver		= {
 		.name		= DRIVER_NAME,
-		.probe_type	= PROBE_PREFER_ASYNCHRONOUS,
 		.pm	= &mxcmci_pm_ops,
 		.of_match_table	= mxcmci_of_match,
 	}

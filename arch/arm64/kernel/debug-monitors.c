@@ -1,8 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ARMv8 single-step debug support and mdscr context switching.
  *
  * Copyright (C) 2012 ARM Limited
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * Author: Will Deacon <will.deacon@arm.com>
  */
@@ -130,7 +141,7 @@ static int clear_os_lock(unsigned int cpu)
 	return 0;
 }
 
-static int __init debug_monitors_init(void)
+static int debug_monitors_init(void)
 {
 	return cpuhp_setup_state(CPUHP_AP_ARM64_DEBUG_MONITORS_STARTING,
 				 "arm64/debug_monitors:starting",
@@ -156,44 +167,23 @@ NOKPROBE_SYMBOL(clear_user_regs_spsr_ss);
 #define set_regs_spsr_ss(r)	set_user_regs_spsr_ss(&(r)->user_regs)
 #define clear_regs_spsr_ss(r)	clear_user_regs_spsr_ss(&(r)->user_regs)
 
-static DEFINE_SPINLOCK(debug_hook_lock);
-static LIST_HEAD(user_step_hook);
-static LIST_HEAD(kernel_step_hook);
+/* EL1 Single Step Handler hooks */
+static LIST_HEAD(step_hook);
+static DEFINE_SPINLOCK(step_hook_lock);
 
-static void register_debug_hook(struct list_head *node, struct list_head *list)
+void register_step_hook(struct step_hook *hook)
 {
-	spin_lock(&debug_hook_lock);
-	list_add_rcu(node, list);
-	spin_unlock(&debug_hook_lock);
-
+	spin_lock(&step_hook_lock);
+	list_add_rcu(&hook->node, &step_hook);
+	spin_unlock(&step_hook_lock);
 }
 
-static void unregister_debug_hook(struct list_head *node)
+void unregister_step_hook(struct step_hook *hook)
 {
-	spin_lock(&debug_hook_lock);
-	list_del_rcu(node);
-	spin_unlock(&debug_hook_lock);
+	spin_lock(&step_hook_lock);
+	list_del_rcu(&hook->node);
+	spin_unlock(&step_hook_lock);
 	synchronize_rcu();
-}
-
-void register_user_step_hook(struct step_hook *hook)
-{
-	register_debug_hook(&hook->node, &user_step_hook);
-}
-
-void unregister_user_step_hook(struct step_hook *hook)
-{
-	unregister_debug_hook(&hook->node);
-}
-
-void register_kernel_step_hook(struct step_hook *hook)
-{
-	register_debug_hook(&hook->node, &kernel_step_hook);
-}
-
-void unregister_kernel_step_hook(struct step_hook *hook)
-{
-	unregister_debug_hook(&hook->node);
 }
 
 /*
@@ -205,20 +195,17 @@ void unregister_kernel_step_hook(struct step_hook *hook)
 static int call_step_hook(struct pt_regs *regs, unsigned int esr)
 {
 	struct step_hook *hook;
-	struct list_head *list;
 	int retval = DBG_HOOK_ERROR;
 
-	list = user_mode(regs) ? &user_step_hook : &kernel_step_hook;
+	rcu_read_lock();
 
-	/*
-	 * Since single-step exception disables interrupt, this function is
-	 * entirely not preemptible, and we can use rcu list safely here.
-	 */
-	list_for_each_entry_rcu(hook, list, node)	{
+	list_for_each_entry_rcu(hook, &step_hook, node)	{
 		retval = hook->fn(regs, esr);
 		if (retval == DBG_HOOK_HANDLED)
 			break;
 	}
+
+	rcu_read_unlock();
 
 	return retval;
 }
@@ -227,6 +214,13 @@ NOKPROBE_SYMBOL(call_step_hook);
 static void send_user_sigtrap(int si_code)
 {
 	struct pt_regs *regs = current_pt_regs();
+	siginfo_t info;
+
+	clear_siginfo(&info);
+	info.si_signo	= SIGTRAP;
+	info.si_errno	= 0;
+	info.si_code	= si_code;
+	info.si_addr	= (void __user *)instruction_pointer(regs);
 
 	if (WARN_ON(!user_mode(regs)))
 		return;
@@ -234,11 +228,10 @@ static void send_user_sigtrap(int si_code)
 	if (interrupts_enabled(regs))
 		local_irq_enable();
 
-	arm64_force_sig_fault(SIGTRAP, si_code, instruction_pointer(regs),
-			      "User debug trap");
+	arm64_force_sig_info(&info, "User debug trap", current);
 }
 
-static int single_step_handler(unsigned long unused, unsigned int esr,
+static int single_step_handler(unsigned long addr, unsigned int esr,
 			       struct pt_regs *regs)
 {
 	bool handler_found = false;
@@ -250,6 +243,10 @@ static int single_step_handler(unsigned long unused, unsigned int esr,
 	if (!reinstall_suspended_bps(regs))
 		return 0;
 
+#ifdef	CONFIG_KPROBES
+	if (kprobe_single_step_handler(regs, esr) == DBG_HOOK_HANDLED)
+		handler_found = true;
+#endif
 	if (!handler_found && call_step_hook(regs, esr) == DBG_HOOK_HANDLED)
 		handler_found = true;
 
@@ -276,62 +273,61 @@ static int single_step_handler(unsigned long unused, unsigned int esr,
 }
 NOKPROBE_SYMBOL(single_step_handler);
 
-static LIST_HEAD(user_break_hook);
-static LIST_HEAD(kernel_break_hook);
+/*
+ * Breakpoint handler is re-entrant as another breakpoint can
+ * hit within breakpoint handler, especically in kprobes.
+ * Use reader/writer locks instead of plain spinlock.
+ */
+static LIST_HEAD(break_hook);
+static DEFINE_SPINLOCK(break_hook_lock);
 
-void register_user_break_hook(struct break_hook *hook)
+void register_break_hook(struct break_hook *hook)
 {
-	register_debug_hook(&hook->node, &user_break_hook);
+	spin_lock(&break_hook_lock);
+	list_add_rcu(&hook->node, &break_hook);
+	spin_unlock(&break_hook_lock);
 }
 
-void unregister_user_break_hook(struct break_hook *hook)
+void unregister_break_hook(struct break_hook *hook)
 {
-	unregister_debug_hook(&hook->node);
-}
-
-void register_kernel_break_hook(struct break_hook *hook)
-{
-	register_debug_hook(&hook->node, &kernel_break_hook);
-}
-EXPORT_SYMBOL_GPL(register_kernel_break_hook);
-
-void unregister_kernel_break_hook(struct break_hook *hook)
-{
-	unregister_debug_hook(&hook->node);
+	spin_lock(&break_hook_lock);
+	list_del_rcu(&hook->node);
+	spin_unlock(&break_hook_lock);
+	synchronize_rcu();
 }
 
 static int call_break_hook(struct pt_regs *regs, unsigned int esr)
 {
 	struct break_hook *hook;
-	struct list_head *list;
 	int (*fn)(struct pt_regs *regs, unsigned int esr) = NULL;
 
-	list = user_mode(regs) ? &user_break_hook : &kernel_break_hook;
-
-	/*
-	 * Since brk exception disables interrupt, this function is
-	 * entirely not preemptible, and we can use rcu list safely here.
-	 */
-	list_for_each_entry_rcu(hook, list, node) {
-		unsigned int comment = esr & ESR_ELx_BRK64_ISS_COMMENT_MASK;
-
-		if ((comment & ~hook->mask) == hook->imm)
+	rcu_read_lock();
+	list_for_each_entry_rcu(hook, &break_hook, node)
+		if ((esr & hook->esr_mask) == hook->esr_val)
 			fn = hook->fn;
-	}
+	rcu_read_unlock();
 
 	return fn ? fn(regs, esr) : DBG_HOOK_ERROR;
 }
 NOKPROBE_SYMBOL(call_break_hook);
 
-static int brk_handler(unsigned long unused, unsigned int esr,
+static int brk_handler(unsigned long addr, unsigned int esr,
 		       struct pt_regs *regs)
 {
-	if (call_break_hook(regs, esr) == DBG_HOOK_HANDLED)
-		return 0;
+	bool handler_found = false;
 
-	if (user_mode(regs)) {
+#ifdef	CONFIG_KPROBES
+	if ((esr & BRK64_ESR_MASK) == BRK64_ESR_KPROBES) {
+		if (kprobe_breakpoint_handler(regs, esr) == DBG_HOOK_HANDLED)
+			handler_found = true;
+	}
+#endif
+	if (!handler_found && call_break_hook(regs, esr) == DBG_HOOK_HANDLED)
+		handler_found = true;
+
+	if (!handler_found && user_mode(regs)) {
 		send_user_sigtrap(TRAP_BRKPT);
-	} else {
+	} else if (!handler_found) {
 		pr_warn("Unexpected kernel BRK exception at EL1\n");
 		return -EFAULT;
 	}
@@ -379,13 +375,15 @@ int aarch32_break_handler(struct pt_regs *regs)
 }
 NOKPROBE_SYMBOL(aarch32_break_handler);
 
-void __init debug_traps_init(void)
+static int __init debug_traps_init(void)
 {
 	hook_debug_fault_code(DBG_ESR_EVT_HWSS, single_step_handler, SIGTRAP,
 			      TRAP_TRACE, "single-step handler");
 	hook_debug_fault_code(DBG_ESR_EVT_BRK, brk_handler, SIGTRAP,
-			      TRAP_BRKPT, "BRK handler");
+			      TRAP_BRKPT, "ptrace BRK handler");
+	return 0;
 }
+arch_initcall(debug_traps_init);
 
 /* Re-enable single step for syscall restarting. */
 void user_rewind_single_step(struct task_struct *task)

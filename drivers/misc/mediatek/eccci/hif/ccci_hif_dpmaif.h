@@ -16,8 +16,6 @@
 #include "mt-plat/mtk_ccci_common.h"
 #include "ccci_bm.h"
 #include "ccci_hif_internal.h"
-#include "dpmaif_debug.h"
-
 /*
  * hardcode, max queue number should be synced with port array in port_cfg.c
  */
@@ -49,17 +47,17 @@
 #define DPMAIF_HW_CHK_FRG_NUM      DPMAIF_HW_CHK_BAT_NUM
 #define DPMAIF_HW_CHK_PIT_NUM      (DPMAIF_HW_CHK_BAT_NUM*2)
 #define DPMAIF_HW_CHK_RB_PIT_NUM   64
-
-#define DPMAIF_DL_BAT_ENTRY_SIZE  8192 /* <- 1024 <- 128 */
-
 #else
 #define DPMAIF_HW_CHK_PIT_NUM      6
 #define DPMAIF_HW_CHK_BAT_NUM      3
 #define DPMAIF_HW_CHK_FRG_NUM      3
-
-#define DPMAIF_DL_BAT_ENTRY_SIZE  1024 /* 128 */
 #endif
 
+#ifdef MT6297
+#define DPMAIF_DL_BAT_ENTRY_SIZE  8192 /* <- 1024 <- 128 */
+#else
+#define DPMAIF_DL_BAT_ENTRY_SIZE  1024 /* 128 */
+#endif
 /* 2048*/ /* 256, 100pkts*2*10ms=2000*12B=>24k */
 #define DPMAIF_DL_PIT_ENTRY_SIZE  (DPMAIF_DL_BAT_ENTRY_SIZE * 2)
 #define DPMAIF_UL_DRB_ENTRY_SIZE  2048 /* from 512 */
@@ -90,7 +88,7 @@ unsigned int buf_len;
 /****************************************************************************
  * Structure of DL PIT
  ****************************************************************************/
-#if (MD_GENERATION < 6297)
+#if MD_GENERATION < 6297
 struct dpmaifq_normal_pit {
 	unsigned int    packet_type:1; /* 0-payload packet; 1-message packet */
 	unsigned int    c_bit:1;/* 1-1/n; 0-the last one */
@@ -125,7 +123,7 @@ struct dpmaifq_normal_pit {
 /* buffer_type */
 #define PKT_BUF_FRAG    0x1
 
-#if (MD_GENERATION < 6297)
+#if MD_GENERATION < 6297
 struct dpmaifq_msg_pit {
 	unsigned int    packet_type:1;
 	unsigned int    c_bit:1;
@@ -203,10 +201,14 @@ struct dpmaif_bat_request {
 	unsigned int    bat_size_cnt;
 	unsigned short    bat_wr_idx;
 	unsigned short    bat_rd_idx;
+	unsigned short    bat_rel_rd_idx;
 	void *bat_skb_ptr;/* collect skb linked to bat */
 	unsigned int     skb_pkt_cnt;
 	unsigned int pkt_buf_sz;
 
+#if defined(_97_REORDER_BAT_PAGE_TABLE_)
+	unsigned char bid_btable[DPMAIF_DL_BAT_ENTRY_SIZE];
+#endif
 	/* for debug */
 	int check_bid_fail_cnt;
 };
@@ -245,7 +247,10 @@ struct dpmaif_rx_queue {
 	unsigned long	  pit_dummy_idx;
 	unsigned char     pit_reload_en;
 #endif
-
+	struct dpmaif_bat_request bat_req;
+#ifdef HW_FRG_FEATURE_ENABLE
+	struct dpmaif_bat_request bat_frag;
+#endif
 	struct tasklet_struct dpmaif_rxq0_task;
 	wait_queue_head_t rx_wq;
 	struct task_struct *rx_thread;
@@ -328,12 +333,17 @@ struct dpmaif_tx_queue {
 
 	void    *drb_skb_base;
 	wait_queue_head_t req_wq;
+	struct workqueue_struct *worker;
 
+#ifdef USING_TX_DONE_KERNEL_THREAD
 	/* For Tx done Kernel thread */
 	struct hrtimer tx_done_timer;
 	atomic_t txq_done;
 	wait_queue_head_t tx_done_wait;
-	struct task_struct *tx_done_thread;
+	void *tx_done_thread;
+#else
+	struct delayed_work dpmaif_tx_work;
+#endif
 
 	spinlock_t tx_lock;
 	atomic_t tx_processing;
@@ -399,17 +409,11 @@ struct hif_dpmaif_ctrl {
 	struct timer_list traffic_monitor;
 	char traffic_started;
 #endif
+	struct clk *clk_ref0;
+	struct clk *clk_ref1;
 	struct platform_device *plat_dev; /* maybe: no need. */
 	struct ccci_hif_dpmaif_val plat_val;
 
-	atomic_t suspend_flag;
-	struct dpmaif_bat_request *bat_req;
-	struct dpmaif_bat_request *bat_frag;
-	wait_queue_head_t   bat_alloc_wq;
-	struct task_struct *bat_alloc_thread;
-	atomic_t bat_need_alloc;
-	atomic_t bat_paused_alloc;
-	int bat_alloc_running;
 };
 
 #ifndef CCCI_KMODULE_ENABLE
@@ -470,10 +474,9 @@ static inline int ccci_dpmaif_hif_set_wakeup_src(unsigned char hif_id,
 	struct hif_dpmaif_ctrl *hif_ctrl =
 		(struct hif_dpmaif_ctrl *)ccci_hif_get_by_id(hif_id);
 
-	if (hif_ctrl) {
-		arch_atomic_set(&hif_ctrl->wakeup_src, value);
-		return value;
-	} else
+	if (hif_ctrl)
+		return atomic_set(&hif_ctrl->wakeup_src, value);
+	else
 		return -1;
 
 }
@@ -513,13 +516,9 @@ int dpmaif_stop_rx(unsigned char hif_id);
 int dpmaif_stop_tx(unsigned char hif_id);
 int dpmaif_stop(unsigned char hif_id);
 void dpmaif_stop_hw(void);
-extern void ccmni_clr_flush_timer(void);
 extern struct regmap *syscon_regmap_lookup_by_phandle(struct device_node *np,
 	const char *property);
 extern int regmap_write(struct regmap *map, unsigned int reg, unsigned int val);
 extern int regmap_read(struct regmap *map, unsigned int reg, unsigned int *val);
-#ifdef CONFIG_MTK_GIC_V3_EXT
 extern void mt_irq_dump_status(int irq);
-#endif
-
 #endif				/* __MODEM_DPMA_H__ */

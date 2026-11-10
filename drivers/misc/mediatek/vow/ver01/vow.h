@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * vow.h  --  VoW platform driver definition
- *
- * Copyright (c) 2020 MediaTek Inc.
- * Author: Michael Hsiao <michael.hsiao@mediatek.com>
+ * Copyright (c) 2017 MediaTek Inc.
  */
 
 #ifndef __VOW_H__
@@ -20,18 +17,18 @@
 #define DEBUG_VOWDRV 1
 
 #if DEBUG_VOWDRV
-#define VOWDRV_DEBUG(format, args...) pr_info(format, ##args)
+#define VOWDRV_DEBUG(format, args...) pr_debug(format, ##args)
 #else
 #define VOWDRV_DEBUG(format, args...)
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_VOW_GVA_SUPPORT)
+#ifdef CONFIG_MTK_VOW_GVA_SUPPORT
 #define VOW_GOOGLE_MODEL 1
 #else
 #define VOW_GOOGLE_MODEL 0
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_VOW_AMAZON_SUPPORT)
+#ifdef CONFIG_MTK_VOW_AMAZON_SUPPORT
 #define VOW_AMAZON_MODEL 1
 #else
 #define VOW_AMAZON_MODEL 0
@@ -40,13 +37,19 @@
 #define VOW_DEVNAME                    "vow"
 #define VOW_IOC_MAGIC                  'V'
 #define VOW_PRE_LEARN_MODE             1
-#define MAX_VOW_SPEAKER_MODEL          2
+#ifdef CONFIG_MTK_VOW_MAX_PDK_NUMBER
+#define MAX_VOW_SPEAKER_MODEL          (CONFIG_MTK_VOW_MAX_PDK_NUMBER + \
+					VOW_GOOGLE_MODEL + VOW_AMAZON_MODEL)
+#else
+#define MAX_VOW_SPEAKER_MODEL          (VOW_GOOGLE_MODEL + VOW_AMAZON_MODEL)
+#endif
 #define VOW_WAITCHECK_INTERVAL_MS      1
 #define MAX_VOW_INFO_LEN               7
 #define VOW_VOICE_RECORD_THRESHOLD     2560 /* 80ms */
 #define VOW_VOICE_RECORD_BIG_THRESHOLD 8320 /* 260ms */
 #define VOW_IPI_SEND_CNT_TIMEOUT       500 /* 500ms */
 /* UBM_V1:0xA000, UBM_V2:0xDC00, UBM_V3: 2*0x11000 */
+#define VOW_MODEL_SIZE_THRES           0x2800
 #define VOW_MODEL_SIZE                 0x11000
 #define VOW_VOICEDATA_OFFSET           (VOW_MODEL_SIZE * MAX_VOW_SPEAKER_MODEL)
 #define VOW_VOICEDATA_SIZE             0x12500 /* 74880, need over 2.3sec */
@@ -62,21 +65,23 @@
 #define VOW_RECOVERY_WAIT              100
 
 /* length limitation sync by audio hal */
-#if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT)
+#ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT
 #define VOW_VBUF_LENGTH      (0x12E80 * 2)  /*(0x12480 + 0x0A00) * 2*/
 #else
 #define VOW_VBUF_LENGTH      (0x12E80)  /* 0x12480 + 0x0A00 */
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT)
+#define VOW_RECOGDATA_SIZE             0x2800
+#ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT
 #define VOW_RECOGDATA_OFFSET    (VOW_VOICEDATA_OFFSET + 2 * VOW_VOICEDATA_SIZE)
 #else
 #define VOW_RECOGDATA_OFFSET        (VOW_VOICEDATA_OFFSET + VOW_VOICEDATA_SIZE)
 #endif
-#define VOW_RECOGDATA_SIZE             0x2800
+#define VOW_EXTRA_DATA_OFFSET       (VOW_RECOGDATA_OFFSET + VOW_RECOGDATA_SIZE)
 
 #define VOW_PCM_DUMP_BYTE_SIZE         0xA00 /* 320 * 8 */
-#define VOW_ENGINE_INFO_LENGTH_BYTE    40
+#define VOW_EXTRA_DATA_SIZE            0x100 /* 256 */
+#define VOW_ENGINE_INFO_LENGTH_BYTE    64
 
 /* below is control message */
 #define VOW_SET_CONTROL               _IOW(VOW_IOC_MAGIC, 0x03, unsigned int)
@@ -94,27 +99,31 @@
 #define VOW_GET_GOOGLE_ENGINE_VER     _IOW(VOW_IOC_MAGIC, 0x12, unsigned int)
 #define VOW_GET_GOOGLE_ARCH           _IOW(VOW_IOC_MAGIC, 0x13, unsigned int)
 #define VOW_READ_VOICE_DATA           _IOW(VOW_IOC_MAGIC, 0x17, unsigned int)
+#define VOW_READ_VOW_DUMP_DATA        _IOW(VOW_IOC_MAGIC, 0x18, unsigned int)
 
 #ifdef VOW_ECHO_SW_SRC
 #define VOW_BARGEIN_DUMP_OFFSET 0x1E00
 #else
 #define VOW_BARGEIN_DUMP_OFFSET 0xA00
 #endif
-#define VOW_BARGEIN_DUMP_SIZE    0x3C00
+#define VOW_BARGEIN_DUMP_SIZE   0x3C00
+#define VOW_BARGEIN_IRQ_MAX_NUM 32
 
-#define KERNEL_VOW_DRV_VER "1.1.1"
+#define KERNEL_VOW_DRV_VER              "1.0.4"
+#define DEFAULT_GOOGLE_ENGINE_VER       2147483647
+
 struct dump_package_t {
 	uint32_t dump_data_type;
 	uint32_t mic_offset;
 	uint32_t mic_data_size;
 	uint32_t recog_data_offset;
 	uint32_t recog_data_size;
-#if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT)
+#ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT
 	uint32_t mic_offset_R;
 	uint32_t mic_data_size_R;
 	uint32_t recog_data_offset_R;
 	uint32_t recog_data_size_R;
-#endif  /* #if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT) */
+#endif  /* #ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT */
 	uint32_t echo_offset;
 	uint32_t echo_data_size;
 };
@@ -131,12 +140,12 @@ struct dump_work_t {
 	uint32_t mic_data_size;
 	uint32_t recog_data_offset;
 	uint32_t recog_data_size;
-#if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT)
+#ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT
 	uint32_t mic_offset_R;
 	uint32_t mic_data_size_R;
 	uint32_t recog_data_offset_R;
 	uint32_t recog_data_size_R;
-#endif  /* #if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT) */
+#endif  /* #ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT */
 	uint32_t echo_offset;
 	uint32_t echo_data_size;
 };
@@ -239,11 +248,13 @@ enum vow_mtkif_type_t {
 	VOW_MTKIF_AMIC = 1,
 	VOW_MTKIF_DMIC = 2,
 	VOW_MTKIF_DMIC_LP = 3,
+	VOW_MTKIF_MAX
 };
 
 enum vow_channel_t {
 	VOW_MONO = 0,
 	VOW_STEREO = 1,
+	VOW_CH_MAX
 };
 
 enum vow_model_status_t {
@@ -290,7 +301,7 @@ struct vow_eint_data_struct_t {
 };
 
 
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 
 struct vow_speaker_model_t {
 	void *model_ptr;
@@ -301,6 +312,8 @@ struct vow_speaker_model_t {
 	int  enabled;
 	unsigned int model_size;
 	unsigned int confidence_lv;
+	unsigned long rx_inform_addr;
+	unsigned long rx_inform_size_addr;
 };
 
 struct vow_model_info_t {
@@ -316,6 +329,8 @@ struct vow_model_info_t {
 struct vow_model_start_t {
 	long handle;
 	long confidence_level;
+	long dsp_inform_addr;
+	long dsp_inform_size_addr;
 };
 
 struct vow_speaker_model_kernel_t {
@@ -337,6 +352,8 @@ struct vow_model_info_kernel_t {
 struct vow_model_start_kernel_t {
 	compat_size_t handle;
 	compat_size_t confidence_level;
+	compat_size_t dsp_inform_addr;
+	compat_size_t dsp_inform_size_addr;
 };
 
 struct vow_engine_info_t {
@@ -349,7 +366,7 @@ struct vow_engine_info_kernel_t {
 	compat_size_t data_addr;
 };
 
-#else  /* #if IS_ENABLED(CONFIG_COMPAT) */
+#else  /* #ifdef CONFIG_COMPAT */
 
 struct vow_speaker_model_t {
 	void *model_ptr;
@@ -359,6 +376,8 @@ struct vow_speaker_model_t {
 	int  enabled;
 	unsigned int model_size;
 	unsigned int confidence_lv;
+	unsigned long rx_inform_addr;
+	unsigned long rx_inform_size_addr;
 };
 
 struct vow_model_info_t {
@@ -374,13 +393,15 @@ struct vow_model_info_t {
 struct vow_model_start_t {
 	long handle;
 	long confidence_level;
+	long dsp_inform_addr;
+	long dsp_inform_size_addr;
 };
 
 struct vow_engine_version_t {
 	long return_size_addr;
 	long data_addr;
 };
-#endif  /* #if IS_ENABLED(CONFIG_COMPAT) */
+#endif  /* #ifdef CONFIG_COMPAT */
 
 enum ipi_type_flag_t {
 	RECOG_OK_IDX = 0,
@@ -397,12 +418,13 @@ enum ipi_type_flag_t {
 #define BARGEIN_DUMP_IDX_MASK       (0x01 << BARGEIN_DUMP_IDX)
 
 struct vow_ipi_combined_info_t {
-	unsigned int ipi_type_flag;
+	unsigned short ipi_type_flag;
 	/* IPIMSG_VOW_RECOGNIZE_OK */
-	unsigned int recog_ret_info;
 	unsigned int recog_ok_uuid;
+	/* unsigned int recog_ret_info; */
 	unsigned int confidence_lv;
 	unsigned long long recog_ok_os_timer;
+	unsigned int extra_data_len;
 	/* IPIMSG_VOW_DATAREADY */
 	unsigned int voice_buf_offset;
 	unsigned int voice_length;
@@ -412,18 +434,18 @@ struct vow_ipi_combined_info_t {
 	/* IPIMSG_VOW_BARGEIN_PCMDUMP_OK */
 	unsigned int mic_dump_size;
 	unsigned int mic_offset;
-#if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT)
+#ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT
 	unsigned int mic_dump_size_R;
 	unsigned int mic_offset_R;
-#endif  /* #if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT) */
+#endif  /* #ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT */
 	unsigned int echo_dump_size;
 	unsigned int echo_offset;
 	unsigned int recog_dump_size;
 	unsigned int recog_dump_offset;
-#if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT)
+#ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT
 	unsigned int recog_dump_size_R;
 	unsigned int recog_dump_offset_R;
-#endif  /* #if IS_ENABLED(CONFIG_MTK_VOW_DUAL_MIC_SUPPORT) */
+#endif  /* #ifdef CONFIG_MTK_VOW_DUAL_MIC_SUPPORT */
 };
 
 #endif /*__VOW_H__ */

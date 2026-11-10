@@ -1,7 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * QLogic iSCSI Offload Driver
  * Copyright (c) 2016 Cavium Inc.
+ *
+ * This software is available under the terms of the GNU General Public License
+ * (GPL) Version 2, available from the file COPYING in the main directory of
+ * this source tree.
  */
 
 #ifndef _QEDI_ISCSI_H_
@@ -149,7 +152,6 @@ struct qedi_conn {
 	struct iscsi_cls_conn *cls_conn;
 	struct qedi_ctx *qedi;
 	struct qedi_endpoint *ep;
-	struct iscsi_endpoint *iscsi_ep;
 	struct list_head active_cmd_list;
 	spinlock_t list_lock;		/* internal conn lock */
 	u32 active_cmd_count;

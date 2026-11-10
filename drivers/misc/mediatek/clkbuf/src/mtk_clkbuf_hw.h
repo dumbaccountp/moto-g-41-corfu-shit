@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 /**
@@ -70,6 +70,7 @@ enum {
 };
 
 enum reg_type {
+	PMIC_R = 0,
 	PWRAP_R,
 	SPM,
 	REGMAP_NUM,
@@ -82,7 +83,24 @@ enum dev_sta {
 };
 
 enum dts_arg {
-	PWRAP_START = 0,
+	DCXO_START = 0,
+	XO_START = DCXO_START,
+	XO_SW_EN = XO_START,
+	DCXO_CW,
+	XO_HW_SEL,
+	XO_END,
+
+	BBLPM_START = XO_END,
+	BBL_SW_EN = BBLPM_START,
+	BBLPM_END,
+
+	MISC_START = BBLPM_END,
+	MISC_SRCLKENI_EN = MISC_START,
+	MISC_END,
+
+	DCXO_END = MISC_END,
+
+	PWRAP_START = DCXO_END,
 	PWRAP_DCXO_EN = PWRAP_START,
 	PWRAP_CONN_EN,
 	PWRAP_NFC_EN,
@@ -114,41 +132,33 @@ struct reg_info {
 	u32 *bit;
 };
 
-struct pmic_clkbuf_op {
-	char pmic_name[20];
-	int (*pmic_clk_buf_set_bblpm_hw_msk)(u32 id, bool onoff);
-	int (*pmic_clk_buf_bblpm_hw_en)(bool on);
-	int (*pmic_clk_buf_get_drv_curr)(u32 id, u32 *drvcurr);
-	int (*pmic_clk_buf_set_drv_curr)(u32 id, u32 drvcurr);
-	int (*pmic_clk_buf_get_xo_num)(void);
-	int (*pmic_clk_buf_get_xo_name)(u32 id, char *name);
-	int (*pmic_clk_buf_get_xo_en)(u32 id, u32 *stat);
-	int (*pmic_clk_buf_set_xo_sw_en)(u32 id, bool onoff);
-	int (*pmic_clk_buf_get_xo_sw_en)(u32 id, u32 *stat);
-	int (*pmic_clk_buf_set_xo_mode)(u32 id, u32 mode);
-	int (*pmic_clk_buf_get_xo_mode)(u32 id, u32 *stat);
-	int (*pmic_clk_buf_get_bblpm_en)(u32 *stat);
-	int (*pmic_clk_buf_set_bblpm_sw_en)(bool on);
-	int (*pmic_clk_buf_dump_misc_log)(char *buf);
+struct clk_buf_op {
+	/* initial flow */
+	void		(*xo_init)(void);
+	int		(*bblpm_init)(void);
+	int		(*dts_init)(struct platform_device *dev);
+	int		(*fs_init)(void);
+	/* cat state */
+	bool		(*get_bringup_sta)(void);
+	bool		(*get_clkbuf_init_sta)(void);
+	bool		(*get_flight_mode)(void);
+	int		(*get_xo_sta)(enum xo_id id);
+	void		(*get_bblpm_enter_cond)(u32 *bblpm_cond);
+	int		(*get_bblpm_sta)(void);
+	/* dump log */
+	void		(*get_main_log)(void);
+	int		(*get_dws_log)(char *buf);
+	int		(*get_misc_log)(char *buf);
+	/* set state */
+	void		(*set_bringup_sta)(bool on);
+	void		(*set_clkbuf_init_sta)(bool on);
+	void		(*set_flight_mode)(bool on);
+	bool		(*set_xo_sta)(enum clk_buf_id id, bool on);
+	int		(*set_xo_cmd)(enum clk_buf_id id, enum cmd_type type);
+	int		(*set_bblpm_sta)(bool on);
+	int		(*set_bblpm_hw_mode)(bool on);
 };
 
-void clk_buf_set_init_sta(bool done);
-bool clk_buf_get_flight_mode(void);
-int clk_buf_hw_set_flight_mode(bool on);
-void clk_buf_hw_dump_misc_log(void);
-int clk_buf_bblpm_init(void);
-void clk_buf_get_enter_bblpm_cond(u32 *bblpm_cond);
-int clk_buf_ctrl_bblpm_sw(bool enable);
-int clk_buf_hw_ctrl(u32 id, bool onoff);
-int clk_buf_xo_init(void);
-int clk_buf_hw_get_xo_en(u32 id, u32 *stat);
-bool clk_buf_get_init_sta(void);
-void clk_buf_get_bringup_node(struct platform_device *pdev);
-bool clk_buf_get_bringup_sta(void);
-int clk_buf_fs_init(void);
-int clk_buf_dts_init(struct platform_device *pdev);
-
-void set_clkbuf_ops(const struct pmic_clkbuf_op *ops);
-int clkbuf_hw_is_ready(void);
+int clk_buf_hw_probe(struct platform_device *pdev);
 #endif
 

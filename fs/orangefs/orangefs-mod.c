@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (C) 2001 Clemson University and The University of Chicago
  *
@@ -31,12 +30,10 @@ static ulong module_parm_debug_mask;
 __u64 orangefs_gossip_debug_mask;
 int op_timeout_secs = ORANGEFS_DEFAULT_OP_TIMEOUT_SECS;
 int slot_timeout_secs = ORANGEFS_DEFAULT_SLOT_TIMEOUT_SECS;
-int orangefs_cache_timeout_msecs = 50;
 int orangefs_dcache_timeout_msecs = 50;
 int orangefs_getattr_timeout_msecs = 50;
 
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(ANDROID_GKI_VFS_EXPORT_ONLY);
 MODULE_AUTHOR("ORANGEFS Development Team");
 MODULE_DESCRIPTION("The Linux Kernel VFS interface to ORANGEFS");
 MODULE_PARM_DESC(module_parm_debug_mask, "debugging level (see orangefs-debug.h for values)");
@@ -80,7 +77,7 @@ DECLARE_WAIT_QUEUE_HEAD(orangefs_request_list_waitq);
 
 static int __init orangefs_init(void)
 {
-	int ret;
+	int ret = -1;
 	__u32 i = 0;
 
 	if (op_timeout_secs < 0)
@@ -130,7 +127,9 @@ static int __init orangefs_init(void)
 	if (ret)
 		goto cleanup_key_table;
 
-	orangefs_debugfs_init(module_parm_debug_mask);
+	ret = orangefs_debugfs_init(module_parm_debug_mask);
+	if (ret)
+		goto debugfs_init_failed;
 
 	ret = orangefs_sysfs_init();
 	if (ret)
@@ -142,7 +141,7 @@ static int __init orangefs_init(void)
 		gossip_err("%s: could not initialize device subsystem %d!\n",
 			   __func__,
 			   ret);
-		goto cleanup_sysfs;
+		goto cleanup_device;
 	}
 
 	ret = register_filesystem(&orangefs_fs_type);
@@ -150,15 +149,18 @@ static int __init orangefs_init(void)
 		pr_info("%s: module version %s loaded\n",
 			__func__,
 			ORANGEFS_VERSION);
+		ret = 0;
 		goto out;
 	}
 
-	orangefs_dev_cleanup();
-
-cleanup_sysfs:
 	orangefs_sysfs_exit();
 
+cleanup_device:
+	orangefs_dev_cleanup();
+
 sysfs_init_failed:
+
+debugfs_init_failed:
 	orangefs_debugfs_cleanup();
 
 cleanup_key_table:

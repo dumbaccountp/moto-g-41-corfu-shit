@@ -11,7 +11,6 @@
 #include <asm/neon.h>
 #include <asm/simd.h>
 #include <crypto/internal/kpp.h>
-#include <crypto/internal/simd.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -29,7 +28,7 @@ void curve25519_arch(u8 out[CURVE25519_KEY_SIZE],
 		     const u8 scalar[CURVE25519_KEY_SIZE],
 		     const u8 point[CURVE25519_KEY_SIZE])
 {
-	if (static_branch_likely(&have_neon) && crypto_simd_usable()) {
+	if (static_branch_likely(&have_neon) && may_use_simd()) {
 		kernel_neon_begin();
 		curve25519_neon(out, scalar, point);
 		kernel_neon_end();

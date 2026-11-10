@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /* Altera Triple-Speed Ethernet MAC driver
  * Copyright (C) 2008-2014 Altera Corporation. All rights reserved
  *
@@ -15,6 +14,18 @@
  *
  * Original driver contributed by SLS.
  * Major updates contributed by GlobalLogic
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/atomic.h>
@@ -163,8 +174,7 @@ static int altera_tse_mdio_create(struct net_device *dev, unsigned int id)
 	mdio = mdiobus_alloc();
 	if (mdio == NULL) {
 		netdev_err(dev, "Error allocating MDIO bus\n");
-		ret = -ENOMEM;
-		goto put_node;
+		return -ENOMEM;
 	}
 
 	mdio->name = ALTERA_TSE_RESOURCE_NAME;
@@ -181,7 +191,6 @@ static int altera_tse_mdio_create(struct net_device *dev, unsigned int id)
 			   mdio->id);
 		goto out_free_mdio;
 	}
-	of_node_put(mdio_node);
 
 	if (netif_msg_drv(priv))
 		netdev_info(dev, "MDIO bus %s: created\n", mdio->id);
@@ -191,8 +200,6 @@ static int altera_tse_mdio_create(struct net_device *dev, unsigned int id)
 out_free_mdio:
 	mdiobus_free(mdio);
 	mdio = NULL;
-put_node:
-	of_node_put(mdio_node);
 	return ret;
 }
 
@@ -558,7 +565,7 @@ static irqreturn_t altera_isr(int irq, void *dev_id)
  * physically contiguous fragment starting at
  * skb->data, for length of skb_headlen(skb).
  */
-static netdev_tx_t tse_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int tse_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct altera_tse_private *priv = netdev_priv(dev);
 	unsigned int txsize = priv->tx_ring_size;
@@ -566,7 +573,7 @@ static netdev_tx_t tse_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct tse_buffer *buffer = NULL;
 	int nfrags = skb_shinfo(skb)->nr_frags;
 	unsigned int nopaged_len = skb_headlen(skb);
-	netdev_tx_t ret = NETDEV_TX_OK;
+	enum netdev_tx ret = NETDEV_TX_OK;
 	dma_addr_t dma_addr;
 
 	spin_lock_bh(&priv->tx_lock);
@@ -734,12 +741,12 @@ static int altera_tse_phy_get_addr_mdio_create(struct net_device *dev)
 {
 	struct altera_tse_private *priv = netdev_priv(dev);
 	struct device_node *np = priv->device->of_node;
-	int ret;
+	int ret = 0;
 
-	ret = of_get_phy_mode(np, &priv->phy_iface);
+	priv->phy_iface = of_get_phy_mode(np);
 
 	/* Avoid get phy addr and create mdio if no phy is present */
-	if (ret)
+	if (!priv->phy_iface)
 		return 0;
 
 	/* try to get PHY address from device tree, use PHY autodetection if
@@ -830,10 +837,13 @@ static int init_phy(struct net_device *dev)
 	}
 
 	/* Stop Advertising 1000BASE Capability if interface is not GMII
+	 * Note: Checkpatch throws CHECKs for the camel case defines below,
+	 * it's ok to ignore.
 	 */
 	if ((priv->phy_iface == PHY_INTERFACE_MODE_MII) ||
 	    (priv->phy_iface == PHY_INTERFACE_MODE_RMII))
-		phy_set_max_speed(phydev, SPEED_100);
+		phydev->advertising &= ~(SUPPORTED_1000baseT_Half |
+					 SUPPORTED_1000baseT_Full);
 
 	/* Broken HW is sometimes missing the pull-up resistor on the
 	 * MDIO line, which results in reads to non-existent devices returning
@@ -1336,10 +1346,10 @@ static int request_and_map(struct platform_device *pdev, const char *name,
 		return -EBUSY;
 	}
 
-	*ptr = devm_ioremap(device, region->start,
+	*ptr = devm_ioremap_nocache(device, region->start,
 				    resource_size(region));
 	if (*ptr == NULL) {
-		dev_err(device, "ioremap of %s failed!", name);
+		dev_err(device, "ioremap_nocache of %s failed!", name);
 		return -ENOMEM;
 	}
 
@@ -1435,19 +1445,16 @@ static int altera_tse_probe(struct platform_device *pdev)
 		priv->rxdescmem_busaddr = dma_res->start;
 
 	} else {
-		ret = -ENODEV;
 		goto err_free_netdev;
 	}
 
-	if (!dma_set_mask(priv->device, DMA_BIT_MASK(priv->dmaops->dmamask))) {
+	if (!dma_set_mask(priv->device, DMA_BIT_MASK(priv->dmaops->dmamask)))
 		dma_set_coherent_mask(priv->device,
 				      DMA_BIT_MASK(priv->dmaops->dmamask));
-	} else if (!dma_set_mask(priv->device, DMA_BIT_MASK(32))) {
+	else if (!dma_set_mask(priv->device, DMA_BIT_MASK(32)))
 		dma_set_coherent_mask(priv->device, DMA_BIT_MASK(32));
-	} else {
-		ret = -EIO;
+	else
 		goto err_free_netdev;
-	}
 
 	/* MAC address space */
 	ret = request_and_map(pdev, "control_port", &control_port,
@@ -1533,7 +1540,7 @@ static int altera_tse_probe(struct platform_device *pdev)
 
 	/* get default MAC address from device tree */
 	macaddr = of_get_mac_address(pdev->dev.of_node);
-	if (!IS_ERR(macaddr))
+	if (macaddr)
 		ether_addr_copy(ndev->dev_addr, macaddr);
 	else
 		eth_hw_addr_random(ndev);

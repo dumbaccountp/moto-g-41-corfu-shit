@@ -32,7 +32,6 @@
 
 #include <linux/types.h>
 #include <linux/completion.h>
-#include <linux/idr.h>
 
 #include <uapi/drm/drm.h>
 
@@ -42,7 +41,6 @@ struct dma_fence;
 struct drm_file;
 struct drm_device;
 struct device;
-struct file;
 
 /*
  * FIXME: Not sure we want to have drm_minor here in the end, but to avoid
@@ -166,14 +164,14 @@ struct drm_file {
 	 * See also the :ref:`section on primary nodes and authentication
 	 * <drm_primary_node>`.
 	 */
-	bool authenticated;
+	unsigned authenticated :1;
 
 	/**
 	 * @stereo_allowed:
 	 *
 	 * True when the client has asked us to expose stereo 3D mode flags.
 	 */
-	bool stereo_allowed;
+	unsigned stereo_allowed :1;
 
 	/**
 	 * @universal_planes:
@@ -181,10 +179,10 @@ struct drm_file {
 	 * True if client understands CRTC primary planes and cursor planes
 	 * in the plane list. Automatically set when @atomic is set.
 	 */
-	bool universal_planes;
+	unsigned universal_planes:1;
 
 	/** @atomic: True if client understands atomic properties. */
-	bool atomic;
+	unsigned atomic:1;
 
 	/**
 	 * @aspect_ratio_allowed:
@@ -192,25 +190,14 @@ struct drm_file {
 	 * True, if client can handle picture aspect ratios, and has requested
 	 * to pass this information along with the mode.
 	 */
-	bool aspect_ratio_allowed;
+	unsigned aspect_ratio_allowed:1;
 
 	/**
 	 * @writeback_connectors:
 	 *
 	 * True if client understands writeback connectors
 	 */
-	bool writeback_connectors;
-
-	/**
-	 * @was_master:
-	 *
-	 * This client has or had, master capability. Protected by struct
-	 * &drm_device.master_mutex.
-	 *
-	 * This is used to ensure that CAP_SYS_ADMIN is not enforced, if the
-	 * client is or was master in the past.
-	 */
-	bool was_master;
+	unsigned writeback_connectors:1;
 
 	/**
 	 * @is_master:
@@ -221,7 +208,7 @@ struct drm_file {
 	 * See also the :ref:`section on primary nodes and authentication
 	 * <drm_primary_node>`.
 	 */
-	bool is_master;
+	unsigned is_master:1;
 
 	/**
 	 * @master:
@@ -347,9 +334,7 @@ struct drm_file {
 	struct drm_prime_file_private prime;
 
 	/* private: */
-#if IS_ENABLED(CONFIG_DRM_LEGACY)
 	unsigned long lock_count; /* DRI1 legacy lock count */
-#endif
 };
 
 /**
@@ -385,7 +370,6 @@ int drm_open(struct inode *inode, struct file *filp);
 ssize_t drm_read(struct file *filp, char __user *buffer,
 		 size_t count, loff_t *offset);
 int drm_release(struct inode *inode, struct file *filp);
-int drm_release_noglobal(struct inode *inode, struct file *filp);
 __poll_t drm_poll(struct file *filp, struct poll_table_struct *wait);
 int drm_event_reserve_init_locked(struct drm_device *dev,
 				  struct drm_file *file_priv,
@@ -399,19 +383,5 @@ void drm_event_cancel_free(struct drm_device *dev,
 			   struct drm_pending_event *p);
 void drm_send_event_locked(struct drm_device *dev, struct drm_pending_event *e);
 void drm_send_event(struct drm_device *dev, struct drm_pending_event *e);
-void drm_send_event_timestamp_locked(struct drm_device *dev,
-				     struct drm_pending_event *e,
-				     ktime_t timestamp);
-
-struct file *mock_drm_getfile(struct drm_minor *minor, unsigned int flags);
-
-#ifdef CONFIG_MMU
-struct drm_vma_offset_manager;
-unsigned long drm_get_unmapped_area(struct file *file,
-				    unsigned long uaddr, unsigned long len,
-				    unsigned long pgoff, unsigned long flags,
-				    struct drm_vma_offset_manager *mgr);
-#endif /* CONFIG_MMU */
-
 
 #endif /* _DRM_FILE_H_ */

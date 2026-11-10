@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
  * (C) COPYRIGHT 2019-2021 ARM Limited. All rights reserved.
@@ -29,9 +29,8 @@
 #include <device/mali_kbase_device.h>
 #include <mali_kbase_as_fault_debugfs.h>
 #include <mmu/mali_kbase_mmu_internal.h>
-#if IS_ENABLED(CONFIG_MALI_MTK_DEBUG)
+#if IS_ENABLED(CONFIG_MTK_GPU_DEBUG)
 #include <mtk_gpufreq.h>
-#include "platform/mtk_platform_common.h"
 #endif
 
 void kbase_mmu_get_as_setup(struct kbase_mmu_table *mmut,
@@ -67,15 +66,16 @@ void kbase_gpu_report_bus_fault_and_kill(struct kbase_context *kctx,
 	u32 const exception_data = (status >> 8) & 0xFFFFFF;
 	int const as_no = as->number;
 	unsigned long flags;
+	const uintptr_t fault_addr = fault->addr;
 
 	/* terminal fault, print info about the fault */
 	dev_err(kbdev->dev,
-		"GPU bus fault in AS%d at VA 0x%016llX\n"
+		"GPU bus fault in AS%d at PA %pK\n"
 		"raw fault status: 0x%X\n"
 		"exception type 0x%X: %s\n"
 		"exception data 0x%X\n"
 		"pid: %d\n",
-		as_no, fault->addr,
+		as_no, (void *)fault_addr,
 		status,
 		exception_type, kbase_gpu_exception_name(exception_type),
 		exception_data,
@@ -129,14 +129,8 @@ void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 	access_type = (fault->status >> 8) & 0x3;
 	source_id = (fault->status >> 16);
 
-#if IS_ENABLED(CONFIG_MALI_MTK_DEBUG)
-	if (!mtk_common_gpufreq_bringup()) {
-#if defined(CONFIG_MTK_GPUFREQ_V2)
-		gpufreq_dump_infra_status();
-#else
-		mt_gpufreq_dump_infra_status();
-#endif /* CONFIG_MTK_GPUFREQ_V2 */
-	}
+#if IS_ENABLED(CONFIG_MTK_GPU_DEBUG)
+	mt_gpufreq_dump_infra_status();
 #endif
 
 	/* terminal fault, print info about the fault */

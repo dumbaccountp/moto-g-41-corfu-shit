@@ -136,6 +136,8 @@ enables the mitigation by default.
 The mitigation can be controlled at boot time via a kernel command line option.
 See :ref:`taa_mitigation_control_command_line`.
 
+.. _virt_mechanism:
+
 Virtualization mitigation
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 

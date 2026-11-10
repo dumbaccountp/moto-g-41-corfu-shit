@@ -680,7 +680,7 @@ static int cyapa_gen6_operational_check(struct cyapa *cyapa)
 		}
 
 		cyapa->state = CYAPA_STATE_GEN6_APP;
-		fallthrough;
+		/* fall through */
 
 	case CYAPA_STATE_GEN6_APP:
 		/*

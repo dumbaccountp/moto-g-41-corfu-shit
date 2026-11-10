@@ -1,20 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2010 - 2018 Novatek, Inc.
- *
- * $Revision: 49359 $
- * $Date: 2019-08-19 16:20:18 +0800 (週一, 19 八月 2019) $
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
+ * Copyright (C) 2021 MediaTek Inc.
  */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -25,10 +13,24 @@
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 
+#if defined(CONFIG_FB)
+#ifdef CONFIG_DRM_MSM
+#include <linux/msm_drm_notify.h>
+#endif
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+#include <linux/earlysuspend.h>
+#endif
+
 #include "nt36xxx.h"
 #if NVT_TOUCH_ESD_PROTECT
 #include <linux/jiffies.h>
 #endif				/* #if NVT_TOUCH_ESD_PROTECT */
+
+#ifdef CONFIG_DRM_MEDIATEK
+#include "mtk_panel_ext.h"
+#endif
 
 #if NVT_TOUCH_ESD_PROTECT
 static struct delayed_work nvt_esd_check_work;
@@ -40,15 +42,19 @@ uint8_t esd_retry;
 
 struct nvt_ts_data *ts;
 char novatek_firmware[25];
-int nvt_find_lcm;
-const char *nvt_lcm_buf;
 /* For SPI mode */
 static struct pinctrl *nt36672_pinctrl;
 static struct pinctrl_state *nt36672_spi_mode_default;
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-static int nvt_disp_notifier_callback(struct notifier_block *nb,
-	unsigned long value, void *v);
+#if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+static int nvt_drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
+#else
+static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
+#endif
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+static void nvt_ts_early_suspend(struct early_suspend *h);
+static void nvt_ts_late_resume(struct early_suspend *h);
 #endif
 
 static int32_t nvt_ts_resume(struct device *dev);
@@ -638,8 +644,8 @@ info_retry:
 			NVT_ERR("retry_count=%d\n", retry_count);
 			goto info_retry;
 		} else {
-			NVT_ERR("Set default fw_ver=%d, x_num=%d, y_num=%d, "
-				"abs_x_max=%d, abs_y_max=%d, max_button_num=%d!\n",
+			NVT_ERR("Set default fw_ver=%d, x_num=%d, y_num=%d, \
+				abs_x_max=%d, abs_y_max=%d, max_button_num=%d!\n",
 				ts->fw_ver, ts->x_num, ts->y_num,
 				ts->abs_x_max, ts->abs_y_max, ts->max_button_num);
 			ret = -1;
@@ -715,11 +721,6 @@ static ssize_t nvt_flash_read(struct file *file, char __user *buff, size_t count
 #endif				/* #if NVT_TOUCH_ESD_PROTECT */
 
 	spi_wr = str[0] >> 7;
-	if ((((str[0] & 0x7F) << 8) | str[1]) > (count - 2 * sizeof(*str))) {
-		NVT_ERR("memcpy out-of-bounds error!\n");
-		ret = -ENOMEM;
-		goto out;
-	}
 	memcpy(buf, str + 2, ((str[0] & 0x7F) << 8) | str[1]);
 
 	if (spi_wr == NVTWRITE) {	//SPI write
@@ -816,10 +817,11 @@ static int32_t nvt_flash_close(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static const struct proc_ops nvt_flash_fops = {
-	.proc_open = nvt_flash_open,
-	.proc_release = nvt_flash_close,
-	.proc_read = nvt_flash_read,
+static const struct file_operations nvt_flash_fops = {
+	.owner = THIS_MODULE,
+	.open = nvt_flash_open,
+	.release = nvt_flash_close,
+	.read = nvt_flash_read,
 };
 
 /*******************************************************
@@ -1463,42 +1465,6 @@ static int nvt_tp_power_on_reinit(void)
 }
 #endif
 
-static int nvt_parse_dt_display(void)
-{
-	int r;
-	unsigned int fake_status;
-	struct device_node *node = NULL;
-
-	node = of_find_compatible_node(NULL, NULL, "mediatek,touch-panel");
-	if (node) {
-		r = of_property_read_u32(node, "lcm-is-fake",
-					 &fake_status);
-		if (r) {
-			NVT_LOG("no lcm-is-fake, not find touch panel node!\n");
-			nvt_find_lcm = 0;
-			return 0;
-		}
-		NVT_LOG("find touch panel node!\n");
-
-		r = of_property_read_string(node, "lcm-name",
-				&nvt_lcm_buf);
-		if (r < 0)
-			NVT_LOG("read lcm-name fail\n");
-
-		if ((strcmp("nt36672e_fhdp_dphy_vdo_tianma_120hz_hfp", nvt_lcm_buf) != 0)
-			&& (strcmp("nt36672c_fhdp_dphy_vdo_shenchao_120hz", nvt_lcm_buf) != 0)
-			&& (strcmp("nt36672c_fhdp_dphy_vdo_tianma_120hz", nvt_lcm_buf) != 0)
-			&& (strcmp("nt36672c_fhdp_dphy_vdo_tianma_144hz", nvt_lcm_buf) != 0)) {
-			NVT_LOG("lcm-name is not supported by nt36672!\n");
-			return -1;
-		}
-		nvt_find_lcm = 1;
-	} else {
-		NVT_LOG("not find touch panel node!\n");
-		nvt_find_lcm = 0;
-	}
-	return 0;
-}
 
 /*******************************************************
 Description:
@@ -1524,7 +1490,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	char firmware_name_jdi[] = "novatek_ts_fw_jdi.bin";
 	char firmware_name_tm[] = "novatek_ts_fw_tm.bin";
 	char firmware_name[] = "novatek_ts_fw.bin";
-	char firmware_name_144hz[] = "novatek_ts_fw_144.bin";
 #if ((TOUCH_KEY_NUM > 0) || WAKEUP_GESTURE)
 	int32_t retry = 0;
 #endif
@@ -1534,7 +1499,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 #endif
 
 
-	NVT_LOG("nvt start\n");
+	NVT_LOG("start\n");
 
 	ts = kmalloc(sizeof(struct nvt_ts_data), GFP_KERNEL);
 	if (ts == NULL) {
@@ -1554,59 +1519,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 	ts->client = client;
 	spi_set_drvdata(client, ts);
-
-	NVT_LOG("start to parse lcm name\n");
-	ret = nvt_parse_dt_display();
-	if (ret < 0) {
-		NVT_LOG("not get lcm info from dts\n");
-		goto err_ckeck_full_duplex;
-	}
-	//find co-load lcm node, use configs in lcm node
-	if (nvt_find_lcm == 1) {
-		if (strcmp("nt36672e_fhdp_dphy_vdo_tianma_120hz_hfp",
-			nvt_lcm_buf) == 0) {
-			strncpy(novatek_firmware, firmware_name_144hz, sizeof(firmware_name_144hz));
-		} else {
-			strncpy(novatek_firmware, firmware_name, sizeof(firmware_name));
-		}
-		NVT_LOG("nvt_find_lcm nt36672c touch fw name : %s", BOOT_UPDATE_FIRMWARE_NAME);
-	} else {
-		lcm_name = of_find_node_by_path("/chosen");
-		if (lcm_name) {
-			videolfb_tag = (struct tag_videolfb *)
-				of_get_property(lcm_name,
-				"atag,videolfb",
-				(int *)&size);
-			if (!videolfb_tag)
-				NVT_ERR("Invalid lcm name\n");
-				NVT_LOG("read lcm name : %s\n", videolfb_tag->lcmname);
-			if (strcmp("nt36672c_fhdp_dsi_vdo_90hz_jdi_rt4801_lcm_drv",
-				videolfb_tag->lcmname) == 0 ||
-				strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_jdi_rt4801_lcm_drv",
-				videolfb_tag->lcmname) == 0 ||
-				strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_jdi_rt4801_hfp_lcm_drv",
-				videolfb_tag->lcmname) == 0)
-				strncpy(novatek_firmware, firmware_name_jdi,
-					sizeof(firmware_name_jdi));
-			else if (strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_tianma_rt4801_lcm_drv",
-				videolfb_tag->lcmname) == 0 ||
-				strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_tianma_rt4801_hfp_lcm_drv",
-				videolfb_tag->lcmname) == 0)
-				strncpy(novatek_firmware, firmware_name_tm,
-					sizeof(firmware_name_tm));
-			else if (strcmp("nt36672e_fhdp_dsi_vdo_120hz_tianma_hfp_lcm_drv",
-				videolfb_tag->lcmname) == 0 ||
-				strcmp("nt36672e_fhdp_dphy_vdo_tianma_120hz_hfp",
-				videolfb_tag->lcmname) == 0)
-				strncpy(novatek_firmware, firmware_name_144hz,
-					sizeof(firmware_name_144hz));
-			else
-				strncpy(novatek_firmware, firmware_name, sizeof(firmware_name));
-			NVT_LOG("nt36672c touch fw name : %s", BOOT_UPDATE_FIRMWARE_NAME);
-		} else {
-			NVT_ERR("Can't find node: chose in dts");
-		}
-	}
 
 	//---prepare for spi parameter---
 	if (ts->client->master->flags & SPI_MASTER_HALF_DUPLEX) {
@@ -1781,6 +1693,55 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 #endif
 
 #if BOOT_UPDATE_FIRMWARE
+	NVT_LOG("start to parse lcm name\n");
+	lcm_name = of_find_node_by_path("/chosen");
+	if (lcm_name) {
+		videolfb_tag = (struct tag_videolfb *)
+			of_get_property(lcm_name,
+			"atag,videolfb",
+			(int *)&size);
+		if (!videolfb_tag)
+			NVT_ERR("Invalid lcm name\n");
+			NVT_LOG("read lcm name : %s\n", videolfb_tag->lcmname);
+
+		#if defined(CONFIG_TOUCH_FW_MP_ONE)
+		if (strcmp("nt36672c_fhdp_dsi_vdo_auo_cphy_90hz_jdi_lcm_drv",
+			videolfb_tag->lcmname) == 0 ||
+			strcmp("nt36672c_fhdp_dsi_vdo_auo_cphy_90hz_jdi_hfp_lcm_drv",
+			videolfb_tag->lcmname) == 0)
+			strncpy(novatek_firmware, firmware_name_jdi, sizeof(firmware_name_jdi));
+		else if (strcmp("nt36672c_fhdp_dsi_vdo_auo_cphy_90hz_tianma_lcm_drv",
+			videolfb_tag->lcmname) == 0)
+			strncpy(novatek_firmware, firmware_name_tm, sizeof(firmware_name_tm));
+		else if (strcmp("nt36672c_fhdp_dsi_vdo_120hz_shenchao_lcm_drv",
+			videolfb_tag->lcmname) == 0 ||
+			strcmp("nt36672c_fhdp_dsi_vdo_90hz_shenchao_lcm_drv",
+			videolfb_tag->lcmname) == 0 ||
+			strcmp("nt36672c_fhdp_dsi_vdo_60hz_shenchao_lcm_drv",
+			videolfb_tag->lcmname) == 0)
+			strncpy(novatek_firmware, firmware_name, sizeof(firmware_name));
+		else
+			strncpy(novatek_firmware, firmware_name, sizeof(firmware_name));
+		#else
+		if (strcmp("nt36672c_fhdp_dsi_vdo_90hz_jdi_rt4801_lcm_drv",
+			videolfb_tag->lcmname) == 0 ||
+			strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_jdi_rt4801_lcm_drv",
+			videolfb_tag->lcmname) == 0 ||
+			strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_jdi_rt4801_hfp_lcm_drv",
+			videolfb_tag->lcmname) == 0)
+			strncpy(novatek_firmware, firmware_name_jdi, sizeof(firmware_name_jdi));
+		else if (strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_tianma_rt4801_lcm_drv",
+			videolfb_tag->lcmname) == 0 ||
+			strcmp("nt36672c_fhdp_dsi_vdo_cphy_90hz_tianma_rt4801_hfp_lcm_drv",
+			videolfb_tag->lcmname) == 0)
+			strncpy(novatek_firmware, firmware_name_tm, sizeof(firmware_name_tm));
+		else
+			strncpy(novatek_firmware, firmware_name, sizeof(firmware_name));
+		#endif
+
+		NVT_LOG("nt36672c touch fw name : %s", BOOT_UPDATE_FIRMWARE_NAME);
+	} else
+		NVT_ERR("Can't find node: chose in dts");
 	nvt_fwu_worker = kthread_create_worker(0, "nvt_fwu_worker");
 	if (!nvt_fwu_worker) {
 		NVT_ERR("nvt_fwu_worker create kthread failed\n");
@@ -1830,15 +1791,32 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	ts->disp_notifier.notifier_call = nvt_disp_notifier_callback;
-	ret = mtk_disp_notifier_register("NVT Touch", &ts->disp_notifier);
+#if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	ts->drm_notif.notifier_call = nvt_drm_notifier_callback;
+	ret = msm_drm_register_client(&ts->drm_notif);
 	if (ret) {
-		NVT_ERR("Failed to register disp notifier client:%d", ret);
-		goto err_register_disp_notif_failed;
+		NVT_ERR("register drm_notifier failed. ret=%d\n", ret);
+		goto err_register_drm_notif_failed;
+	}
+#else
+	ts->fb_notif.notifier_call = nvt_fb_notifier_callback;
+	ret = fb_register_client(&ts->fb_notif);
+	if (ret) {
+		NVT_ERR("register fb_notifier failed. ret=%d\n", ret);
+		goto err_register_fb_notif_failed;
 	}
 #endif
-
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	ts->early_suspend.suspend = nvt_ts_early_suspend;
+	ts->early_suspend.resume = nvt_ts_late_resume;
+	ret = register_early_suspend(&ts->early_suspend);
+	if (ret) {
+		NVT_ERR("register early suspend failed. ret=%d\n", ret);
+		goto err_register_early_suspend_failed;
+	}
+#endif
 
 	bTouchIsAwake = 1;
 	NVT_LOG("end\n");
@@ -1855,10 +1833,19 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 	return 0;
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-err_register_disp_notif_failed:
-	if (mtk_disp_notifier_unregister(&ts->disp_notifier))
-		NVT_ERR("Error occurred while unregistering disp_notifier.\n");
+#if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	if (msm_drm_unregister_client(&ts->drm_notif))
+		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
+err_register_drm_notif_failed:
+#else
+	if (fb_unregister_client(&ts->fb_notif))
+		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
+err_register_fb_notif_failed:
+#endif
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	unregister_early_suspend(&ts->early_suspend);
+err_register_early_suspend_failed:
 #endif
 #if NVT_TOUCH_MP
 	nvt_mp_proc_deinit();
@@ -1931,11 +1918,17 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 {
 	NVT_LOG("Removing driver...\n");
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	if (mtk_disp_notifier_unregister(&ts->disp_notifier))
-		NVT_ERR("Error occurred while unregistering disp_notifier.\n");
+#if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	if (msm_drm_unregister_client(&ts->drm_notif))
+		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
+#else
+	if (fb_unregister_client(&ts->fb_notif))
+		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
 #endif
-
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	unregister_early_suspend(&ts->early_suspend);
+#endif
 
 #if NVT_TOUCH_MP
 	nvt_mp_proc_deinit();
@@ -1998,9 +1991,16 @@ static void nvt_ts_shutdown(struct spi_device *client)
 
 	nvt_irq_enable(false);
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	if (mtk_disp_notifier_unregister(&ts->disp_notifier))
-		NVT_ERR("Error occurred while unregistering disp_notifier.\n");
+#if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	if (msm_drm_unregister_client(&ts->drm_notif))
+		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
+#else
+	if (fb_unregister_client(&ts->fb_notif))
+		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
+#endif
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	unregister_early_suspend(&ts->early_suspend);
 #endif
 
 #if NVT_TOUCH_MP
@@ -2159,37 +2159,83 @@ static int32_t nvt_ts_resume(struct device *dev)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-/**
- * gt9896s_ts_disp_notifier_callback - mtk display notifier callback
- * Called by kernel during framebuffer blanck/unblank phrase
- */
-static int nvt_disp_notifier_callback(struct notifier_block *nb,
-	unsigned long value, void *v)
-{
-	struct nvt_ts_data *ts = container_of(nb, struct nvt_ts_data, disp_notifier);
-	int *data = (int *)v;
 
-	if (ts && v) {
-		NVT_LOG("%s IN", __func__);
-		if (value == MTK_DISP_EARLY_EVENT_BLANK) {
-			if (*data == MTK_DISP_BLANK_POWERDOWN) {
+#if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+static int nvt_drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
+{
+	struct msm_drm_notifier *evdata = data;
+	int *blank;
+	struct nvt_ts_data *ts = container_of(self, struct nvt_ts_data, drm_notif);
+
+	if (!evdata || (evdata->id != 0))
+		return 0;
+
+	if (evdata->data && ts) {
+		blank = evdata->data;
+		if (event == MSM_DRM_EARLY_EVENT_BLANK) {
+			if (*blank == MSM_DRM_BLANK_POWERDOWN) {
+				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
 				nvt_ts_suspend(&ts->client->dev);
 			}
-		} else if (value == MTK_DISP_EVENT_BLANK) {
-			if (*data == MTK_DISP_BLANK_UNBLANK) {
+		} else if (event == MSM_DRM_EVENT_BLANK) {
+			if (*blank == MSM_DRM_BLANK_UNBLANK) {
+				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
 				nvt_ts_resume(&ts->client->dev);
 			}
 		}
-		NVT_LOG("%s OUT", __func__);
-	} else {
-		NVT_LOG("NT36672 touch IC can not suspend or resume");
-		return -1;
 	}
 
 	return 0;
 }
+#else
+static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int *blank;
+	struct nvt_ts_data *ts = container_of(self, struct nvt_ts_data, fb_notif);
 
+	if (evdata && evdata->data && event == FB_EARLY_EVENT_BLANK) {
+		blank = evdata->data;
+		if (*blank == FB_BLANK_POWERDOWN) {
+			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
+			nvt_ts_suspend(&ts->client->dev);
+		}
+	} else if (evdata && evdata->data && event == FB_EVENT_BLANK) {
+		blank = evdata->data;
+		if (*blank == FB_BLANK_UNBLANK) {
+			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
+			nvt_ts_resume(&ts->client->dev);
+		}
+	}
+
+	return 0;
+}
+#endif
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+/*******************************************************
+Description:
+	Novatek touchscreen driver early suspend function.
+
+return:
+	n.a.
+*******************************************************/
+static void nvt_ts_early_suspend(struct early_suspend *h)
+{
+	nvt_ts_suspend(ts->client, PMSG_SUSPEND);
+}
+
+/*******************************************************
+Description:
+	Novatek touchscreen driver late resume function.
+
+return:
+	n.a.
+*******************************************************/
+static void nvt_ts_late_resume(struct early_suspend *h)
+{
+	nvt_ts_resume(ts->client);
+}
 #endif
 
 static const struct spi_device_id nvt_ts_id[] = {

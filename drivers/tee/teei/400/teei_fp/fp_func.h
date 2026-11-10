@@ -18,6 +18,5 @@ extern wait_queue_head_t __fp_open_wq;
 extern wait_queue_head_t __wait_spi_wq;
 extern unsigned long teei_config_flag;
 
-
 int send_fp_command(void *buffer, unsigned long size);
 #endif /* end of TEEI_FUNC_H */

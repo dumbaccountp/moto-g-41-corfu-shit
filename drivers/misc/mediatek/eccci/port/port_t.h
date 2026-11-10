@@ -32,9 +32,6 @@
 #define PORT_F_CLEAN            (1<<9)
 /*Dump pkt of ccmni*/
 #define PORT_F_NET_DUMP         (1<<10)
-/* skip create device port */
-#define PORT_F_GEN95_NOT_SUPPORT (1<<11)
-
 enum {
 	PORT_DBG_DUMP_RILD = 0,
 	PORT_DBG_DUMP_AUDIO,
@@ -111,7 +108,7 @@ struct port_t {
 	unsigned int tx_busy_count;
 	unsigned int rx_busy_count;
 	int interception;
-	atomic_t rx_pkg_cnt;
+	unsigned int rx_pkg_cnt;
 	unsigned int rx_drop_cnt;
 	unsigned int tx_pkg_cnt;
 	port_skb_handler skb_handler;
@@ -163,5 +160,5 @@ long port_dev_compat_ioctl(struct file *filp, unsigned int cmd,
 int port_dev_mmap(struct file *fp, struct vm_area_struct *vma);
 
 int find_port_by_channel(int channel, struct port_t **port);
-int send_new_time_to_md_after_6297(int md_id, int tz);
+int send_new_time_to_new_md(int md_id, int tz);
 #endif /* __PORT_T_H__ */

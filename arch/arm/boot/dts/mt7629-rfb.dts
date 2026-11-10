@@ -38,7 +38,7 @@
 
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0x40000000 0x10000000>;
+		reg = <0 0x40000000 0 0x10000000>;
 	};
 
 	reg_3p3v: regulator-3p3v {
@@ -58,20 +58,26 @@
 		regulator-boot-on;
 		regulator-always-on;
 	};
+
+	rtkgsw: rtkgsw@0 {
+		compatible = "mediatek,rtk-gsw";
+		mediatek,ethsys = <&ethsys>;
+		mediatek,mdio = <&mdio>;
+		status = "okay";
+	};
 };
 
 &eth {
 	pinctrl-names = "default";
-	pinctrl-0 = <&eth_pins>;
-	pinctrl-1 = <&ephy_leds_pins>;
+	pinctrl-0 = <&ephy_leds_pins>;
 	status = "okay";
 
 	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
-		phy-mode = "2500base-x";
+		phy-mode = "sgmii";
 		fixed-link {
-			speed = <2500>;
+			speed = <1000>;
 			full-duplex;
 			pause;
 		};
@@ -80,7 +86,6 @@
 	gmac1: mac@1 {
 		compatible = "mediatek,eth-mac";
 		reg = <1>;
-		phy-mode = "gmii";
 		phy-handle = <&phy0>;
 	};
 
@@ -90,6 +95,7 @@
 
 		phy0: ethernet-phy@0 {
 			reg = <0>;
+			phy-mode = "gmii";
 		};
 	};
 };
@@ -127,26 +133,17 @@
 			};
 
 			factory: partition@70000 {
-				label = "factory";
+				label = "Factory";
 				reg = <0x70000 0x40000>;
 				read-only;
 			};
 
 			partition@b0000 {
-				label = "kernel";
+				label = "Kernel";
 				reg = <0xb0000 0xb50000>;
 			};
 		};
 	};
-};
-
-&pcie {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pcie_pins>;
-};
-
-&pciephy1 {
-	status = "okay";
 };
 
 &pio {
@@ -193,14 +190,6 @@
 		};
 	};
 
-	/* SPI-NOR is shared pin with serial NAND */
-	qspi_pins: qspi-pins {
-		mux {
-			function = "flash";
-			groups = "spi_nor";
-		};
-	};
-
 	/* Serial NAND is shared pin with SPI-NOR */
 	serial_nand_pins: serial-nand-pins {
 		mux {
@@ -213,6 +202,14 @@
 		mux {
 			function = "spi";
 			groups = "spi_0";
+		};
+	};
+
+	/* SPI-NOR is shared pin with serial NAND */
+	qspi_pins: qspi-pins {
+		mux {
+			function = "flash";
+			groups = "spi_nor";
 		};
 	};
 
@@ -243,21 +240,27 @@
 			groups = "watchdog";
 		};
 	};
+
+	wmac0_pins: wmac0-pins {
+		mux {
+			function = "wifi";
+			groups = "wf0_5g";
+			drive-strength = <4>;
+		};
+	};
+
+	wmac1_pins: wmac0-pins {
+		mux {
+			function = "wifi";
+			groups = "wf0_2g";
+			drive-strength = <4>;
+		};
+	};
 };
 
 &spi {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi_pins>;
-	status = "okay";
-};
-
-&ssusb {
-	vusb33-supply = <&reg_3p3v>;
-	vbus-supply = <&reg_5v>;
-	status = "okay";
-};
-
-&u3phy0 {
 	status = "okay";
 };
 
@@ -267,8 +270,25 @@
 	status = "okay";
 };
 
+&ssusb {
+	vusb33-supply = <&reg_3p3v>;
+	vbus-supply = <&reg_5v>;
+	status = "okay";
+};
+
+&u3phy1 {
+	status = "okay";
+};
+
 &watchdog {
 	pinctrl-names = "default";
 	pinctrl-0 = <&watchdog_pins>;
+	status = "okay";
+};
+
+&wmac {
+	pinctrl-names = "default";
+	pinctrl-0 = <&wmac0_pins>;
+	pinctrl-1 = <&wmac1_pins>;
 	status = "okay";
 };

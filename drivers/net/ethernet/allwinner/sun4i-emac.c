@@ -33,6 +33,7 @@
 #include "sun4i-emac.h"
 
 #define DRV_NAME		"sun4i-emac"
+#define DRV_VERSION		"1.02"
 
 #define EMAC_MAX_FRAME_LEN	0x0600
 
@@ -171,7 +172,8 @@ static int emac_mdio_probe(struct net_device *dev)
 	}
 
 	/* mask with MAC supported features */
-	phy_set_max_speed(phydev, SPEED_100);
+	phydev->supported &= PHY_BASIC_FEATURES;
+	phydev->advertising = phydev->supported;
 
 	db->link = 0;
 	db->speed = 0;
@@ -206,11 +208,25 @@ static void emac_inblk_32bit(void __iomem *reg, void *data, int count)
 	readsl(reg, data, round_up(count, 4) / 4);
 }
 
+static int emac_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+{
+	struct phy_device *phydev = dev->phydev;
+
+	if (!netif_running(dev))
+		return -EINVAL;
+
+	if (!phydev)
+		return -ENODEV;
+
+	return phy_mii_ioctl(phydev, rq, cmd);
+}
+
 /* ethtool ops */
 static void emac_get_drvinfo(struct net_device *dev,
 			      struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strlcpy(info->driver, DRV_NAME, sizeof(DRV_NAME));
+	strlcpy(info->version, DRV_VERSION, sizeof(DRV_VERSION));
 	strlcpy(info->bus_info, dev_name(&dev->dev), sizeof(info->bus_info));
 }
 
@@ -392,7 +408,7 @@ static void emac_init_device(struct net_device *dev)
 }
 
 /* Our watchdog timed out. Called by the networking layer */
-static void emac_timeout(struct net_device *dev, unsigned int txqueue)
+static void emac_timeout(struct net_device *dev)
 {
 	struct emac_board_info *db = netdev_priv(dev);
 	unsigned long flags;
@@ -640,11 +656,13 @@ static irqreturn_t emac_interrupt(int irq, void *dev_id)
 	struct net_device *dev = dev_id;
 	struct emac_board_info *db = netdev_priv(dev);
 	int int_status;
+	unsigned long flags;
 	unsigned int reg_val;
 
 	/* A real interrupt coming */
 
-	spin_lock(&db->lock);
+	/* holders of db->lock must always block IRQs */
+	spin_lock_irqsave(&db->lock, flags);
 
 	/* Disable all interrupts */
 	writel(0, db->membase + EMAC_INT_CTL_REG);
@@ -678,7 +696,7 @@ static irqreturn_t emac_interrupt(int irq, void *dev_id)
 		reg_val |= (0xf << 0) | (0x01 << 8);
 		writel(reg_val, db->membase + EMAC_INT_CTL_REG);
 	}
-	spin_unlock(&db->lock);
+	spin_unlock_irqrestore(&db->lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -774,7 +792,7 @@ static const struct net_device_ops emac_netdev_ops = {
 	.ndo_start_xmit		= emac_start_xmit,
 	.ndo_tx_timeout		= emac_timeout,
 	.ndo_set_rx_mode	= emac_set_rx_mode,
-	.ndo_do_ioctl		= phy_do_ioctl_running,
+	.ndo_do_ioctl		= emac_ioctl,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= emac_set_mac_address,
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -801,6 +819,7 @@ static int emac_probe(struct platform_device *pdev)
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 
 	db = netdev_priv(ndev);
+	memset(db, 0, sizeof(*db));
 
 	db->dev = &pdev->dev;
 	db->ndev = ndev;
@@ -843,9 +862,7 @@ static int emac_probe(struct platform_device *pdev)
 		goto out_clk_disable_unprepare;
 	}
 
-	db->phy_node = of_parse_phandle(np, "phy-handle", 0);
-	if (!db->phy_node)
-		db->phy_node = of_parse_phandle(np, "phy", 0);
+	db->phy_node = of_parse_phandle(np, "phy", 0);
 	if (!db->phy_node) {
 		dev_err(&pdev->dev, "no associated PHY\n");
 		ret = -ENODEV;
@@ -854,8 +871,8 @@ static int emac_probe(struct platform_device *pdev)
 
 	/* Read MAC-address from DT */
 	mac_addr = of_get_mac_address(np);
-	if (!IS_ERR(mac_addr))
-		ether_addr_copy(ndev->dev_addr, mac_addr);
+	if (mac_addr)
+		memcpy(ndev->dev_addr, mac_addr, ETH_ALEN);
 
 	/* Check if the MAC address is valid, if not get a random one */
 	if (!is_valid_ether_addr(ndev->dev_addr)) {

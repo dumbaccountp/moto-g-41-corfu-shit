@@ -1,17 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
- */
-
+*/
 
 #include <linux/backlight.h>
+#include <drm/drmP.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
-
-#include <drm/drm_modes.h>
-#include <linux/delay.h>
-#include <drm/drm_connector.h>
-#include <drm/drm_device.h>
 
 #include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
@@ -27,9 +22,9 @@
 
 #define CONFIG_MTK_PANEL_EXT
 #if defined(CONFIG_MTK_PANEL_EXT)
-#include "../mediatek/mediatek_v2/mtk_panel_ext.h"
-#include "../mediatek/mediatek_v2/mtk_log.h"
-#include "../mediatek/mediatek_v2/mtk_drm_graphics_base.h"
+#include "../mediatek/mtk_panel_ext.h"
+#include "../mediatek/mtk_log.h"
+#include "../mediatek/mtk_drm_graphics_base.h"
 #endif
 
 #ifdef CONFIG_MTK_ROUND_CORNER_SUPPORT
@@ -301,12 +296,16 @@ static int lcm_unprepare(struct drm_panel *panel)
 	usleep_range(10 * 1000, 15 * 1000);
 	devm_gpiod_put(ctx->dev, ctx->reset_gpio);
 	usleep_range(10 * 1000, 15 * 1000);
+#if defined(CONFIG_RT5081_PMU_DSV) || defined(CONFIG_MT6370_PMU_DSV)
+	lcm_panel_bias_disable();
+#else
 #ifndef CONFIG_RT4831A_I2C
 	ctx->bias_gpio =
 	devm_gpiod_get(ctx->dev, "bias", GPIOD_OUT_HIGH);
 	gpiod_set_value(ctx->bias_gpio, 0);
 	usleep_range(10 * 1000, 15 * 1000);
 	devm_gpiod_put(ctx->dev, ctx->bias_gpio);
+#endif
 #endif
 	ctx->hbm_en = false;
 
@@ -320,12 +319,16 @@ static int lcm_panel_poweron(struct drm_panel *panel)
 
 	if (ctx->prepared)
 		return 0;
+#if defined(CONFIG_RT5081_PMU_DSV) || defined(CONFIG_MT6370_PMU_DSV)
+	lcm_panel_bias_enable();
+#else
 #ifndef CONFIG_RT4831A_I2C
 	usleep_range(10 * 1000, 10 * 1000);
 	ctx->bias_gpio = devm_gpiod_get(ctx->dev,
 		"bias", GPIOD_OUT_HIGH);
 	gpiod_set_value(ctx->bias_gpio, 1);
 	devm_gpiod_put(ctx->dev, ctx->bias_gpio);
+#endif
 #endif
 	usleep_range(10 * 1000, 10 * 1000);
 	ctx->reset_gpio = devm_gpiod_get(ctx->dev, "reset", GPIOD_OUT_HIGH);
@@ -395,6 +398,7 @@ static const struct drm_display_mode default_mode = {
 	.vsync_start = 2400 + VFP,
 	.vsync_end = 2400 + VFP + VSA,
 	.vtotal = 2400 + VFP + VSA + VBP,
+	.vrefresh = 60,
 };
 
 #if defined(CONFIG_MTK_PANEL_EXT)
@@ -749,6 +753,12 @@ static struct mtk_panel_params ext_params = {
 	.hbm_en_time = 2,
 	.hbm_dis_time = 1,
 	.doze_delay = 3,
+	.dyn = {
+		.switch_en = 1,
+		.data_rate = 1110,
+		.hfp = 50,
+		.vfp = 35,
+	},
 };
 
 static int panel_doze_post_disp_on(struct drm_panel *panel,
@@ -828,25 +838,24 @@ struct panel_desc {
 	} delay;
 };
 
-static int lcm_get_modes(struct drm_panel *panel,
-		struct drm_connector *connector)
+static int lcm_get_modes(struct drm_panel *panel)
 {
 	struct drm_display_mode *mode;
 
-	mode = drm_mode_duplicate(connector->dev, &default_mode);
+	mode = drm_mode_duplicate(panel->drm, &default_mode);
 	if (!mode) {
-		dev_info(connector->dev->dev, "failed to add mode %ux%ux@%u\n",
+		dev_info(panel->drm->dev, "failed to add mode %ux%ux@%u\n",
 			default_mode.hdisplay, default_mode.vdisplay,
-			drm_mode_vrefresh(&default_mode));
+			default_mode.vrefresh);
 		return -ENOMEM;
 	}
 
 	drm_mode_set_name(mode);
 	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
-	drm_mode_probed_add(connector, mode);
+	drm_mode_probed_add(panel->connector, mode);
 
-	connector->display_info.width_mm = 71;
-	connector->display_info.height_mm = 153;
+	panel->connector->display_info.width_mm = 71;
+	panel->connector->display_info.height_mm = 153;
 
 	return 1;
 }
@@ -859,7 +868,7 @@ static const struct drm_panel_funcs lcm_drm_funcs = {
 	.get_modes = lcm_get_modes,
 };
 
-static ssize_t aod_area_show(struct device *dev,
+static ssize_t get_aod_area(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int i;
@@ -869,7 +878,7 @@ static ssize_t aod_area_show(struct device *dev,
 	return 0;
 }
 
-static ssize_t aod_area_store(struct device *dev,
+static ssize_t set_aod_area(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	//struct lcm *ctx = mipi_dsi_get_drvdata(dev);
@@ -877,17 +886,14 @@ static ssize_t aod_area_store(struct device *dev,
 
 	for (i = 0; i < count; i++) {
 		ret = sscanf(&buf[i], "%c", &doze_area_cmd[i]);
-		if (ret != 1) {
-			pr_info("%s ret = %d sscanf failed", __func__, ret);
-			return ret;
-		}
 		pr_info("%s ret = %d, buf[%d]=%d", __func__, ret, i, buf[i]);
 	}
 
 	return ret;
 }
 
-static DEVICE_ATTR_RW(aod_area);
+static DEVICE_ATTR(aod_area, 0644,
+		get_aod_area, set_aod_area);
 
 static struct attribute *aod_area_sysfs_attrs[] = {
 	&dev_attr_aod_area.attr,
@@ -953,22 +959,29 @@ static int lcm_probe(struct mipi_dsi_device *dsi)
 		return PTR_ERR(ctx->reset_gpio);
 	}
 	devm_gpiod_put(dev, ctx->reset_gpio);
-//#ifndef CONFIG_RT4831A_I2C
-//	ctx->bias_gpio = devm_gpiod_get(dev, "bias", GPIOD_OUT_HIGH);
-//	if (IS_ERR(ctx->bias_gpio)) {
-//		dev_info(dev, "cannot get bias-gpios 0 %ld\n",
-//			PTR_ERR(ctx->bias_gpio));
-//		return PTR_ERR(ctx->bias_gpio);
-//	}
-//	devm_gpiod_put(dev, ctx->bias_gpio);
-//#endif
+#if defined(CONFIG_RT5081_PMU_DSV) || defined(CONFIG_MT6370_PMU_DSV)
+	lcm_panel_bias_enable();
+#else
+#ifndef CONFIG_RT4831A_I2C
+	ctx->bias_gpio = devm_gpiod_get(dev, "bias", GPIOD_OUT_HIGH);
+	if (IS_ERR(ctx->bias_gpio)) {
+		dev_info(dev, "cannot get bias-gpios 0 %ld\n",
+			PTR_ERR(ctx->bias_gpio));
+		return PTR_ERR(ctx->bias_gpio);
+	}
+	devm_gpiod_put(dev, ctx->bias_gpio);
+#endif
+#endif
 	ctx->prepared = true;
 	ctx->enabled = true;
 
-	drm_panel_init(&ctx->panel, dev, &lcm_drm_funcs,
-			DRM_MODE_CONNECTOR_DSI);
+	drm_panel_init(&ctx->panel);
+	ctx->panel.dev = dev;
+	ctx->panel.funcs = &lcm_drm_funcs;
 
-	drm_panel_add(&ctx->panel);
+	ret = drm_panel_add(&ctx->panel);
+	if (ret < 0)
+		return ret;
 
 	ret = mipi_dsi_attach(dsi);
 	if (ret < 0)
@@ -992,16 +1005,9 @@ static int lcm_probe(struct mipi_dsi_device *dsi)
 static int lcm_remove(struct mipi_dsi_device *dsi)
 {
 	struct lcm *ctx = mipi_dsi_get_drvdata(dsi);
-#if defined(CONFIG_MTK_PANEL_EXT)
-	struct mtk_panel_ctx *ext_ctx = find_panel_ctx(&ctx->panel);
-#endif
 
 	mipi_dsi_detach(dsi);
 	drm_panel_remove(&ctx->panel);
-#if defined(CONFIG_MTK_PANEL_EXT)
-	mtk_panel_detach(ext_ctx);
-	mtk_panel_remove(ext_ctx);
-#endif
 
 	return 0;
 }
@@ -1024,7 +1030,3 @@ static struct mipi_dsi_driver lcm_driver = {
 };
 
 module_mipi_dsi_driver(lcm_driver);
-
-MODULE_AUTHOR("Linus Wallei <linus.walleij@linaro.org>");
-MODULE_DESCRIPTION("MIPI-DSI s68fc01 Panel Driver");
-MODULE_LICENSE("GPL v2");

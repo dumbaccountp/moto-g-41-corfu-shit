@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016 MediaTek Inc.
- * Author: Daniel Hsiao <daniel.hsiao@mediatek.com>
- *              Jungchang Tsao <jungchang.tsao@mediatek.com>
- *              Tiffany Lin <tiffany.lin@mediatek.com>
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef _VENC_DRV_IF_H_
@@ -77,11 +74,6 @@ struct venc_resolution_change {
 	__u32 resolutionchange;
 };
 
-extern struct mtk_video_fmt
-	mtk_venc_formats[MTK_MAX_ENC_CODECS_SUPPORT];
-extern struct mtk_codec_framesizes
-	mtk_venc_framesizes[MTK_MAX_ENC_CODECS_SUPPORT];
-
 /*
  * venc_if_init - Create the driver handle
  * @ctx: device context
@@ -137,9 +129,8 @@ void venc_encode_prepare(void *ctx_prepare,
 		unsigned int core_id, unsigned long *flags);
 void venc_encode_unprepare(void *ctx_unprepare,
 		unsigned int core_id, unsigned long *flags);
-void venc_check_release_lock(void *ctx_check);
+
 int venc_lock(void *ctx_lock, int core_id, bool sec);
 void venc_unlock(void *ctx_unlock, int core_id);
-
 
 #endif /* _VENC_DRV_IF_H_ */

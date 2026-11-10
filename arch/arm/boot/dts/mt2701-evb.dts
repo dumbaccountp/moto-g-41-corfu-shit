@@ -14,7 +14,6 @@
 	compatible = "mediatek,mt2701-evb", "mediatek,mt2701";
 
 	memory {
-		device_type = "memory";
 		reg = <0 0x80000000 0 0x40000000>;
 	};
 
@@ -243,9 +242,9 @@
 
 &usb2 {
 	status = "okay";
-	usb-role-switch;
 	connector{
-		compatible = "gpio-usb-b-connector", "usb-b-connector";
+		compatible = "gpio-usb-b-connector";
+		label = "micro-USB";
 		type = "micro";
 		id-gpios = <&pio 44 GPIO_ACTIVE_HIGH>;
 		vbus-supply = <&usb_vbus>;

@@ -102,8 +102,7 @@ struct apu_tags *apu_tags_alloc(const char *name, int size, int cnt,
 	}
 
 	memset(at->tags, 0, at->ent_sz * at->cnt);
-	strncpy(at->name, name, sizeof(at->name)-1);
-	at->name[sizeof(at->name)-1] = '\0';
+	strncpy(at->name, name, APU_TAG_NAME_SZ-1);
 
 	/* proc dentries */
 	if (apu_tags_alloc_procfs(at)) {
@@ -305,12 +304,12 @@ static int apu_tags_proc_open(struct inode *inode, struct file *file)
 	return single_open(file, apu_tags_proc_show, PDE_DATA(inode));
 }
 
-static const struct proc_ops apu_tags_proc_fops = {
-	.proc_open = apu_tags_proc_open,
-	.proc_write = apu_tags_proc_write,
-	.proc_read = seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = single_release,
+static const struct file_operations apu_tags_proc_fops = {
+	.open = apu_tags_proc_open,
+	.write = apu_tags_proc_write,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
 };
 
 static int apu_tags_info_show(struct seq_file *s, void *v)
@@ -336,11 +335,11 @@ static int apu_tags_info_open(struct inode *inode, struct file *file)
 	return single_open(file, apu_tags_info_show, NULL);
 }
 
-static const struct proc_ops apu_tags_info_fops = {
-	.proc_open = apu_tags_info_open,
-	.proc_read = seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = single_release,
+static const struct file_operations apu_tags_info_fops = {
+	.open = apu_tags_info_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
 };
 
 static int apu_tags_init_procfs(void)
@@ -364,7 +363,11 @@ static void apu_tags_exit_procfs(void)
 	proot = NULL;
 }
 
-#define APU_TAG_PROC_MDOE		0640
+#if !defined(USER_BUILD_KERNEL) && defined(CONFIG_MTK_ENG_BUILD)
+#define APU_TAG_PROC_MDOE		0660
+#else
+#define APU_TAG_PROC_MDOE		0440
+#endif
 
 static int apu_tags_alloc_procfs(struct apu_tags *at)
 {

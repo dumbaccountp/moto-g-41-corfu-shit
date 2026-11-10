@@ -1066,7 +1066,7 @@ research:
 			} else {
 				/* paste hole to the indirect item */
 				/*
-				 * If kcalloc failed, max_to_insert becomes
+				 * If kmalloc failed, max_to_insert becomes
 				 * zero and it means we only have space for
 				 * one block
 				 */
@@ -1160,9 +1160,11 @@ failure:
 	return retval;
 }
 
-static void reiserfs_readahead(struct readahead_control *rac)
+static int
+reiserfs_readpages(struct file *file, struct address_space *mapping,
+		   struct list_head *pages, unsigned nr_pages)
 {
-	mpage_readahead(rac, reiserfs_get_block);
+	return mpage_readpages(mapping, pages, nr_pages, reiserfs_get_block);
 }
 
 /*
@@ -3429,7 +3431,7 @@ out:
 const struct address_space_operations reiserfs_address_space_operations = {
 	.writepage = reiserfs_writepage,
 	.readpage = reiserfs_readpage,
-	.readahead = reiserfs_readahead,
+	.readpages = reiserfs_readpages,
 	.releasepage = reiserfs_releasepage,
 	.invalidatepage = reiserfs_invalidatepage,
 	.write_begin = reiserfs_write_begin,

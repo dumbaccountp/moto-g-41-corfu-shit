@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of the Emulex Linux Device Driver for Enterprise iSCSI
  * Host Bus Adapters. Refer to the README file included with this package
@@ -7,8 +6,13 @@
  * Copyright (c) 2018 Broadcom. All Rights Reserved.
  * The term "Broadcom" refers to Broadcom Inc. and/or its subsidiaries.
  *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as published
+ * by the Free Software Foundation.
+ *
  * Contact Information:
  * linux-drivers@broadcom.com
+ *
  */
 
 #include <scsi/libiscsi.h>
@@ -27,7 +31,6 @@ extern struct iscsi_transport beiscsi_iscsi_transport;
 
 /**
  * beiscsi_session_create - creates a new iscsi session
- * @ep: pointer to iscsi ep
  * @cmds_max: max commands supported
  * @qdepth: max queue depth supported
  * @initial_cmdsn: initial iscsi CMDSN
@@ -165,7 +168,6 @@ beiscsi_conn_create(struct iscsi_cls_session *cls_session, u32 cid)
  * @cls_session: pointer to iscsi cls session
  * @cls_conn: pointer to iscsi cls conn
  * @transport_fd: EP handle(64 bit)
- * @is_leading: indicate if this is the session leading connection (MCS)
  *
  * This function binds the TCP Conn with iSCSI Connection and Session.
  */
@@ -182,7 +184,6 @@ int beiscsi_conn_bind(struct iscsi_cls_session *cls_session,
 	struct beiscsi_endpoint *beiscsi_ep;
 	struct iscsi_endpoint *ep;
 	uint16_t cri_index;
-	int rc = 0;
 
 	ep = iscsi_lookup_endpoint(transport_fd);
 	if (!ep)
@@ -190,17 +191,15 @@ int beiscsi_conn_bind(struct iscsi_cls_session *cls_session,
 
 	beiscsi_ep = ep->dd_data;
 
-	if (iscsi_conn_bind(cls_session, cls_conn, is_leading)) {
-		rc = -EINVAL;
-		goto put_ep;
-	}
+	if (iscsi_conn_bind(cls_session, cls_conn, is_leading))
+		return -EINVAL;
 
 	if (beiscsi_ep->phba != phba) {
 		beiscsi_log(phba, KERN_ERR, BEISCSI_LOG_CONFIG,
 			    "BS_%d : beiscsi_ep->hba=%p not equal to phba=%p\n",
 			    beiscsi_ep->phba, phba);
-		rc = -EEXIST;
-		goto put_ep;
+
+		return -EEXIST;
 	}
 	cri_index = BE_GET_CRI_FROM_CID(beiscsi_ep->ep_cid);
 	if (phba->conn_table[cri_index]) {
@@ -212,8 +211,7 @@ int beiscsi_conn_bind(struct iscsi_cls_session *cls_session,
 				      beiscsi_ep->ep_cid,
 				      beiscsi_conn,
 				      phba->conn_table[cri_index]);
-			rc = -EINVAL;
-			goto put_ep;
+			return -EINVAL;
 		}
 	}
 
@@ -230,10 +228,7 @@ int beiscsi_conn_bind(struct iscsi_cls_session *cls_session,
 		    "BS_%d : cid %d phba->conn_table[%u]=%p\n",
 		    beiscsi_ep->ep_cid, cri_index, beiscsi_conn);
 	phba->conn_table[cri_index] = beiscsi_conn;
-
-put_ep:
-	iscsi_put_endpoint(ep);
-	return rc;
+	return 0;
 }
 
 static int beiscsi_iface_create_ipv4(struct beiscsi_hba *phba)
@@ -684,7 +679,6 @@ int beiscsi_set_param(struct iscsi_cls_conn *cls_conn,
 	case ISCSI_PARAM_MAX_XMIT_DLENGTH:
 		if (conn->max_xmit_dlength > 65536)
 			conn->max_xmit_dlength = 65536;
-		fallthrough;
 	default:
 		return 0;
 	}
@@ -777,7 +771,7 @@ int beiscsi_get_host_param(struct Scsi_Host *shost,
 			status = beiscsi_get_initiator_name(phba, buf, false);
 			if (status < 0) {
 				beiscsi_log(phba, KERN_ERR, BEISCSI_LOG_CONFIG,
-					    "BS_%d : Retrieving Initiator Name Failed\n");
+					    "BS_%d : Retreiving Initiator Name Failed\n");
 				status = 0;
 			}
 		}
@@ -1001,7 +995,7 @@ static void beiscsi_put_cid(struct beiscsi_hba *phba, unsigned short cid)
 
 /**
  * beiscsi_free_ep - free endpoint
- * @beiscsi_ep: pointer to device endpoint struct
+ * @ep:	pointer to iscsi endpoint structure
  */
 static void beiscsi_free_ep(struct beiscsi_endpoint *beiscsi_ep)
 {
@@ -1036,10 +1030,9 @@ static void beiscsi_free_ep(struct beiscsi_endpoint *beiscsi_ep)
 
 /**
  * beiscsi_open_conn - Ask FW to open a TCP connection
- * @ep: pointer to device endpoint struct
+ * @ep:	endpoint to be used
  * @src_addr: The source IP address
  * @dst_addr: The Destination  IP address
- * @non_blocking: blocking or non-blocking call
  *
  * Asks the FW to open a TCP connection
  */
@@ -1078,9 +1071,9 @@ static int beiscsi_open_conn(struct iscsi_endpoint *ep,
 	else
 		req_memsize = sizeof(struct tcp_connect_and_offload_in_v1);
 
-	nonemb_cmd.va = dma_alloc_coherent(&phba->ctrl.pdev->dev,
+	nonemb_cmd.va = pci_alloc_consistent(phba->ctrl.pdev,
 				req_memsize,
-				&nonemb_cmd.dma, GFP_KERNEL);
+				&nonemb_cmd.dma);
 	if (nonemb_cmd.va == NULL) {
 
 		beiscsi_log(phba, KERN_ERR, BEISCSI_LOG_CONFIG,
@@ -1098,7 +1091,7 @@ static int beiscsi_open_conn(struct iscsi_endpoint *ep,
 			    "BS_%d : mgmt_open_connection Failed for cid=%d\n",
 			    beiscsi_ep->ep_cid);
 
-		dma_free_coherent(&phba->ctrl.pdev->dev, nonemb_cmd.size,
+		pci_free_consistent(phba->ctrl.pdev, nonemb_cmd.size,
 				    nonemb_cmd.va, nonemb_cmd.dma);
 		beiscsi_free_ep(beiscsi_ep);
 		return -EAGAIN;
@@ -1111,9 +1104,8 @@ static int beiscsi_open_conn(struct iscsi_endpoint *ep,
 			    "BS_%d : mgmt_open_connection Failed");
 
 		if (ret != -EBUSY)
-			dma_free_coherent(&phba->ctrl.pdev->dev,
-					nonemb_cmd.size, nonemb_cmd.va,
-					nonemb_cmd.dma);
+			pci_free_consistent(phba->ctrl.pdev, nonemb_cmd.size,
+					    nonemb_cmd.va, nonemb_cmd.dma);
 
 		beiscsi_free_ep(beiscsi_ep);
 		return ret;
@@ -1126,14 +1118,14 @@ static int beiscsi_open_conn(struct iscsi_endpoint *ep,
 	beiscsi_log(phba, KERN_INFO, BEISCSI_LOG_CONFIG,
 		    "BS_%d : mgmt_open_connection Success\n");
 
-	dma_free_coherent(&phba->ctrl.pdev->dev, nonemb_cmd.size,
+	pci_free_consistent(phba->ctrl.pdev, nonemb_cmd.size,
 			    nonemb_cmd.va, nonemb_cmd.dma);
 	return 0;
 }
 
 /**
  * beiscsi_ep_connect - Ask chip to create TCP Conn
- * @shost: Pointer to scsi_host structure
+ * @scsi_host: Pointer to scsi_host structure
  * @dst_addr: The IP address of Target
  * @non_blocking: blocking or non-blocking call
  *
@@ -1238,7 +1230,7 @@ static void beiscsi_flush_cq(struct beiscsi_hba *phba)
 
 /**
  * beiscsi_conn_close - Invalidate and upload connection
- * @beiscsi_ep: pointer to device endpoint struct
+ * @ep: The iscsi endpoint
  *
  * Returns 0 on success,  -1 on failure.
  */

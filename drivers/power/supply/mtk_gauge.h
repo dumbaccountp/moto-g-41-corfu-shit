@@ -55,9 +55,6 @@ enum gauge_property {
 	GAUGE_PROP_BATTERY_EXIST,
 	GAUGE_PROP_HW_VERSION,
 	GAUGE_PROP_BATTERY_VOLTAGE,
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	GAUGE_PROP_CHARGER_VOLTAGE,
-#endif
 	GAUGE_PROP_BATTERY_TEMPERATURE_ADC,
 	GAUGE_PROP_BIF_VOLTAGE,
 	GAUGE_PROP_EN_HIGH_VBAT_INTERRUPT,
@@ -106,8 +103,6 @@ enum gauge_property {
 	GAUGE_PROP_VBAT2_DETECT_TIME,
 	GAUGE_PROP_VBAT2_DETECT_COUNTER,
 	GAUGE_PROP_BAT_TEMP_FROZE_EN,
-	GAUGE_PROP_BAT_EOC,
-	GAUGE_PROP_MAX,
 };
 
 struct gauge_hw_status {
@@ -248,9 +243,7 @@ struct mtk_gauge {
 	struct iio_channel *chan_bif;
 	struct iio_channel *chan_ptim_bat_voltage;
 	struct iio_channel *chan_ptim_r;
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	struct iio_channel *chan_charger_vbus;
-#endif
+
 	struct mtk_gauge_sysfs_field_info *attr;
 	struct zcv_data zcv_info;
 

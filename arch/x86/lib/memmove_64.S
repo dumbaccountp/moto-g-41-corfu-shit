@@ -8,7 +8,7 @@
  */
 #include <linux/linkage.h>
 #include <asm/cpufeatures.h>
-#include <asm/alternative.h>
+#include <asm/alternative-asm.h>
 #include <asm/export.h>
 
 #undef memmove
@@ -24,10 +24,15 @@
  * Output:
  * rax: dest
  */
-SYM_FUNC_START_WEAK(memmove)
-SYM_FUNC_START(__memmove)
+.weak memmove
+.p2align 4, 0x90
+memmove:
+ENTRY(__memmove)
 
+	/* Handle more 32 bytes in loop */
 	mov %rdi, %rax
+	cmp $0x20, %rdx
+	jb	1f
 
 	/* Decide forward/backward copy mode */
 	cmp %rdi, %rsi
@@ -37,10 +42,8 @@ SYM_FUNC_START(__memmove)
 	cmp %rdi, %r8
 	jg 2f
 
-	/* FSRM implies ERMS => no length checks, do the copy directly */
 .Lmemmove_begin_forward:
-	ALTERNATIVE "cmp $0x20, %rdx; jb 1f", "", X86_FEATURE_FSRM
-	ALTERNATIVE "", "jmp .Lmemmove_erms", X86_FEATURE_ERMS
+	ALTERNATIVE "", "movq %rdx, %rcx; rep movsb; retq", X86_FEATURE_ERMS
 
 	/*
 	 * movsq instruction have many startup latency
@@ -111,8 +114,6 @@ SYM_FUNC_START(__memmove)
 	 */
 	.p2align 4
 2:
-	cmp $0x20, %rdx
-	jb 1f
 	cmp $680, %rdx
 	jb 6f
 	cmp %dil, %sil
@@ -205,13 +206,8 @@ SYM_FUNC_START(__memmove)
 	movb (%rsi), %r11b
 	movb %r11b, (%rdi)
 13:
-	RET
-
-.Lmemmove_erms:
-	movq %rdx, %rcx
-	rep movsb
-	RET
-SYM_FUNC_END(__memmove)
-SYM_FUNC_END_ALIAS(memmove)
+	retq
+ENDPROC(__memmove)
+ENDPROC(memmove)
 EXPORT_SYMBOL(__memmove)
 EXPORT_SYMBOL(memmove)

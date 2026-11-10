@@ -6,13 +6,10 @@
 #include <linux/device.h>
 #include <linux/iio/consumer.h>
 #include <linux/kthread.h>
-#include <linux/linear_range.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/mfd/mt6357/registers.h>
-#include <linux/mfd/mt6358/registers.h>
-#include <linux/mfd/mt6359p/registers.h>
-#include <linux/mfd/mt6363/registers.h>
+#include <linux/mfd/mt6359/registers.h>
 #include <linux/mfd/mt6397/core.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
@@ -39,8 +36,19 @@ struct reg_t {
 struct dlpt_regs_t {
 	struct reg_t rgs_chrdet;
 	struct reg_t uvlo_reg;
-	struct reg_t vbb_uvlo_reg;
-	const struct linear_range uvlo_range;
+};
+
+struct dlpt_regs_t mt6359_dlpt_regs = {
+	.rgs_chrdet = {
+		MT6359_RGS_CHRDET_ADDR,
+		MT6359_RGS_CHRDET_MASK << MT6359_RGS_CHRDET_SHIFT,
+		MT6359_RGS_CHRDET_SHIFT
+	},
+	.uvlo_reg = {
+		MT6359_RG_UVLO_VTHL_ADDR,
+		MT6359_RG_UVLO_VTHL_MASK << MT6359_RG_UVLO_VTHL_SHIFT,
+		MT6359_RG_UVLO_VTHL_SHIFT
+	},
 };
 
 struct dlpt_regs_t mt6357_dlpt_regs = {
@@ -53,74 +61,6 @@ struct dlpt_regs_t mt6357_dlpt_regs = {
 		MT6357_RG_UVLO_VTHL_ADDR,
 		MT6357_RG_UVLO_VTHL_MASK << MT6357_RG_UVLO_VTHL_SHIFT,
 		MT6357_RG_UVLO_VTHL_SHIFT
-	},
-	.uvlo_range = {
-		.min = 2500,
-		.min_sel = 0,
-		.max_sel = 8,
-		.step = 50,
-	},
-};
-
-struct dlpt_regs_t mt6358_dlpt_regs = {
-	.rgs_chrdet = {
-		MT6358_RGS_CHRDET_ADDR,
-		MT6358_RGS_CHRDET_MASK << MT6358_RGS_CHRDET_SHIFT,
-		MT6358_RGS_CHRDET_SHIFT
-	},
-	.uvlo_reg = {
-		MT6358_RG_UVLO_VTHL_ADDR,
-		MT6358_RG_UVLO_VTHL_MASK << MT6358_RG_UVLO_VTHL_SHIFT,
-		MT6358_RG_UVLO_VTHL_SHIFT
-	},
-	.uvlo_range = {
-		.min = 2500,
-		.min_sel = 0,
-		.max_sel = 8,
-		.step = 50,
-	},
-};
-
-struct dlpt_regs_t mt6359p_dlpt_regs = {
-	.rgs_chrdet = {
-		MT6359P_RGS_CHRDET_ADDR,
-		MT6359P_RGS_CHRDET_MASK << MT6359P_RGS_CHRDET_SHIFT,
-		MT6359P_RGS_CHRDET_SHIFT
-	},
-	.uvlo_reg = {
-		MT6359P_RG_UVLO_VTHL_ADDR,
-		MT6359P_RG_UVLO_VTHL_MASK << MT6359P_RG_UVLO_VTHL_SHIFT,
-		MT6359P_RG_UVLO_VTHL_SHIFT
-	},
-	.uvlo_range = {
-		.min = 2500,
-		.min_sel = 0,
-		.max_sel = 8,
-		.step = 50,
-	},
-};
-
-struct dlpt_regs_t mt6363_dlpt_regs = {
-	.rgs_chrdet = {
-		MT6363_CHRDET_DEB_ADDR,
-		MT6363_CHRDET_DEB_MASK << MT6363_CHRDET_DEB_SHIFT,
-		MT6363_CHRDET_DEB_SHIFT
-	},
-	.uvlo_reg = {
-		MT6363_RG_VSYS_UVLO_VTHL_ADDR,
-		MT6363_RG_VSYS_UVLO_VTHL_MASK << MT6363_RG_VSYS_UVLO_VTHL_SHIFT,
-		MT6363_RG_VSYS_UVLO_VTHL_SHIFT
-	},
-	.vbb_uvlo_reg = {
-		MT6363_RG_VBB_UVLO_VTHL_ADDR,
-		MT6363_RG_VBB_UVLO_VTHL_MASK << MT6363_RG_VBB_UVLO_VTHL_SHIFT,
-		MT6363_RG_VBB_UVLO_VTHL_SHIFT
-	},
-	.uvlo_range = {
-		.min = 2000,
-		.min_sel = 0,
-		.max_sel = 9,
-		.step = 100,
 	},
 };
 
@@ -144,8 +84,6 @@ struct dlpt_priv {
 	struct iio_channel *chan_ptim;
 	struct iio_channel *chan_imix_r;
 	struct iio_channel *chan_zcv;
-	bool suspend_flag;
-
 };
 
 struct dlpt_callback_table {
@@ -155,7 +93,6 @@ struct dlpt_callback_table {
 static struct dlpt_priv dlpt = {
 	.notify_lock	=  __MUTEX_INITIALIZER(dlpt.notify_lock),
 	.notify_waiter	= __WAIT_QUEUE_HEAD_INITIALIZER(dlpt.notify_waiter),
-	.suspend_flag = false,
 };
 #define DLPTCB_MAX_NUM 16
 static struct dlpt_callback_table dlptcb_tb[DLPTCB_MAX_NUM] = { {0} };
@@ -212,7 +149,7 @@ static int dlpt_adc_chan_init(struct platform_device *pdev)
 void register_dlpt_notify(dlpt_callback dlpt_cb,
 			  enum DLPT_PRIO_TAG prio_val)
 {
-	if (prio_val >= DLPTCB_MAX_NUM) {
+	if (prio_val >= DLPTCB_MAX_NUM || prio_val < 0) {
 		pr_notice("[%s] prio_val=%d, out of boundary\n",
 			  __func__, prio_val);
 		return;
@@ -226,7 +163,6 @@ void register_dlpt_notify(dlpt_callback dlpt_cb,
 			dlpt_cb(dlpt.imix);
 	}
 }
-EXPORT_SYMBOL(register_dlpt_notify);
 
 static void exec_dlpt_callback(int dlpt_val)
 {
@@ -270,18 +206,18 @@ static int dlpt_check_power_off(void)
 	} else
 		dlpt_power_off_cnt = 0;
 
-	/* TODO: do we need to get system_transition_mutex */
-	if (dlpt_power_off_cnt >= 4)
+	if (dlpt_power_off_cnt >= 4 &&
+	    mutex_trylock(&system_transition_mutex)) {
 		kernel_restart("DLPT reboot system");
+		mutex_unlock(&system_transition_mutex);
+	}
 	return ret;
 }
 
-#if IS_ENABLED(CONFIG_MTK_LOW_BATTERY_POWER_THROTTLING)
 static void dlpt_low_battery_cb(enum LOW_BATTERY_LEVEL_TAG level)
 {
 	dlpt.lbat_level = level;
 }
-#endif
 
 static struct power_supply *get_mtk_gauge_psy(void)
 {
@@ -317,24 +253,6 @@ static void dlpt_set_shutdown_condition(void)
 
 	prop.intval = 1;
 	ret = power_supply_set_property(psy, POWER_SUPPLY_PROP_ENERGY_EMPTY,
-					&prop);
-	if (ret)
-		pr_info("%s fail\n", __func__);
-}
-
-static void dlpt_update_imix(int imix)
-{
-	struct power_supply *psy;
-	union power_supply_propval prop;
-	int ret;
-
-	psy = get_mtk_gauge_psy();
-	/* gauge disabled */
-	if (!psy)
-		return;
-
-	prop.intval = imix;
-	ret = power_supply_set_property(psy, POWER_SUPPLY_PROP_ENERGY_EMPTY_DESIGN,
 					&prop);
 	if (ret)
 		pr_info("%s fail\n", __func__);
@@ -441,8 +359,6 @@ static int dlpt_notify_handler(void *unused)
 					 (dlpt.notify_flag == true));
 		__pm_stay_awake(dlpt.notify_ws);
 		mutex_lock(&dlpt.notify_lock);
-		if (dlpt.suspend_flag)
-			goto bypass;
 
 		cur_ui_soc = dlpt_get_uisoc();
 
@@ -458,7 +374,6 @@ static int dlpt_notify_handler(void *unused)
 
 			if (dlpt.imix > IMAX_MAX_VALUE)
 				dlpt.imix = IMAX_MAX_VALUE;
-			dlpt_update_imix(dlpt.imix);
 			exec_dlpt_callback(dlpt.imix);
 
 			pr_info("[DLPT_final] %d,%d,%d,%d\n"
@@ -474,7 +389,6 @@ static int dlpt_notify_handler(void *unused)
 			dlpt_set_shutdown_condition();
 			pr_info("[DLPT] notify battery SOC=0 to power off.\n");
 		}
-bypass:
 		mutex_unlock(&dlpt.notify_lock);
 		__pm_relax(dlpt.notify_ws);
 
@@ -509,65 +423,59 @@ static void dlpt_notify_init(void)
 	if (IS_ERR(dlpt.notify_thread))
 		pr_notice("Failed to create dlpt_notify_thread\n");
 
-#if IS_ENABLED(CONFIG_MTK_LOW_BATTERY_POWER_THROTTLING)
 	register_low_battery_notify(&dlpt_low_battery_cb,
 				    LOW_BATTERY_PRIO_DLPT);
-#endif
-}
-
-static int linear_range_get_selector(const struct linear_range *r,
-				     unsigned int val, unsigned int *selector)
-{
-	if ((r->min + (r->max_sel - r->min_sel) * r->step) < val)
-		return -EINVAL;
-
-	if (r->min > val) {
-		*selector = r->min_sel;
-		return 0;
-	}
-	if (r->step == 0)
-		*selector = r->max_sel;
-	else
-		*selector = DIV_ROUND_UP(val - r->min, r->step) + r->min_sel;
-
-	return 0;
 }
 
 static void pmic_uvlo_init(int uvlo_level)
 {
-	int ret, val = 0;
+	int val;
 
-	ret = linear_range_get_selector(&dlpt.regs->uvlo_range, uvlo_level, &val);
-	if (!ret) {
-		regmap_update_bits(dlpt.regmap, dlpt.regs->uvlo_reg.addr,
-				   dlpt.regs->uvlo_reg.mask,
-				   val << dlpt.regs->uvlo_reg.shift);
-		pr_info("[dlpt] UVLO_VOLT_LEVEL = %d, RG_UVLO_VTHL = 0x%x\n",
-			uvlo_level, val);
-	} else
+	/*re-init UVLO volt */
+	switch (uvlo_level) {
+	case 2500:
+		val = 0;
+		break;
+	case 2550:
+		val = 1;
+		break;
+	case 2600:
+		val = 2;
+		break;
+	case 2650:
+		val = 3;
+		break;
+	case 2700:
+		val = 4;
+		break;
+	case 2750:
+		val = 5;
+		break;
+	case 2800:
+		val = 6;
+		break;
+	case 2850:
+		val = 7;
+		break;
+	case 2900:
+		val = 8;
+		break;
+	default:
+		val = 0;
 		pr_notice("[dlpt] Invalid uvlo_level (%d)\n", uvlo_level);
-}
-
-static void pmic_vbb_uvlo_init(int vbb_uvlo_level)
-{
-	int ret, val = 0;
-
-	ret = linear_range_get_selector(&dlpt.regs->uvlo_range, vbb_uvlo_level, &val);
-	if (!ret) {
-		regmap_update_bits(dlpt.regmap, dlpt.regs->vbb_uvlo_reg.addr,
-				   dlpt.regs->vbb_uvlo_reg.mask,
-				   val << dlpt.regs->vbb_uvlo_reg.shift);
-		pr_info("[dlpt] VBB_UVLO_VOLT_LEVEL = %d, RG_VBB_UVLO_VTHL = 0x%x\n",
-			vbb_uvlo_level, val);
-	} else
-		pr_info("[dlpt] Invalid vbb_uvlo_level (%d)\n", vbb_uvlo_level);
+		break;
+	}
+	regmap_update_bits(dlpt.regmap, dlpt.regs->uvlo_reg.addr,
+			   dlpt.regs->uvlo_reg.mask,
+			   val << dlpt.regs->uvlo_reg.shift);
+	pr_info("[dlpt] UVLO_VOLT_LEVEL = %d, RG_UVLO_VTHL = 0x%x\n"
+		, uvlo_level, val);
 }
 
 static void dlpt_parse_dt(struct platform_device *pdev)
 {
 	struct device_node *np;
 	int uvlo_level;
-	int vbb_uvlo_level = 0;
 	int ret;
 
 	/* get power_path_support */
@@ -592,13 +500,6 @@ static void dlpt_parse_dt(struct platform_device *pdev)
 		if (ret)
 			uvlo_level = POWER_UVLO_VOLT_LEVEL;
 		pmic_uvlo_init(uvlo_level);
-
-		/* get vbb-uvlo-level */
-		ret = of_property_read_u32(np, "vbb-uvlo-level", &vbb_uvlo_level);
-		if (ret == 0) {
-			pmic_vbb_uvlo_init(vbb_uvlo_level);
-		} else
-			pr_info("[dlpt] Invalid vbb-uvlo-level (%d)\n", vbb_uvlo_level);
 	}
 	dev_notice(&pdev->dev, "power_path_support:%d isense_support:%d\n"
 		   , dlpt.is_power_path_supported, dlpt.is_isense_supported);
@@ -606,17 +507,13 @@ static void dlpt_parse_dt(struct platform_device *pdev)
 
 static int dlpt_probe(struct platform_device *pdev)
 {
-	struct mt6397_chip *chip;
+	struct mt6397_chip *chip = dev_get_drvdata(pdev->dev.parent);
 	int ret;
 
-	dlpt.regmap = dev_get_regmap(pdev->dev.parent, NULL);
+	dlpt.regmap = chip->regmap;
 	if (!dlpt.regmap) {
-		chip = dev_get_drvdata(pdev->dev.parent);
-		if (!chip || !chip->regmap) {
-			dev_notice(&pdev->dev, "%s: invalid regmap.\n", __func__);
-			return -ENODEV;
-		}
-		dlpt.regmap = chip->regmap;
+		dev_notice(&pdev->dev, "%s: invalid regmap.\n", __func__);
+		return -EINVAL;
 	}
 	dlpt.regs = of_device_get_match_data(&pdev->dev);
 	dlpt_parse_dt(pdev);
@@ -629,27 +526,14 @@ static int dlpt_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused dlpt_suspend(struct device *d)
-{
-	if (!mutex_trylock(&dlpt.notify_lock))
-		return -EAGAIN;
-	dlpt.suspend_flag = true;
-	mutex_unlock(&dlpt.notify_lock);
-	return 0;
-}
-
 static int __maybe_unused dlpt_resume(struct device *d)
 {
-	mutex_lock(&dlpt.notify_lock);
-	dlpt.suspend_flag = false;
-	mutex_unlock(&dlpt.notify_lock);
 	update_dlpt_imix_r();
-	wake_up_interruptible(&dlpt.notify_waiter);
 	return 0;
 }
 
 static SIMPLE_DEV_PM_OPS(dlpt_pm_ops,
-			 dlpt_suspend,
+			 NULL,
 			 dlpt_resume);
 
 static const struct of_device_id dynamic_loading_throttling_of_match[] = {
@@ -657,14 +541,8 @@ static const struct of_device_id dynamic_loading_throttling_of_match[] = {
 		.compatible = "mediatek,mt6357-dynamic_loading_throttling",
 		.data = &mt6357_dlpt_regs,
 	}, {
-		.compatible = "mediatek,mt6358-dynamic_loading_throttling",
-		.data = &mt6358_dlpt_regs,
-	}, {
-		.compatible = "mediatek,mt6359p-dynamic_loading_throttling",
-		.data = &mt6359p_dlpt_regs,
-	}, {
-		.compatible = "mediatek,mt6363-dynamic_loading_throttling",
-		.data = &mt6363_dlpt_regs,
+		.compatible = "mediatek,mt6359-dynamic_loading_throttling",
+		.data = &mt6359_dlpt_regs,
 	}, {
 		/* sentinel */
 	}

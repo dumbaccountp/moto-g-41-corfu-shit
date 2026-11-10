@@ -63,8 +63,11 @@ int snd_soc_get_enum_double(struct snd_kcontrol *kcontrol,
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int val, item;
 	unsigned int reg_val;
+	int ret;
 
-	reg_val = snd_soc_component_read(component, e->reg);
+	ret = snd_soc_component_read(component, e->reg, &reg_val);
+	if (ret)
+		return ret;
 	val = (reg_val >> e->shift_l) & e->mask;
 	item = snd_soc_enum_val_to_item(e, val);
 	ucontrol->value.enumerated.item[0] = item;
@@ -133,7 +136,10 @@ static int snd_soc_read_signed(struct snd_soc_component *component,
 	int ret;
 	unsigned int val;
 
-	val = snd_soc_component_read(component, reg);
+	ret = snd_soc_component_read(component, reg, &val);
+	if (ret < 0)
+		return ret;
+
 	val = (val >> shift) & mask;
 
 	if (!sign_bit) {
@@ -308,7 +314,7 @@ int snd_soc_put_volsw(struct snd_kcontrol *kcontrol,
 	unsigned int sign_bit = mc->sign_bit;
 	unsigned int mask = (1 << fls(max)) - 1;
 	unsigned int invert = mc->invert;
-	int err, ret;
+	int err;
 	bool type_2r = false;
 	unsigned int val2 = 0;
 	unsigned int val, val_mask;
@@ -316,27 +322,13 @@ int snd_soc_put_volsw(struct snd_kcontrol *kcontrol,
 	if (sign_bit)
 		mask = BIT(sign_bit + 1) - 1;
 
-	val = ucontrol->value.integer.value[0];
-	if (mc->platform_max && ((int)val + min) > mc->platform_max)
-		return -EINVAL;
-	if (val > max - min)
-		return -EINVAL;
-	if (val < 0)
-		return -EINVAL;
-	val = (val + min) & mask;
+	val = ((ucontrol->value.integer.value[0] + min) & mask);
 	if (invert)
 		val = max - val;
 	val_mask = mask << shift;
 	val = val << shift;
 	if (snd_soc_volsw_is_stereo(mc)) {
-		val2 = ucontrol->value.integer.value[1];
-		if (mc->platform_max && ((int)val2 + min) > mc->platform_max)
-			return -EINVAL;
-		if (val2 > max - min)
-			return -EINVAL;
-		if (val2 < 0)
-			return -EINVAL;
-		val2 = (val2 + min) & mask;
+		val2 = ((ucontrol->value.integer.value[1] + min) & mask);
 		if (invert)
 			val2 = max - val2;
 		if (reg == reg2) {
@@ -350,18 +342,12 @@ int snd_soc_put_volsw(struct snd_kcontrol *kcontrol,
 	err = snd_soc_component_update_bits(component, reg, val_mask, val);
 	if (err < 0)
 		return err;
-	ret = err;
 
-	if (type_2r) {
+	if (type_2r)
 		err = snd_soc_component_update_bits(component, reg2, val_mask,
-						    val2);
-		/* Don't discard any error code or drop change flag */
-		if (ret == 0 || err < 0) {
-			ret = err;
-		}
-	}
+			val2);
 
-	return ret;
+	return err;
 }
 EXPORT_SYMBOL_GPL(snd_soc_put_volsw);
 
@@ -389,12 +375,19 @@ int snd_soc_get_volsw_sx(struct snd_kcontrol *kcontrol,
 	int min = mc->min;
 	unsigned int mask = (1U << (fls(min + max) - 1)) - 1;
 	unsigned int val;
+	int ret;
 
-	val = snd_soc_component_read(component, reg);
+	ret = snd_soc_component_read(component, reg, &val);
+	if (ret < 0)
+		return ret;
+
 	ucontrol->value.integer.value[0] = ((val >> shift) - min) & mask;
 
 	if (snd_soc_volsw_is_stereo(mc)) {
-		val = snd_soc_component_read(component, reg2);
+		ret = snd_soc_component_read(component, reg2, &val);
+		if (ret < 0)
+			return ret;
+
 		val = ((val >> rshift) - min) & mask;
 		ucontrol->value.integer.value[1] = val;
 	}
@@ -429,15 +422,8 @@ int snd_soc_put_volsw_sx(struct snd_kcontrol *kcontrol,
 	int err = 0;
 	unsigned int val, val_mask, val2 = 0;
 
-	val = ucontrol->value.integer.value[0];
-	if (mc->platform_max && val > mc->platform_max)
-		return -EINVAL;
-	if (val > max)
-		return -EINVAL;
-	if (val < 0)
-		return -EINVAL;
 	val_mask = mask << shift;
-	val = (val + min) & mask;
+	val = (ucontrol->value.integer.value[0] + min) & mask;
 	val = val << shift;
 
 	err = snd_soc_component_update_bits(component, reg, val_mask, val);
@@ -445,15 +431,8 @@ int snd_soc_put_volsw_sx(struct snd_kcontrol *kcontrol,
 		return err;
 
 	if (snd_soc_volsw_is_stereo(mc)) {
-		val2 = ucontrol->value.integer.value[1];
-
-		if (mc->platform_max && val2 > mc->platform_max)
-			return -EINVAL;
-		if (val2 > max)
-			return -EINVAL;
-
 		val_mask = mask << rshift;
-		val2 = (val2 + min) & mask;
+		val2 = (ucontrol->value.integer.value[1] + min) & mask;
 		val2 = val2 << rshift;
 
 		err = snd_soc_component_update_bits(component, reg2, val_mask,
@@ -517,15 +496,7 @@ int snd_soc_put_volsw_range(struct snd_kcontrol *kcontrol,
 	unsigned int mask = (1 << fls(max)) - 1;
 	unsigned int invert = mc->invert;
 	unsigned int val, val_mask;
-	int err, ret, tmp;
-
-	tmp = ucontrol->value.integer.value[0];
-	if (tmp < 0)
-		return -EINVAL;
-	if (mc->platform_max && tmp > mc->platform_max)
-		return -EINVAL;
-	if (tmp > mc->max - mc->min)
-		return -EINVAL;
+	int ret;
 
 	if (invert)
 		val = (max - ucontrol->value.integer.value[0]) & mask;
@@ -534,20 +505,11 @@ int snd_soc_put_volsw_range(struct snd_kcontrol *kcontrol,
 	val_mask = mask << shift;
 	val = val << shift;
 
-	err = snd_soc_component_update_bits(component, reg, val_mask, val);
-	if (err < 0)
-		return err;
-	ret = err;
+	ret = snd_soc_component_update_bits(component, reg, val_mask, val);
+	if (ret < 0)
+		return ret;
 
 	if (snd_soc_volsw_is_stereo(mc)) {
-		tmp = ucontrol->value.integer.value[1];
-		if (tmp < 0)
-			return -EINVAL;
-		if (mc->platform_max && tmp > mc->platform_max)
-			return -EINVAL;
-		if (tmp > mc->max - mc->min)
-			return -EINVAL;
-
 		if (invert)
 			val = (max - ucontrol->value.integer.value[1]) & mask;
 		else
@@ -555,12 +517,8 @@ int snd_soc_put_volsw_range(struct snd_kcontrol *kcontrol,
 		val_mask = mask << shift;
 		val = val << shift;
 
-		err = snd_soc_component_update_bits(component, rreg, val_mask,
+		ret = snd_soc_component_update_bits(component, rreg, val_mask,
 			val);
-		/* Don't discard any error code or drop change flag */
-		if (ret == 0 || err < 0) {
-			ret = err;
-		}
 	}
 
 	return ret;
@@ -590,8 +548,12 @@ int snd_soc_get_volsw_range(struct snd_kcontrol *kcontrol,
 	unsigned int mask = (1 << fls(max)) - 1;
 	unsigned int invert = mc->invert;
 	unsigned int val;
+	int ret;
 
-	val = snd_soc_component_read(component, reg);
+	ret = snd_soc_component_read(component, reg, &val);
+	if (ret)
+		return ret;
+
 	ucontrol->value.integer.value[0] = (val >> shift) & mask;
 	if (invert)
 		ucontrol->value.integer.value[0] =
@@ -601,7 +563,10 @@ int snd_soc_get_volsw_range(struct snd_kcontrol *kcontrol,
 			ucontrol->value.integer.value[0] - min;
 
 	if (snd_soc_volsw_is_stereo(mc)) {
-		val = snd_soc_component_read(component, rreg);
+		ret = snd_soc_component_read(component, rreg, &val);
+		if (ret)
+			return ret;
+
 		ucontrol->value.integer.value[1] = (val >> shift) & mask;
 		if (invert)
 			ucontrol->value.integer.value[1] =
@@ -627,16 +592,23 @@ EXPORT_SYMBOL_GPL(snd_soc_get_volsw_range);
 int snd_soc_limit_volume(struct snd_soc_card *card,
 	const char *name, int max)
 {
+	struct snd_card *snd_card = card->snd_card;
 	struct snd_kcontrol *kctl;
 	struct soc_mixer_control *mc;
+	int found = 0;
 	int ret = -EINVAL;
 
 	/* Sanity check for name and max */
 	if (unlikely(!name || max <= 0))
 		return -EINVAL;
 
-	kctl = snd_soc_card_get_kcontrol(card, name);
-	if (kctl) {
+	list_for_each_entry(kctl, &snd_card->controls, list) {
+		if (!strncmp(kctl->id.name, name, sizeof(kctl->id.name))) {
+			found = 1;
+			break;
+		}
+	}
+	if (found) {
 		mc = (struct soc_mixer_control *)kctl->private_value;
 		if (max <= mc->max) {
 			mc->platform_max = max;
@@ -868,9 +840,12 @@ int snd_soc_get_xr_sx(struct snd_kcontrol *kcontrol,
 	long val = 0;
 	unsigned int regval;
 	unsigned int i;
+	int ret;
 
 	for (i = 0; i < regcount; i++) {
-		regval = snd_soc_component_read(component, regbase+i);
+		ret = snd_soc_component_read(component, regbase+i, &regval);
+		if (ret)
+			return ret;
 		val |= (regval & regwmask) << (regwshift*(regcount-i-1));
 	}
 	val &= mask;
@@ -914,8 +889,6 @@ int snd_soc_put_xr_sx(struct snd_kcontrol *kcontrol,
 	unsigned int i, regval, regmask;
 	int err;
 
-	if (val < mc->min || val > mc->max)
-		return -EINVAL;
 	if (invert)
 		val = max - val;
 	val &= mask;
@@ -952,8 +925,12 @@ int snd_soc_get_strobe(struct snd_kcontrol *kcontrol,
 	unsigned int mask = 1 << shift;
 	unsigned int invert = mc->invert != 0;
 	unsigned int val;
+	int ret;
 
-	val = snd_soc_component_read(component, reg);
+	ret = snd_soc_component_read(component, reg, &val);
+	if (ret)
+		return ret;
+
 	val &= mask;
 
 	if (shift != 0 && val != 0)

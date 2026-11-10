@@ -1,22 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Goodix Touchscreen Driver
- * Core layer of touchdriver architecture.
- *
- * Copyright (C) 2019 - 2020 Goodix, Inc.
- * Authors: Wang Yafei <wangyafei@goodix.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be a reference
- * to you, when you are integrating the GOODiX's CTP IC into your system,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
+ * Copyright (C) 2016 MediaTek Inc.
  */
+
 #ifndef _GOODIX_TS_CORE_H_
 #define _GOODIX_TS_CORE_H_
 
@@ -41,9 +27,12 @@
 #include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 #endif
-
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-#include "mtk_disp_notify.h"
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+#endif
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
 #endif
 
 #define GOODIX_FLASH_CONFIG_WITH_ISP	1
@@ -129,6 +118,8 @@ struct gt9896s_ts_board_data {
 	/* For MTK Internal Touch End */
 
 	unsigned int swap_axis;
+	unsigned int lcm_max_x;
+	unsigned int lcm_max_y;
 	unsigned int panel_max_x;
 	unsigned int panel_max_y;
 	unsigned int panel_max_w; /*major and minor*/
@@ -137,7 +128,6 @@ struct gt9896s_ts_board_data {
 	unsigned int panel_key_map[GOODIX_MAX_TP_KEY];
 	unsigned int x2x;
 	unsigned int y2y;
-	unsigned int fake_status;
 	bool pen_enable;
 	unsigned int tp_key_num;
 	/*add end*/
@@ -467,8 +457,10 @@ struct gt9896s_ts_core {
 	struct notifier_block ts_notifier;
 	struct gt9896s_ts_esd ts_esd;
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	struct notifier_block disp_notifier;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	struct early_suspend early_suspend;
 #endif
 };
 
@@ -760,31 +752,13 @@ int gt9896s_ts_fb_notifier_callback(struct notifier_block *self,
 void gt9896s_msg_printf(const char *fmt, ...);
 
 int gt9896s_do_fw_update(int mode);
-#if 0
-static int gt9896s_ts_remove(struct platform_device *pdev);
-#endif
+
+int gt9896s_ts_remove(struct platform_device *pdev);
+
 int gt9896s_start_later_init(struct gt9896s_ts_core *ts_core);
 
 void gt9896s_ts_dev_release(void);
 
 int gt9896s_ts_core_init(void);
-
-void gt9896s_ts_report_finger(struct input_dev *dev,
-		struct gt9896s_touch_data *touch_data);
-
-#if (IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI) && IS_ENABLED(CONFIG_TOUCHSCREEN_MTK_TUI_COMMON_API))
-extern void register_tpd_tui_request(int (*enter_func)(void), int (*exit_func)(void));
-extern int gt9896s_tpd_enter_tui(void);
-extern int gt9896s_tpd_exit_tui(void);
-#endif
-
-int gt9896s_fwu_module_init(void *data);
-
-#if IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI)
-extern atomic_t gt9896s_tui_flag;
-extern struct gt9896s_ts_core *ts_core_for_tui;
-extern void mt_spi_enable_master_clk(struct spi_device *spidev);
-extern void mt_spi_disable_master_clk(struct spi_device *spidev);
-#endif
 
 #endif

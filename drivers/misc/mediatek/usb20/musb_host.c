@@ -12,16 +12,12 @@
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/usb/ch9.h>
-#include <linux/time.h>
+
 #include <linux/dma-mapping.h>
 
 #include "musb_core.h"
 #include "musb_host.h"
 #include "musb_qmu.h"
-#include "musb_trace.h"
-
-int musb_urb_dequeue_udelay = 300;
-module_param(musb_urb_dequeue_udelay, int, 0644);
 
 /* MUSB HOST status 22-mar-2006
  *
@@ -383,18 +379,18 @@ void wait_tx_done(u8 epnum, unsigned int timeout_ns)
 	void __iomem *mbase = mtk_musb->mregs;
 	int offset = MUSB_EP_OFFSET(epnum,
 			MUSB_TXCSR);
-	struct timespec64 tv_before, tv_after;
-	int diff_ns = 0;
+	struct timeval tv_before, tv_after;
+	u64 diff_ns = 0;
 
 	musb_ep_select(mbase, epnum);
 
 	txcsr = musb_readw(mbase, offset);
-	ktime_get_ts64(&tv_before);
+	do_gettimeofday(&tv_before);
 	while ((txcsr & (MUSB_TXCSR_FIFONOTEMPTY | MUSB_TXCSR_TXPKTRDY))
 			&& (diff_ns < timeout_ns)) {
 		txcsr = musb_readw(mbase, offset);
-		ktime_get_ts64(&tv_after);
-		diff_ns = GET_TIME_DIFF_NS(tv_after, tv_before);
+		do_gettimeofday(&tv_after);
+		diff_ns = timeval_to_ns(&tv_after) - timeval_to_ns(&tv_before);
 	}
 	if (diff_ns >= timeout_ns)
 		DBG(0, "ERROR !!!, packet still in FIFO, CSR %04x\n", txcsr);
@@ -447,7 +443,7 @@ static inline void musb_h_tx_start(struct musb_hw_ep *ep)
 
 }
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 void musb_ep_set_qh(struct musb_hw_ep *ep, int is_in, struct musb_qh *qh)
 #else
 static void musb_ep_set_qh(struct musb_hw_ep *ep, int is_in, struct musb_qh *qh)
@@ -459,7 +455,7 @@ static void musb_ep_set_qh(struct musb_hw_ep *ep, int is_in, struct musb_qh *qh)
 		ep->out_qh = qh;
 }
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 struct musb_qh *musb_ep_get_qh(struct musb_hw_ep *ep, int is_in)
 #else
 static struct musb_qh *musb_ep_get_qh(struct musb_hw_ep *ep, int is_in)
@@ -596,7 +592,6 @@ __releases(musb->lock) __acquires(musb->lock)
 
 	usb_hcd_unlink_urb_from_ep(musb_to_hcd(musb), urb);
 	spin_unlock(&musb->lock);
-	trace_musb_host_urb_giveback(urb);
 	usb_hcd_giveback_urb(musb_to_hcd(musb), urb, status);
 	spin_lock(&musb->lock);
 }
@@ -681,7 +676,7 @@ static inline void
  *
  * Context: caller owns controller lock, IRQs are blocked
  */
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 void musb_advance_schedule(struct musb *musb
 	, struct urb *urb, struct musb_hw_ep *hw_ep, int is_in)
 #else
@@ -707,7 +702,7 @@ static void musb_advance_schedule
 			hw_ep->epnum,
 			qh, qh->type,
 			is_in, list_empty(&qh->hep->urb_list),
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 				qh->is_use_qmu);
 #else
 				0);
@@ -784,7 +779,7 @@ check_recycle_qh:
 				qh->type != USB_ENDPOINT_XFER_CONTROL)
 			musb_host_free_ep_fifo(musb, qh, is_in);
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 		if (qh->is_use_qmu)
 			mtk_disable_q(musb, hw_ep->epnum, is_in);
 #endif
@@ -819,7 +814,7 @@ check_recycle_qh:
 	if (qh != NULL && qh->is_ready) {
 		DBG(3, "[MUSB]... next ep%d %cX urb %p\n",
 		    hw_ep->epnum, is_in ? 'R' : 'T', next_urb(qh));
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 		if (qh->is_use_qmu && !mtk_host_qmu_concurrent) {
 			musb_ep_set_qh(hw_ep, is_in, qh);
 			mtk_kick_CmdQ(musb, is_in ? 1:0, qh, next_urb(qh));
@@ -1657,7 +1652,7 @@ static bool musb_h_ep0_continue(struct musb *musb, u16 len, struct urb *urb)
 		DBG(4, "start OUT-DATA\n");
 		musb->ep0_stage = MUSB_EP0_OUT;
 		more = true;
-		fallthrough;
+		/* FALLTHROUGH */
 	case MUSB_EP0_OUT:
 		fifo_count = min_t(size_t, qh->maxpacket,
 					urb->transfer_buffer_length -
@@ -1841,7 +1836,7 @@ void musb_host_tx(struct musb *musb, u8 epnum)
 	struct dma_channel *dma;
 	bool transfer_pending = false;
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	if (qh && qh->is_use_qmu)
 		return;
 #endif
@@ -1987,11 +1982,11 @@ void musb_host_tx(struct musb *musb, u8 epnum)
 		 * FIFO mode too...
 		 */
 		{
-			struct timespec64 tv_before, tv_after;
+			struct timeval tv_before, tv_after;
 			int timeout = 0;
-			int diff_ns;
+			u64 diff_ns;
 
-			ktime_get_ts64(&tv_before);
+			do_gettimeofday(&tv_before);
 			while (1) {
 				if (tx_csr & (MUSB_TXCSR_FIFONOTEMPTY |
 							  MUSB_TXCSR_TXPKTRDY))
@@ -1999,9 +1994,10 @@ void musb_host_tx(struct musb *musb, u8 epnum)
 				else
 					break;
 
-				ktime_get_ts64(&tv_after);
+				do_gettimeofday(&tv_after);
 
-				diff_ns = GET_TIME_DIFF_NS(tv_after, tv_before);
+				diff_ns = timeval_to_ns(&tv_after) -
+					timeval_to_ns(&tv_before);
 				/* 5 ms for timeout */
 				if (diff_ns >= 5000000) {
 					timeout = 1;
@@ -2165,7 +2161,7 @@ void musb_host_rx(struct musb *musb, u8 epnum)
 	struct dma_channel *dma;
 	static bool use_sg;
 	unsigned int sg_flags = SG_MITER_ATOMIC | SG_MITER_TO_SG;
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	if (qh && qh->is_use_qmu)
 		return;
 #endif
@@ -2574,7 +2570,7 @@ finish:
 		musb_advance_schedule(musb, urb, hw_ep, USB_DIR_IN);
 	}
 }
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 /*
  *	X:	isoc_ep_end_idx
 	Y:	MAX_QMU_EP
@@ -2695,7 +2691,7 @@ static int musb_schedule(struct musb *musb, struct musb_qh *qh, int is_in)
 		goto success;
 	}
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	{
 		int group_type;
 
@@ -2766,7 +2762,7 @@ success:
 				pr_debug("<ratelimit> QH create, 1st transfer\n");
 		}
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 		/* downgrade to non-qmu
 		 * if no specific ep grabbed
 		 * when isoc_ep_gpd_count is set
@@ -2824,7 +2820,7 @@ static int
 	 * except for the first urb queued after a config change.
 	 */
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	if (mtk_host_qmu_concurrent && qh && qh->is_use_qmu && (ret == 0)) {
 		mtk_kick_CmdQ(musb,
 			(epd->bEndpointAddress & USB_ENDPOINT_DIR_MASK)
@@ -2852,10 +2848,11 @@ static int
 		return -ENOMEM;
 	}
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	if (urb->dev->devnum)
 		musb_host_active_dev_add((unsigned int)urb->dev->devnum);
 #endif
+
 
 	DBG(4, "kzalloc a qh %p\n", qh);
 	qh->hep = hep;
@@ -2916,7 +2913,7 @@ static int
 			interval = max_t(u8, epd->bInterval, 1);
 			break;
 		}
-		fallthrough;
+		/* FALLTHROUGH */
 	case USB_ENDPOINT_XFER_ISOC:
 		/* ISO always uses logarithmic encoding */
 		interval = min_t(u8, epd->bInterval, 16);
@@ -2972,7 +2969,7 @@ static int
 		qh = NULL;
 		ret = 0;
 	} else {
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 		if ((!usb_pipecontrol(urb->pipe))
 			&& ((usb_pipetype(urb->pipe) + 1)
 			& mtk_host_qmu_pipe_msk))
@@ -3087,7 +3084,7 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 	int ret, pos;
 	char info[256];
 
-	udelay(musb_urb_dequeue_udelay);
+
 	spin_lock_irqsave(&musb->lock, flags);
 	ret = usb_hcd_check_unlink_urb(hcd, urb, status);
 	if (ret) {
@@ -3117,9 +3114,12 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 			DBG(0, "ret<%d>\n", ret);
 	}
 
-	DBG_LIMIT(5, "%s", info);
+	if (strstr(current->comm, "usb_call"))
+		DBG_LIMIT(5, "%s", info);
+	else
+		DBG(0, "%s\n", info);
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	/* abort HW transaction on this ep */
 	if (qh->is_use_qmu)
 		mtk_disable_q(musb, qh->hw_ep->epnum, is_in);
@@ -3161,7 +3161,7 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 		 * and its URB list has emptied, recycle this qh.
 		 */
 		if (ready && list_empty(&qh->hep->urb_list)) {
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 			if (qh->is_use_qmu && mtk_host_qmu_concurrent) {
 				DBG(0, "qmu with concurrent, exit\n");
 				goto done;
@@ -3172,7 +3172,7 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 #endif
 			if (qh->type != USB_ENDPOINT_XFER_CONTROL) {
 				DBG(0, "why here, this is ring case?\n");
-				dump_stack();
+				musb_bug();
 			}
 
 			qh->hep->hcpriv = NULL;
@@ -3181,7 +3181,7 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 			kfree(qh);
 		}
 	} else {
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 		/* qmu non-concurrent case, stop HW */
 		if (qh->is_use_qmu && !mtk_host_qmu_concurrent)
 			mtk_disable_q(musb, qh->hw_ep->epnum, is_in);
@@ -3249,7 +3249,7 @@ static void musb_h_disable(struct usb_hcd *hcd, struct usb_host_endpoint *hep)
 				qh, is_in, qh->hw_ep->epnum, hep);
 	}
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	/* abort HW transaction on this ep */
 	if (qh->is_use_qmu)
 		mtk_disable_q(musb, qh->hw_ep->epnum, is_in);
@@ -3358,11 +3358,6 @@ static int musb_bus_suspend(struct usb_hcd *hcd)
 {
 	struct musb *musb = hcd_to_musb(hcd);
 	u8 devctl;
-	int ret;
-
-	ret = musb_port_suspend(musb, true);
-	if (ret)
-		return ret;
 
 	if (!is_host_active(musb))
 		return 0;
@@ -3401,10 +3396,8 @@ static int musb_bus_resume(struct usb_hcd *hcd)
 {
 	struct musb *musb = hcd_to_musb(hcd);
 
-	if (!is_host_active(musb))
-		return 0;
-
-	usb_hal_dpidle_request(USB_DPIDLE_FORBIDDEN);
+	if (is_host_active(musb))
+		usb_hal_dpidle_request(USB_DPIDLE_FORBIDDEN);
 
 	/* resuming child port does the work */
 	return 0;
@@ -3414,7 +3407,7 @@ const struct hc_driver musb_hc_driver = {
 	.description = "musb-hcd",
 	.product_desc = "MUSB HDRC host driver",
 	.hcd_priv_size = sizeof(struct musb),
-	.flags = HCD_USB2 | HCD_DMA | HCD_MEMORY,
+	.flags = HCD_USB2 | HCD_MEMORY,
 
 	/* not using irq handler or reset hooks from usbcore, since
 	 * those must be shared with peripheral code for OTG configs

@@ -71,6 +71,7 @@ static unsigned int tx_start = 10;
 static unsigned int tx_stop = 5;
 
 struct ntb_netdev {
+	struct list_head list;
 	struct pci_dev *pdev;
 	struct net_device *ndev;
 	struct ntb_transport_qp *qp;
@@ -79,6 +80,8 @@ struct ntb_netdev {
 
 #define	NTB_TX_TIMEOUT_MS	1000
 #define	NTB_RXQ_SIZE		100
+
+static LIST_HEAD(dev_list);
 
 static void ntb_netdev_event_handler(void *data, int link_is_up)
 {
@@ -137,7 +140,7 @@ static void ntb_netdev_rx_handler(struct ntb_transport_qp *qp, void *qp_data,
 enqueue_again:
 	rc = ntb_transport_rx_enqueue(qp, skb, skb->data, ndev->mtu + ETH_HLEN);
 	if (rc) {
-		dev_kfree_skb_any(skb);
+		dev_kfree_skb(skb);
 		ndev->stats.rx_errors++;
 		ndev->stats.rx_fifo_errors++;
 	}
@@ -192,7 +195,7 @@ static void ntb_netdev_tx_handler(struct ntb_transport_qp *qp, void *qp_data,
 		ndev->stats.tx_aborted_errors++;
 	}
 
-	dev_kfree_skb_any(skb);
+	dev_kfree_skb(skb);
 
 	if (ntb_transport_tx_free_entry(dev->qp) >= tx_start) {
 		/* Make sure anybody stopping the queue after this sees the new
@@ -449,7 +452,7 @@ static int ntb_netdev_probe(struct device *client_dev)
 	if (rc)
 		goto err1;
 
-	dev_set_drvdata(client_dev, ndev);
+	list_add(&dev->list, &dev_list);
 	dev_info(&pdev->dev, "%s created\n", ndev->name);
 	return 0;
 
@@ -462,8 +465,27 @@ err:
 
 static void ntb_netdev_remove(struct device *client_dev)
 {
-	struct net_device *ndev = dev_get_drvdata(client_dev);
-	struct ntb_netdev *dev = netdev_priv(ndev);
+	struct ntb_dev *ntb;
+	struct net_device *ndev;
+	struct pci_dev *pdev;
+	struct ntb_netdev *dev;
+	bool found = false;
+
+	ntb = dev_ntb(client_dev->parent);
+	pdev = ntb->pdev;
+
+	list_for_each_entry(dev, &dev_list, list) {
+		if (dev->pdev == pdev) {
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+		return;
+
+	list_del(&dev->list);
+
+	ndev = dev->ndev;
 
 	unregister_netdev(ndev);
 	ntb_transport_free_queue(dev->qp);
@@ -484,14 +506,7 @@ static int __init ntb_netdev_init_module(void)
 	rc = ntb_transport_register_client_dev(KBUILD_MODNAME);
 	if (rc)
 		return rc;
-
-	rc = ntb_transport_register_client(&ntb_netdev_client);
-	if (rc) {
-		ntb_transport_unregister_client_dev(KBUILD_MODNAME);
-		return rc;
-	}
-
-	return 0;
+	return ntb_transport_register_client(&ntb_netdev_client);
 }
 module_init(ntb_netdev_init_module);
 

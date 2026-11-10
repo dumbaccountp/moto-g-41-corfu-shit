@@ -5,9 +5,7 @@
 
 #include "imgsensor_common.h"
 #include "imgsensor_i2c.h"
-#include "kd_imgsensor_api.h"
 #include <linux/ratelimit.h>
-#include <linux/thermal.h>
 
 struct IMGSENSOR_I2C gi2c;
 #ifdef SENSOR_PARALLEISM
@@ -89,37 +87,10 @@ static const struct of_device_id gof_device_id_7[] = {
 
 #endif
 
-static int imgsensor_get_temp(void *data, int *temperature)
-{
-	u32 ret;
-	u8 valid;
-	s32 temp;
-
-	ret = Get_Camera_Temperature(
-		(enum CAMERA_DUAL_CAMERA_SENSOR_ENUM)data,
-		&valid, &temp);
-
-	if (ret != IMGSENSOR_RETURN_SUCCESS ||
-		!(valid & SENSOR_TEMPERATURE_VALID)) {
-		*temperature = THERMAL_TEMP_INVALID;
-		return 0;
-	}
-
-	*temperature = temp * 1000;
-
-	return 0;
-}
-
-static const struct thermal_zone_of_device_ops imgsensor_tz_ops = {
-	.get_temp = imgsensor_get_temp,
-};
-
 static int imgsensor_i2c_probe_0(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_0].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_MAIN_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 
@@ -127,8 +98,6 @@ static int imgsensor_i2c_probe_1(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_1].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_SUB_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 
@@ -136,8 +105,6 @@ static int imgsensor_i2c_probe_2(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_2].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_MAIN_2_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 
@@ -146,8 +113,6 @@ static int imgsensor_i2c_probe_3(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_3].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_SUB_2_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 #endif
@@ -157,8 +122,6 @@ static int imgsensor_i2c_probe_4(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_4].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_MAIN_3_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 #endif
@@ -168,8 +131,6 @@ static int imgsensor_i2c_probe_5(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_5].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_SUB_3_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 #endif
@@ -179,8 +140,6 @@ static int imgsensor_i2c_probe_6(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_6].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_MAIN_4_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 #endif
@@ -190,8 +149,6 @@ static int imgsensor_i2c_probe_7(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	gi2c.inst[IMGSENSOR_I2C_DEV_7].pi2c_client = client;
-	devm_thermal_zone_of_sensor_register(&client->dev, 0,
-		(void *)DUAL_CAMERA_SUB_4_SENSOR, &imgsensor_tz_ops);
 	return 0;
 }
 #endif
@@ -335,7 +292,8 @@ enum IMGSENSOR_RETURN imgsensor_i2c_init(
 		enum IMGSENSOR_I2C_DEV device)
 {
 	if (!pi2c_cfg ||
-			device >= IMGSENSOR_I2C_DEV_MAX_NUM)
+			device >= IMGSENSOR_I2C_DEV_MAX_NUM ||
+			device < IMGSENSOR_I2C_DEV_0)
 		return IMGSENSOR_RETURN_ERROR;
 
 	pi2c_cfg->pinst       = &gi2c.inst[device];
@@ -391,7 +349,7 @@ enum IMGSENSOR_RETURN imgsensor_i2c_read(
 	int i2c_ret = 0;
 
 	if (pinst->pi2c_client == NULL) {
-		pr_info("NOTICE: pi2c_client is NULL!\n");
+		PK_PR_ERR("pi2c_client is NULL!\n");
 		return IMGSENSOR_RETURN_ERROR;
 	}
 
@@ -419,7 +377,7 @@ enum IMGSENSOR_RETURN imgsensor_i2c_read(
 		static DEFINE_RATELIMIT_STATE(ratelimit, 1 * HZ, 30);
 
 		if (__ratelimit(&ratelimit))
-			pr_info("NOTICE: I2C read failed (%d)! speed(0=%d) (0x%x)\n",
+			pr_info("I2C read failed (%d)! speed(0=%d) (0x%x)\n",
 				i2c_ret, speed, *pwrite_data);
 		ret = IMGSENSOR_RETURN_ERROR;
 	}
@@ -446,7 +404,7 @@ enum IMGSENSOR_RETURN imgsensor_i2c_write(
 	int i2c_ret = 0;
 
 	if (pinst->pi2c_client == NULL) {
-		pr_info("NOTICE: slave_id %d pi2c_client is NULL!\n", id);
+		PK_PR_ERR("pi2c_client is NULL!\n");
 		return IMGSENSOR_RETURN_ERROR;
 	}
 
@@ -475,134 +433,12 @@ enum IMGSENSOR_RETURN imgsensor_i2c_write(
 		static DEFINE_RATELIMIT_STATE(ratelimit, 1 * HZ, 30);
 
 		if (__ratelimit(&ratelimit))
-			pr_info("NOTICE: I2C id %d write failed (%d)! speed(0=%d) (0x%x)\n",
-				id, i2c_ret, speed, *pwrite_data);
+			pr_info("I2C write failed (%d)! speed(0=%d) (0x%x)\n",
+				i2c_ret, speed, *pwrite_data);
 		ret = IMGSENSOR_RETURN_ERROR;
 	}
 
 	mutex_unlock(&pi2c_cfg->i2c_mutex);
-
-	return ret;
-}
-
-#define IMGSENSOR_DIAG 1
-#define IMGSENSOR_I2C_BUF_LEN 8192
-#define IMGSENSOR_BATCH_TH (IMGSENSOR_I2C_CMD_LENGTH_MAX)
-static u8 imgsensor_i2c_buf[IMGSENSOR_I2C_BUF_LEN];
-enum IMGSENSOR_RETURN imgsensor_i2c_write_ext(
-		struct IMGSENSOR_I2C_CFG *pi2c_cfg,
-		const u16 *pwrite_data,
-		u16 write_items,
-		u16 addr_type,
-		u16 data_type,
-		u16 id,
-		int speed)
-{
-	struct IMGSENSOR_I2C_INST *pinst = pi2c_cfg->pinst;
-	enum   IMGSENSOR_RETURN    ret   = IMGSENSOR_RETURN_SUCCESS;
-	struct i2c_msg     *pmsg  = pi2c_cfg->msg;
-	u8                 *pContStart = NULL;
-	u8                 *pdata = imgsensor_i2c_buf;
-	u8                 *pend  = &imgsensor_i2c_buf[IMGSENSOR_I2C_BUF_LEN-1];
-	int batch_cnt   = 0;
-	int item_cnt = 0;
-	int cont_len = 0;
-	int i2c_ret = 0;
-#if IMGSENSOR_DIAG
-	int merged_regs = 0;
-#endif
-
-	if (pinst->pi2c_client == NULL) {
-		pr_err("NOTICE: slave_id %d pi2c_client is NULL!\n", id);
-		return IMGSENSOR_RETURN_ERROR;
-	}
-
-	if (write_items % 2) {
-		pr_err("NOTICE: slave_id %d addr/data can't match!\n", id);
-		return IMGSENSOR_RETURN_ERROR;
-	}
-
-	if (addr_type > 2 || data_type > 2) {
-		pr_err("NOTICE: slave_id %d addr/data type unsupported(%d,%d)!\n",id,addr_type,data_type);
-		return IMGSENSOR_RETURN_ERROR;
-	}
-
-	mutex_lock(&pi2c_cfg->i2c_mutex);
-	while (item_cnt < write_items) {
-		pmsg->addr  = id >> 1;
-		pmsg->flags = 0;
-		pContStart = pdata;
-		/*Fill register start addresss*/
-		if (addr_type == 2) {
-			*pdata++ =  (pwrite_data[item_cnt]>>8) & 0xff ;
-			*pdata++  =  pwrite_data[item_cnt] & 0xff ;
-			cont_len += 2;
-		} else {
-			*pdata++  =  pwrite_data[item_cnt] & 0xff ;
-			cont_len += 1;
-		}
-		item_cnt++;
-
-		/*Fill register data*/
-		if (data_type == 2) {
-			*pdata++  =  (pwrite_data[item_cnt]>>8) & 0xff ;
-			*pdata++  =  pwrite_data[item_cnt] & 0xff ;
-			cont_len += 2;
-		} else {
-			*pdata++  =  pwrite_data[item_cnt] & 0xff ;
-			cont_len += 1;
-		}
-		item_cnt++;
-
-		/*Merge continous address writing into one I2C operation*/
-		while ((item_cnt < write_items-4) && (pwrite_data[item_cnt]-pwrite_data[item_cnt-2] == data_type) && (pdata < pend-data_type)) {
-			if (data_type == 2) {
-				*pdata++  =  (pwrite_data[item_cnt+1]>>8) & 0xff ;
-				*pdata++  =  pwrite_data[item_cnt+1] & 0xff ;
-				cont_len += 2;
-			} else {
-				*pdata++  =  pwrite_data[item_cnt+1] & 0xff ;
-				cont_len += 1;
-			}
-			item_cnt += 2;
-#if IMGSENSOR_DIAG
-			merged_regs ++;
-#endif
-		}
-		pmsg->len = cont_len;
-		pmsg->buf =pContStart ;
-		batch_cnt++;
-		pmsg++;
-		cont_len = 0;
-
-		if ((batch_cnt >= IMGSENSOR_BATCH_TH) || (pdata >= pend-data_type) || (item_cnt >= write_items)) {
-			pr_info("I2C: batch Writing(batch_cnt: %d, buf len:%d)", batch_cnt, pdata-imgsensor_i2c_buf);
-			i2c_ret = mtk_i2c_transfer(
-					pinst->pi2c_client->adapter,
-					pi2c_cfg->msg,
-					batch_cnt,
-					(pi2c_cfg->pinst->status.filter_msg)
-						? I2C_A_FILTER_MSG : 0,
-					((speed > 0) && (speed <= 1000))
-						? speed * 1000 : IMGSENSOR_I2C_SPEED * 1000);
-			if (i2c_ret != batch_cnt) {
-				pr_err("NOTICE: I2C id %d write failed (%d)! speed(0=%d) (0x%x)\n",
-					id, i2c_ret, speed, *pwrite_data);
-				ret = IMGSENSOR_RETURN_ERROR;
-				break;
-			}
-			pdata = imgsensor_i2c_buf;
-			pmsg  = pi2c_cfg->msg;
-			batch_cnt = 0;
-		}
-	}
-
-	mutex_unlock(&pi2c_cfg->i2c_mutex);
-
-#if IMGSENSOR_DIAG
-	pr_info("REGS merged:%d, %d bytes skipped, ratio:%d percent", merged_regs, (1+addr_type)*merged_regs,
-			100*(1+addr_type)*merged_regs/((addr_type+data_type+1)*write_items/2));
-#endif
 
 	return ret;
 }
@@ -618,15 +454,11 @@ void imgsensor_i2c_filter_msg(struct IMGSENSOR_I2C_CFG *pi2c_cfg, bool en)
 #include <linux/syscalls.h>
 
 
-
 struct IMGSENSOR_I2C_CFG *pgi2c_cfg_legacy[IMGSENSOR_SENSOR_IDX_MAX_NUM];
 pid_t tid_mapping[IMGSENSOR_SENSOR_IDX_MAX_NUM];
 #else
 struct IMGSENSOR_I2C_CFG *pgi2c_cfg_legacy;
-
 #endif
-
-
 
 void imgsensor_i2c_set_device(struct IMGSENSOR_I2C_CFG *pi2c_cfg)
 {
@@ -656,10 +488,9 @@ void imgsensor_i2c_set_device(struct IMGSENSOR_I2C_CFG *pi2c_cfg)
 	/* PK_DBG("set tid = %d i = %d pi2c_cfg %p\n", _tid, i, pi2c_cfg); */
 #else
 	pgi2c_cfg_legacy = pi2c_cfg;
-
 #endif
-
 }
+
 struct IMGSENSOR_I2C_CFG *imgsensor_i2c_get_device(void)
 {
 #ifdef SENSOR_PARALLEISM

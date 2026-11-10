@@ -1,6 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/of_graph.h>
@@ -100,27 +108,26 @@ void adv7533_dsi_power_off(struct adv7511 *adv)
 	regmap_write(adv->regmap_cec, 0x27, 0x0b);
 }
 
-enum drm_mode_status adv7533_mode_valid(struct adv7511 *adv,
-					const struct drm_display_mode *mode)
+void adv7533_mode_set(struct adv7511 *adv, struct drm_display_mode *mode)
 {
-	int lanes;
 	struct mipi_dsi_device *dsi = adv->dsi;
+	int lanes, ret;
+
+	if (adv->num_dsi_lanes != 4)
+		return;
 
 	if (mode->clock > 80000)
 		lanes = 4;
 	else
 		lanes = 3;
 
-	/*
-	 * TODO: add support for dynamic switching of lanes
-	 * by using the bridge pre_enable() op . Till then filter
-	 * out the modes which shall need different number of lanes
-	 * than what was configured in the device tree.
-	 */
-	if (lanes != dsi->lanes)
-		return MODE_BAD;
-
-	return MODE_OK;
+	if (lanes != dsi->lanes) {
+		mipi_dsi_detach(dsi);
+		dsi->lanes = lanes;
+		ret = mipi_dsi_attach(dsi);
+		if (ret)
+			dev_err(&dsi->dev, "failed to change host lanes\n");
+	}
 }
 
 int adv7533_patch_registers(struct adv7511 *adv)

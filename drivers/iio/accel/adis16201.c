@@ -1,8 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ADIS16201 Dual-Axis Digital Inclinometer and Accelerometer
  *
  * Copyright 2010 Analog Devices Inc.
+ *
+ * Licensed under the GPL-2 or later.
  */
 
 #include <linux/device.h>
@@ -70,7 +71,7 @@
 #define  ADIS16201_DIAG_STAT_FLASH_UPT_FAIL_BIT		2
 /* Power supply above 3.625 V */
 #define  ADIS16201_DIAG_STAT_POWER_HIGH_BIT		1
-/* Power supply below 2.975 V */
+/* Power supply below 3.15 V */
 #define  ADIS16201_DIAG_STAT_POWER_LOW_BIT		0
 
 /* System Command Register Definition */
@@ -230,13 +231,7 @@ static const char * const adis16201_status_error_msgs[] = {
 	[ADIS16201_DIAG_STAT_SPI_FAIL_BIT] = "SPI failure",
 	[ADIS16201_DIAG_STAT_FLASH_UPT_FAIL_BIT] = "Flash update failed",
 	[ADIS16201_DIAG_STAT_POWER_HIGH_BIT] = "Power supply above 3.625V",
-	[ADIS16201_DIAG_STAT_POWER_LOW_BIT] = "Power supply below 2.975V",
-};
-
-static const struct adis_timeout adis16201_timeouts = {
-	.reset_ms = ADIS16201_STARTUP_DELAY_MS,
-	.sw_reset_ms = ADIS16201_STARTUP_DELAY_MS,
-	.self_test_ms = ADIS16201_STARTUP_DELAY_MS,
+	[ADIS16201_DIAG_STAT_POWER_LOW_BIT] = "Power supply below 3.15V",
 };
 
 static const struct adis_data adis16201_data = {
@@ -246,9 +241,8 @@ static const struct adis_data adis16201_data = {
 	.diag_stat_reg = ADIS16201_DIAG_STAT_REG,
 
 	.self_test_mask = ADIS16201_MSC_CTRL_SELF_TEST_EN,
-	.self_test_reg = ADIS16201_MSC_CTRL_REG,
 	.self_test_no_autoclear = true,
-	.timeouts = &adis16201_timeouts,
+	.startup_delay = ADIS16201_STARTUP_DELAY_MS,
 
 	.status_error_msgs = adis16201_status_error_msgs,
 	.status_error_mask = BIT(ADIS16201_DIAG_STAT_SPI_FAIL_BIT) |
@@ -271,6 +265,7 @@ static int adis16201_probe(struct spi_device *spi)
 	spi_set_drvdata(spi, indio_dev);
 
 	indio_dev->name = spi->dev.driver->name;
+	indio_dev->dev.parent = &spi->dev;
 	indio_dev->info = &adis16201_info;
 
 	indio_dev->channels = adis16201_channels;
@@ -281,15 +276,34 @@ static int adis16201_probe(struct spi_device *spi)
 	if (ret)
 		return ret;
 
-	ret = devm_adis_setup_buffer_and_trigger(st, indio_dev, NULL);
+	ret = adis_setup_buffer_and_trigger(st, indio_dev, NULL);
 	if (ret)
 		return ret;
 
 	ret = adis_initial_startup(st);
 	if (ret)
-		return ret;
+		goto error_cleanup_buffer_trigger;
 
-	return devm_iio_device_register(&spi->dev, indio_dev);
+	ret = iio_device_register(indio_dev);
+	if (ret < 0)
+		goto error_cleanup_buffer_trigger;
+
+	return 0;
+
+error_cleanup_buffer_trigger:
+	adis_cleanup_buffer_and_trigger(st, indio_dev);
+	return ret;
+}
+
+static int adis16201_remove(struct spi_device *spi)
+{
+	struct iio_dev *indio_dev = spi_get_drvdata(spi);
+	struct adis *st = iio_priv(indio_dev);
+
+	iio_device_unregister(indio_dev);
+	adis_cleanup_buffer_and_trigger(st, indio_dev);
+
+	return 0;
 }
 
 static struct spi_driver adis16201_driver = {
@@ -297,6 +311,7 @@ static struct spi_driver adis16201_driver = {
 		.name = "adis16201",
 	},
 	.probe = adis16201_probe,
+	.remove = adis16201_remove,
 };
 module_spi_driver(adis16201_driver);
 
@@ -304,4 +319,3 @@ MODULE_AUTHOR("Barry Song <21cnbao@gmail.com>");
 MODULE_DESCRIPTION("Analog Devices ADIS16201 Dual-Axis Digital Inclinometer and Accelerometer");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("spi:adis16201");
-MODULE_IMPORT_NS(IIO_ADISLIB);

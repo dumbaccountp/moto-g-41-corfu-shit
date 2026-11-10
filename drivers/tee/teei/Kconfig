@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2019, MICROTRUST Incorporated
+# Copyright (c) 2015-2020, MICROTRUST Incorporated
 # All Rights Reserved.
 #
 # This program is free software; you can redistribute it and/or
@@ -11,9 +11,10 @@
 # GNU General Public License for more details.
 
 config MICROTRUST_TEE_SUPPORT
-	tristate "Enable Microtrust TEEI Support"
+	bool "Enable Microtrust TEEI Support"
 	select DMA_SHARED_BUFFER
 	select GENERIC_ALLOCATOR
+	select MTK_TEE_SANITY
 	default n
 	help
 	  Enables the support of Microtrust TEE drivers.
@@ -43,7 +44,7 @@ config MICROTRUST_TZ_DRIVER
 	  If unsure, say Y.
 
 config MICROTRUST_DYNAMIC_CORE
-	tristate "Microtrust Dynamic Core"
+	tristate "Microtrust TEEI Dynamic Core"
 	depends on MICROTRUST_TEE_SUPPORT
 	default y
 	help
@@ -54,7 +55,7 @@ config MICROTRUST_DYNAMIC_CORE
 	  If unsure, say Y.
 
 config MICROTRUST_TZ_DRIVER_MTK_BOOTPROF
-	tristate "Enable MTK bootprof to track boot progress of TEEI"
+	bool "Enable MTK bootprof to track boot progress of TEEI"
 	depends on MICROTRUST_TZ_DRIVER
 	depends on MTPROF
 	default y
@@ -75,7 +76,6 @@ config MICROTRUST_TZ_DRIVER_MTK_TRACING
 	  tz_driver. This feature is for tracking teei thread by MTK
 	  tracing mechanism.
 	  Say Y if you would like to enable this feature.
-
 
 config MICROTRUST_VFS_DRIVER
 	tristate "Microtrust Virtual File System Driver"
@@ -109,17 +109,6 @@ config MICROTRUST_KEYMASTER_DRIVER
 	  to communicate with keymaster trusted application.
 	  Say Y if you would like to enable the helper driver.
 	  If unsure, say Y.
-
-config MICROTRUST_TUI_DRIVER
-	bool "Enable Microtrust TUI Support"
-	depends on MICROTRUST_TEE_SUPPORT
-	default n
-	help
-	  Enables support of Microtrust TUI helper driver.
-	  This driver provides IOCTL interface for TUI manager to
-	  communicate with TUI server in secure world.
-	  Say Y if you would like to enable the helper driver.
-	  If unsure, say N.
 
 config MICROTRUST_DEBUG
 	bool "Enable Microtrust Debug Message"

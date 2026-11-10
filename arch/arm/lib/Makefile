@@ -37,6 +37,7 @@ else
 endif
 
 ifeq ($(CONFIG_ARCH_RPC),y)
+  lib-y				+= ecard.o io-acorn.o floppydma.o
   AFLAGS_delay-loop.o		+= -march=armv4
 endif
 

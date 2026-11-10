@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #include "inc/tcpci.h"
@@ -28,7 +28,7 @@
  * DPM flow delay reactions
  */
 
-#if CONFIG_USB_PD_UFP_FLOW_DELAY
+#ifdef CONFIG_USB_PD_UFP_FLOW_DELAY
 static uint8_t dpm_reaction_ufp_flow_delay(struct pd_port *pd_port)
 {
 	struct tcpc_device __maybe_unused *tcpc = pd_port->tcpc;
@@ -39,7 +39,7 @@ static uint8_t dpm_reaction_ufp_flow_delay(struct pd_port *pd_port)
 }
 #endif	/* CONFIG_USB_PD_UFP_FLOW_DELAY */
 
-#if CONFIG_USB_PD_DFP_FLOW_DELAY
+#ifdef CONFIG_USB_PD_DFP_FLOW_DELAY
 static uint8_t dpm_reaction_dfp_flow_delay(struct pd_port *pd_port)
 {
 	struct tcpc_device __maybe_unused *tcpc = pd_port->tcpc;
@@ -50,7 +50,7 @@ static uint8_t dpm_reaction_dfp_flow_delay(struct pd_port *pd_port)
 }
 #endif	/* CONFIG_USB_PD_DFP_FLOW_DELAY */
 
-#if CONFIG_USB_PD_VCONN_STABLE_DELAY
+#ifdef CONFIG_USB_PD_VCONN_STABLE_DELAY
 static uint8_t dpm_reaction_vconn_stable_delay(struct pd_port *pd_port)
 {
 	struct tcpc_device __maybe_unused *tcpc = pd_port->tcpc;
@@ -68,7 +68,7 @@ static uint8_t dpm_reaction_vconn_stable_delay(struct pd_port *pd_port)
  * DPM get cap reaction
  */
 
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 static uint8_t dpm_reaction_get_source_cap_ext(struct pd_port *pd_port)
 {
 	if (pd_port->power_role == PD_ROLE_SINK)
@@ -88,7 +88,7 @@ static uint8_t dpm_reaction_get_source_cap(struct pd_port *pd_port)
 	return TCP_DPM_EVT_GET_SOURCE_CAP;
 }
 
-static uint8_t dpm_reaction_attempt_get_flag(struct pd_port *pd_port)
+static uint8_t dpm_reaction_attemp_get_flag(struct pd_port *pd_port)
 {
 	return TCP_DPM_EVT_GET_SINK_CAP;
 }
@@ -97,7 +97,7 @@ static uint8_t dpm_reaction_attempt_get_flag(struct pd_port *pd_port)
  * DPM swap reaction
  */
 
-#if CONFIG_USB_PD_PR_SWAP
+#ifdef CONFIG_USB_PD_PR_SWAP
 static uint8_t dpm_reaction_request_pr_swap(struct pd_port *pd_port)
 {
 	uint32_t prefer_role =
@@ -110,7 +110,7 @@ static uint8_t dpm_reaction_request_pr_swap(struct pd_port *pd_port)
 		if (prefer_role == DPM_CAP_PR_CHECK_PREFER_SRC)
 			return TCP_DPM_EVT_PR_SWAP_AS_SRC;
 	} else {
-#if CONFIG_USB_PD_SRC_TRY_PR_SWAP_IF_BAD_PW
+#ifdef CONFIG_USB_PD_SRC_TRY_PR_SWAP_IF_BAD_PW
 		if (dpm_check_good_power(pd_port) == GOOD_PW_PARTNER)
 			return TCP_DPM_EVT_PR_SWAP_AS_SNK;
 #endif	/* CONFIG_USB_PD_SRC_TRY_PR_SWAP_IF_BAD_PW */
@@ -123,7 +123,7 @@ static uint8_t dpm_reaction_request_pr_swap(struct pd_port *pd_port)
 }
 #endif	/* CONFIG_USB_PD_PR_SWAP */
 
-#if CONFIG_USB_PD_DR_SWAP
+#ifdef CONFIG_USB_PD_DR_SWAP
 static uint8_t dpm_reaction_request_dr_swap(struct pd_port *pd_port)
 {
 	uint32_t prefer_role =
@@ -142,14 +142,14 @@ static uint8_t dpm_reaction_request_dr_swap(struct pd_port *pd_port)
 
 	return 0;
 }
-#endif	/* CONFIG_USB_PD_DR_SWAP */
+#endif	/* #ifdef CONFIG_USB_PD_DR_SWAP */
 
 
 /*
  * DPM DiscoverCable reaction
  */
 
-#if CONFIG_TCPC_VCONN_SUPPLY_MODE
+#ifdef CONFIG_TCPC_VCONN_SUPPLY_MODE
 static uint8_t dpm_reaction_dynamic_vconn(struct pd_port *pd_port)
 {
 	pd_dpm_dynamic_enable_vconn(pd_port);
@@ -157,7 +157,7 @@ static uint8_t dpm_reaction_dynamic_vconn(struct pd_port *pd_port)
 }
 #endif	/* CONFIG_TCPC_VCONN_SUPPLY_MODE */
 
-#if CONFIG_USB_PD_DISCOVER_CABLE_REQUEST_VCONN
+#ifdef CONFIG_USB_PD_DISCOVER_CABLE_REQUEST_VCONN
 static uint8_t dpm_reaction_request_vconn_source(struct pd_port *pd_port)
 {
 	bool return_vconn = true;
@@ -168,7 +168,7 @@ static uint8_t dpm_reaction_request_vconn_source(struct pd_port *pd_port)
 	if (pd_port->vconn_role)
 		return 0;
 
-#if CONFIG_TCPC_VCONN_SUPPLY_MODE
+#ifdef CONFIG_TCPC_VCONN_SUPPLY_MODE
 	if (pd_port->tcpc->tcpc_vconn_supply == TCPC_VCONN_SUPPLY_STARTUP)
 		return_vconn = false;
 #endif	/* CONFIG_TCPC_VCONN_SUPPLY_MODE */
@@ -183,10 +183,10 @@ static uint8_t dpm_reaction_request_vconn_source(struct pd_port *pd_port)
 }
 #endif	/* CONFIG_USB_PD_DISCOVER_CABLE_REQUEST_VCONN */
 
-#if CONFIG_USB_PD_DFP_READY_DISCOVER_ID
+#ifdef CONFIG_USB_PD_DFP_READY_DISCOVER_ID
 static uint8_t pd_dpm_reaction_discover_cable(struct pd_port *pd_port)
 {
-#if CONFIG_PD_DFP_RESET_CABLE
+#ifdef CONFIG_PD_DFP_RESET_CABLE
 	if (pd_is_reset_cable(pd_port))
 		return TCP_DPM_EVT_CABLE_SOFTRESET;
 #endif	/* CONFIG_PD_DFP_RESET_CABLE */
@@ -200,7 +200,7 @@ static uint8_t pd_dpm_reaction_discover_cable(struct pd_port *pd_port)
 }
 #endif	/* CONFIG_USB_PD_DFP_READY_DISCOVER_ID */
 
-#if CONFIG_USB_PD_DISCOVER_CABLE_RETURN_VCONN
+#ifdef CONFIG_USB_PD_DISCOVER_CABLE_RETURN_VCONN
 static uint8_t dpm_reaction_return_vconn_source(struct pd_port *pd_port)
 {
 	struct tcpc_device __maybe_unused *tcpc = pd_port->tcpc;
@@ -218,21 +218,21 @@ static uint8_t dpm_reaction_return_vconn_source(struct pd_port *pd_port)
  * DPM EnterMode reaction
  */
 
-#if CONFIG_USB_PD_ATTEMPT_DISCOVER_ID
+#ifdef CONFIG_USB_PD_ATTEMP_DISCOVER_ID
 static uint8_t dpm_reaction_discover_id(struct pd_port *pd_port)
 {
 	return TCP_DPM_EVT_DISCOVER_ID;
 }
-#endif	/* CONFIG_USB_PD_ATTEMPT_DISCOVER_ID */
+#endif	/* CONFIG_USB_PD_ATTEMP_DISCOVER_ID */
 
-#if CONFIG_USB_PD_ATTEMPT_DISCOVER_SVID
+#ifdef CONFIG_USB_PD_ATTEMP_DISCOVER_SVID
 static uint8_t dpm_reaction_discover_svid(struct pd_port *pd_port)
 {
 	return TCP_DPM_EVT_DISCOVER_SVIDS;
 }
-#endif	/* CONFIG_USB_PD_ATTEMPT_DISCOVER_SVID */
+#endif	/* CONFIG_USB_PD_ATTEMP_DISCOVER_SVID */
 
-#if CONFIG_USB_PD_MODE_OPERATION
+#ifdef CONFIG_USB_PD_MODE_OPERATION
 static uint8_t dpm_reaction_mode_operation(struct pd_port *pd_port)
 {
 	if (svdm_notify_pe_ready(pd_port))
@@ -246,9 +246,9 @@ static uint8_t dpm_reaction_mode_operation(struct pd_port *pd_port)
  * DPM Local/Remote Alert reaction
  */
 
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 
-#if CONFIG_USB_PD_DPM_AUTO_SEND_ALERT
+#ifdef CONFIG_USB_PD_DPM_AUTO_SEND_ALERT
 
 static uint8_t dpm_reaction_send_alert(struct pd_port *pd_port)
 {
@@ -272,7 +272,7 @@ static uint8_t dpm_reaction_send_alert(struct pd_port *pd_port)
 
 #endif	/* CONFIG_USB_PD_DPM_AUTO_SEND_ALERT */
 
-#if CONFIG_USB_PD_DPM_AUTO_GET_STATUS
+#ifdef CONFIG_USB_PD_DPM_AUTO_GET_STATUS
 
 const uint32_t c_get_status_alert_type = ADO_ALERT_OCP|
 	ADO_ALERT_OTP|ADO_ALERT_OVP|ADO_ALERT_OPER_CHANGED|
@@ -373,7 +373,7 @@ static inline uint8_t dpm_get_pd_connect_state(struct pd_port *pd_port)
 
 static inline void dpm_check_vconn_highv_prot(struct pd_port *pd_port)
 {
-#if CONFIG_USB_PD_VCONN_SAFE5V_ONLY
+#ifdef CONFIG_USB_PD_VCONN_SAFE5V_ONLY
 	struct tcpc_device *tcpc = pd_port->tcpc;
 	struct pe_data *pe_data = &pd_port->pe_data;
 	bool vconn_highv_prot = pd_port->request_v_new > 5000;
@@ -403,7 +403,7 @@ static uint8_t dpm_reaction_update_pe_ready(struct pd_port *pd_port)
 	dpm_check_vconn_highv_prot(pd_port);
 	pd_dpm_dynamic_disable_vconn(pd_port);
 
-#if CONFIG_USB_PD_REV30_COLLISION_AVOID
+#ifdef CONFIG_USB_PD_REV30_COLLISION_AVOID
 	pd_port->pe_data.pd_traffic_idle = true;
 	if (pd_check_rev30(pd_port) &&
 		(pd_port->power_role == PD_ROLE_SOURCE))
@@ -512,26 +512,26 @@ struct dpm_ready_reaction {
 
 static const struct dpm_ready_reaction dpm_reactions[] = {
 
-#if CONFIG_USB_PD_REV30
-#if CONFIG_USB_PD_DPM_AUTO_SEND_ALERT
+#ifdef CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_DPM_AUTO_SEND_ALERT
 	DECL_DPM_REACTION_PD30(
 		DPM_REACTION_CAP_ALWAYS,
 		dpm_reaction_send_alert),
 #endif	/* CONFIG_USB_PD_DPM_AUTO_SEND_ALERT */
-#if CONFIG_USB_PD_DPM_AUTO_GET_STATUS
+#ifdef CONFIG_USB_PD_DPM_AUTO_GET_STATUS
 	DECL_DPM_REACTION_PD30(
 		DPM_REACTION_CAP_ALWAYS,
 		dpm_reaction_handle_alert),
 #endif	/* CONFIG_USB_PD_DPM_AUTO_GET_STATUS */
 #endif	/* CONFIG_USB_PD_REV30 */
 
-#if CONFIG_USB_PD_DFP_FLOW_DELAY
+#ifdef CONFIG_USB_PD_DFP_FLOW_DELAY
 	DECL_DPM_REACTION_DFP(
 		DPM_REACTION_DFP_FLOW_DELAY,
 		dpm_reaction_dfp_flow_delay),
 #endif	/* CONFIG_USB_PD_DFP_FLOW_DELAY */
 
-#if CONFIG_USB_PD_UFP_FLOW_DELAY
+#ifdef CONFIG_USB_PD_UFP_FLOW_DELAY
 	DECL_DPM_REACTION_UFP(
 		DPM_REACTION_UFP_FLOW_DELAY,
 		dpm_reaction_ufp_flow_delay),
@@ -547,69 +547,69 @@ static const struct dpm_ready_reaction dpm_reactions[] = {
 
 	DECL_DPM_REACTION_LIMITED_RETRIES(
 		DPM_REACTION_ATTEMPT_GET_FLAG,
-		dpm_reaction_attempt_get_flag),
+		dpm_reaction_attemp_get_flag),
 
-#if CONFIG_USB_PD_REV30
+#ifdef CONFIG_USB_PD_REV30
 	DECL_DPM_REACTION_PD30_ONE_SHOT(
 		DPM_REACTION_GET_SOURCE_CAP_EXT,
 		dpm_reaction_get_source_cap_ext),
 #endif	/* CONFIG_USB_PD_REV30 */
 
-#if CONFIG_USB_PD_PR_SWAP
+#ifdef CONFIG_USB_PD_PR_SWAP
 	DECL_DPM_REACTION_CHECK_ONCE(
 		DPM_REACTION_REQUEST_PR_SWAP,
 		dpm_reaction_request_pr_swap),
 #endif	/* CONFIG_USB_PD_PR_SWAP */
 
-#if CONFIG_USB_PD_DR_SWAP
+#ifdef CONFIG_USB_PD_DR_SWAP
 	DECL_DPM_REACTION_CHECK_ONCE(
 		DPM_REACTION_REQUEST_DR_SWAP,
 		dpm_reaction_request_dr_swap),
 #endif	/* CONFIG_USB_PD_DR_SWAP */
 
-#if CONFIG_TCPC_VCONN_SUPPLY_MODE
+#ifdef CONFIG_TCPC_VCONN_SUPPLY_MODE
 	DECL_DPM_REACTION_DFP_PD30_CHECK_ONCE(
 		DPM_REACTION_DYNAMIC_VCONN,
 		dpm_reaction_dynamic_vconn),
 #endif	/* CONFIG_TCPC_VCONN_SUPPLY_MODE */
 
-#if CONFIG_USB_PD_DISCOVER_CABLE_REQUEST_VCONN
+#ifdef CONFIG_USB_PD_DISCOVER_CABLE_REQUEST_VCONN
 	DECL_DPM_REACTION_DFP_PD30_RUN_ONCE(
 		DPM_REACTION_REQUEST_VCONN_SRC,
 		dpm_reaction_request_vconn_source),
 #endif	/* CONFIG_USB_PD_DISCOVER_CABLE_REQUEST_VCONN */
 
-#if CONFIG_USB_PD_VCONN_STABLE_DELAY
+#ifdef CONFIG_USB_PD_VCONN_STABLE_DELAY
 	DECL_DPM_REACTION_DFP_PD30_CHECK_ONCE(
 		DPM_REACTION_VCONN_STABLE_DELAY,
 		dpm_reaction_vconn_stable_delay),
 #endif	/* CONFIG_USB_PD_VCONN_STABLE_DELAY */
 
-#if CONFIG_USB_PD_DFP_READY_DISCOVER_ID
+#ifdef CONFIG_USB_PD_DFP_READY_DISCOVER_ID
 	DECL_DPM_REACTION_DFP_PD30_CHECK_ONCE(
 		DPM_REACTION_DISCOVER_CABLE,
 		pd_dpm_reaction_discover_cable),
 #endif	/* CONFIG_USB_PD_DFP_READY_DISCOVER_ID */
 
-#if CONFIG_USB_PD_DISCOVER_CABLE_RETURN_VCONN
+#ifdef CONFIG_USB_PD_DISCOVER_CABLE_RETURN_VCONN
 	DECL_DPM_REACTION_DFP_PD30_RUN_ONCE(
 		DPM_REACTION_RETURN_VCONN_SRC,
 		dpm_reaction_return_vconn_source),
 #endif	/* CONFIG_USB_PD_DISCOVER_CABLE_RETURN_VCONN */
 
-#if CONFIG_USB_PD_ATTEMPT_DISCOVER_ID
+#ifdef CONFIG_USB_PD_ATTEMP_DISCOVER_ID
 	DECL_DPM_REACTION_DFP_PD30_LIMITED_RETRIES(
 		DPM_REACTION_DISCOVER_ID,
 		dpm_reaction_discover_id),
-#endif	/* CONFIG_USB_PD_ATTEMPT_DISCOVER_ID */
+#endif	/* CONFIG_USB_PD_ATTEMP_DISCOVER_ID */
 
-#if CONFIG_USB_PD_ATTEMPT_DISCOVER_SVID
+#ifdef CONFIG_USB_PD_ATTEMP_DISCOVER_SVID
 	DECL_DPM_REACTION_DFP_PD30_LIMITED_RETRIES(
 		DPM_REACTION_DISCOVER_SVID,
 		dpm_reaction_discover_svid),
-#endif	/* CONFIG_USB_PD_ATTEMPT_DISCOVER_SVID */
+#endif	/* CONFIG_USB_PD_ATTEMP_DISCOVER_SVID */
 
-#if CONFIG_USB_PD_MODE_OPERATION
+#ifdef CONFIG_USB_PD_MODE_OPERATION
 	DECL_DPM_REACTION_ALWAYS(
 		dpm_reaction_mode_operation),
 #endif	/* CONFIG_USB_PD_MODE_OPERATION */

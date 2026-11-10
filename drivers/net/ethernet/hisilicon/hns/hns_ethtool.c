@@ -1,6 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 
 #include <linux/etherdevice.h>
@@ -305,7 +309,7 @@ static int __lb_setup(struct net_device *ndev,
 		break;
 	case MAC_LOOP_PHY_NONE:
 		ret = hns_nic_config_phy_loopback(phy_dev, 0x0);
-		fallthrough;
+		/* fall through */
 	case MAC_LOOP_NONE:
 		if (!ret && h->dev->ops->set_loopback) {
 			if (priv->ae_handle->phy_if != PHY_INTERFACE_MODE_XGMII)
@@ -466,9 +470,9 @@ static int __lb_clean_rings(struct hns_nic_priv *priv,
 }
 
 /**
- * __lb_run_test -  run loopback test
- * @ndev: net device
- * @loop_mode: loopback mode
+ * nic_run_loopback_test -  run loopback test
+ * @nic_dev: net device
+ * @loopback_type: loopback type
  */
 static int __lb_run_test(struct net_device *ndev,
 			 enum hnae_loop loop_mode)
@@ -576,7 +580,7 @@ static int __lb_down(struct net_device *ndev, enum hnae_loop loop)
 
 /**
  * hns_nic_self_test - self test
- * @ndev: net device
+ * @dev: net device
  * @eth_test: test cmd
  * @data: test result
  */
@@ -628,7 +632,7 @@ static void hns_nic_self_test(struct net_device *ndev,
 		clear_bit(NIC_STATE_TESTING, &priv->state);
 
 		if (if_running)
-			(void)dev_open(ndev, NULL);
+			(void)dev_open(ndev);
 	}
 	/* Online tests aren't run; pass by default */
 
@@ -637,7 +641,7 @@ static void hns_nic_self_test(struct net_device *ndev,
 
 /**
  * hns_nic_get_drvinfo - get net driver info
- * @net_dev: net device
+ * @dev: net device
  * @drvinfo: driver info
  */
 static void hns_nic_get_drvinfo(struct net_device *net_dev,
@@ -662,7 +666,7 @@ static void hns_nic_get_drvinfo(struct net_device *net_dev,
 
 /**
  * hns_get_ringparam - get ring parameter
- * @net_dev: net device
+ * @dev: net device
  * @param: ethtool parameter
  */
 static void hns_get_ringparam(struct net_device *net_dev,
@@ -687,7 +691,7 @@ static void hns_get_ringparam(struct net_device *net_dev,
 
 /**
  * hns_get_pauseparam - get pause parameter
- * @net_dev: net device
+ * @dev: net device
  * @param: pause parameter
  */
 static void hns_get_pauseparam(struct net_device *net_dev,
@@ -705,7 +709,7 @@ static void hns_get_pauseparam(struct net_device *net_dev,
 
 /**
  * hns_set_pauseparam - set pause parameter
- * @net_dev: net device
+ * @dev: net device
  * @param: pause parameter
  *
  * Return 0 on success, negative on failure
@@ -729,7 +733,7 @@ static int hns_set_pauseparam(struct net_device *net_dev,
 
 /**
  * hns_get_coalesce - get coalesce info.
- * @net_dev: net device
+ * @dev: net device
  * @ec: coalesce info.
  *
  * Return 0 on success, negative on failure.
@@ -773,7 +777,7 @@ static int hns_get_coalesce(struct net_device *net_dev,
 
 /**
  * hns_set_coalesce - set coalesce info.
- * @net_dev: net device
+ * @dev: net device
  * @ec: coalesce info.
  *
  * Return 0 on success, negative on failure.
@@ -812,7 +816,7 @@ static int hns_set_coalesce(struct net_device *net_dev,
 
 /**
  * hns_get_channels - get channel info.
- * @net_dev: net device
+ * @dev: net device
  * @ch: channel info.
  */
 static void
@@ -829,7 +833,7 @@ hns_get_channels(struct net_device *net_dev, struct ethtool_channels *ch)
 
 /**
  * get_ethtool_stats - get detail statistics.
- * @netdev: net device
+ * @dev: net device
  * @stats: statistics info.
  * @data: statistics data.
  */
@@ -887,8 +891,8 @@ static void hns_get_ethtool_stats(struct net_device *netdev,
 
 /**
  * get_strings: Return a set of strings that describe the requested objects
- * @netdev: net device
- * @stringset: string set ID.
+ * @dev: net device
+ * @stats: string set ID.
  * @data: objects data.
  */
 static void hns_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
@@ -975,8 +979,8 @@ static void hns_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
 }
 
 /**
- * hns_get_sset_count - get string set count returned by nic_get_strings
- * @netdev: net device
+ * nic_get_sset_count - get string set count witch returned by nic_get_strings.
+ * @dev: net device
  * @stringset: string set index, 0: self test string; 1: statistics string.
  *
  * Return string set count.
@@ -1010,7 +1014,7 @@ static int hns_get_sset_count(struct net_device *netdev, int stringset)
 
 /**
  * hns_phy_led_set - set phy LED status.
- * @netdev: net device
+ * @dev: net device
  * @value: LED state.
  *
  * Return 0 on success, negative on failure.
@@ -1031,8 +1035,8 @@ static int hns_phy_led_set(struct net_device *netdev, int value)
 }
 
 /**
- * hns_set_phys_id - set phy identify LED.
- * @netdev: net device
+ * nic_set_phys_id - set phy identify LED.
+ * @dev: net device
  * @state: LED state.
  *
  * Return 0 on success, negative on failure.
@@ -1108,9 +1112,9 @@ hns_set_phys_id(struct net_device *netdev, enum ethtool_phys_id_state state)
 
 /**
  * hns_get_regs - get net device register
- * @net_dev: net device
+ * @dev: net device
  * @cmd: ethtool cmd
- * @data: register data
+ * @date: register data
  */
 static void hns_get_regs(struct net_device *net_dev, struct ethtool_regs *cmd,
 			 void *data)
@@ -1129,8 +1133,8 @@ static void hns_get_regs(struct net_device *net_dev, struct ethtool_regs *cmd,
 }
 
 /**
- * hns_get_regs_len - get total register len.
- * @net_dev: net device
+ * nic_get_regs_len - get total register len.
+ * @dev: net device
  *
  * Return total register len.
  */
@@ -1155,7 +1159,7 @@ static int hns_get_regs_len(struct net_device *net_dev)
 
 /**
  * hns_nic_nway_reset - nway reset
- * @netdev: net device
+ * @dev: net device
  *
  * Return 0 on success, negative on failure
  */
@@ -1268,11 +1272,6 @@ static int hns_get_rxnfc(struct net_device *netdev,
 }
 
 static const struct ethtool_ops hns_ethtool_ops = {
-	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
-				     ETHTOOL_COALESCE_MAX_FRAMES |
-				     ETHTOOL_COALESCE_USE_ADAPTIVE |
-				     ETHTOOL_COALESCE_USECS_LOW_HIGH |
-				     ETHTOOL_COALESCE_MAX_FRAMES_LOW_HIGH,
 	.get_drvinfo = hns_nic_get_drvinfo,
 	.get_link  = hns_nic_get_link,
 	.get_ringparam = hns_get_ringparam,

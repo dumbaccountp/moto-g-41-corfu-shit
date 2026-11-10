@@ -1,9 +1,22 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * This file provides ECC correction for more than 1 bit per block of data,
  * using binary BCH codes. It relies on the generic BCH library lib/bch.c.
  *
  * Copyright © 2011 Ivan Djelic <ivan.djelic@parrot.com>
+ *
+ * This file is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 or (at your option) any
+ * later version.
+ *
+ * This file is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this file; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
  */
 
 #include <linux/types.h>
@@ -30,18 +43,19 @@ struct nand_bch_control {
 
 /**
  * nand_bch_calculate_ecc - [NAND Interface] Calculate ECC for data block
- * @chip:	NAND chip object
+ * @mtd:	MTD block structure
  * @buf:	input buffer with raw data
  * @code:	output buffer with ECC
  */
-int nand_bch_calculate_ecc(struct nand_chip *chip, const unsigned char *buf,
+int nand_bch_calculate_ecc(struct mtd_info *mtd, const unsigned char *buf,
 			   unsigned char *code)
 {
+	const struct nand_chip *chip = mtd_to_nand(mtd);
 	struct nand_bch_control *nbc = chip->ecc.priv;
 	unsigned int i;
 
 	memset(code, 0, chip->ecc.bytes);
-	bch_encode(nbc->bch, buf, chip->ecc.size, code);
+	encode_bch(nbc->bch, buf, chip->ecc.size, code);
 
 	/* apply mask so that an erased page is a valid codeword */
 	for (i = 0; i < chip->ecc.bytes; i++)
@@ -53,21 +67,22 @@ EXPORT_SYMBOL(nand_bch_calculate_ecc);
 
 /**
  * nand_bch_correct_data - [NAND Interface] Detect and correct bit error(s)
- * @chip:	NAND chip object
+ * @mtd:	MTD block structure
  * @buf:	raw data read from the chip
  * @read_ecc:	ECC from the chip
  * @calc_ecc:	the ECC calculated from raw data
  *
  * Detect and correct bit errors for a data byte block
  */
-int nand_bch_correct_data(struct nand_chip *chip, unsigned char *buf,
+int nand_bch_correct_data(struct mtd_info *mtd, unsigned char *buf,
 			  unsigned char *read_ecc, unsigned char *calc_ecc)
 {
+	const struct nand_chip *chip = mtd_to_nand(mtd);
 	struct nand_bch_control *nbc = chip->ecc.priv;
 	unsigned int *errloc = nbc->errloc;
 	int i, count;
 
-	count = bch_decode(nbc->bch, NULL, chip->ecc.size, read_ecc, calc_ecc,
+	count = decode_bch(nbc->bch, NULL, chip->ecc.size, read_ecc, calc_ecc,
 			   NULL, errloc);
 	if (count > 0) {
 		for (i = 0; i < count; i++) {
@@ -130,7 +145,7 @@ struct nand_bch_control *nand_bch_init(struct mtd_info *mtd)
 	if (!nbc)
 		goto fail;
 
-	nbc->bch = bch_init(m, t, 0, false);
+	nbc->bch = init_bch(m, t, 0);
 	if (!nbc->bch)
 		goto fail;
 
@@ -165,13 +180,12 @@ struct nand_bch_control *nand_bch_init(struct mtd_info *mtd)
 	 */
 	nand->ecc.steps = eccsteps;
 	nand->ecc.total = eccsteps * eccbytes;
-	nand->base.ecc.ctx.total = nand->ecc.total;
 	if (mtd_ooblayout_count_eccbytes(mtd) != (eccsteps*eccbytes)) {
 		pr_warn("invalid ecc layout\n");
 		goto fail;
 	}
 
-	nbc->eccmask = kzalloc(eccbytes, GFP_KERNEL);
+	nbc->eccmask = kmalloc(eccbytes, GFP_KERNEL);
 	nbc->errloc = kmalloc_array(t, sizeof(*nbc->errloc), GFP_KERNEL);
 	if (!nbc->eccmask || !nbc->errloc)
 		goto fail;
@@ -183,7 +197,8 @@ struct nand_bch_control *nand_bch_init(struct mtd_info *mtd)
 		goto fail;
 
 	memset(erased_page, 0xff, eccsize);
-	bch_encode(nbc->bch, erased_page, eccsize, nbc->eccmask);
+	memset(nbc->eccmask, 0, eccbytes);
+	encode_bch(nbc->bch, erased_page, eccsize, nbc->eccmask);
 	kfree(erased_page);
 
 	for (i = 0; i < eccbytes; i++)
@@ -206,7 +221,7 @@ EXPORT_SYMBOL(nand_bch_init);
 void nand_bch_free(struct nand_bch_control *nbc)
 {
 	if (nbc) {
-		bch_free(nbc->bch);
+		free_bch(nbc->bch);
 		kfree(nbc->errloc);
 		kfree(nbc->eccmask);
 		kfree(nbc);

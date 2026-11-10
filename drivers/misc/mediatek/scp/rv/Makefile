@@ -12,8 +12,13 @@ scp-$(CONFIG_MTK_TINYSYS_SCP_SUPPORT) += scp_awake.o
 scp-$(CONFIG_MTK_TINYSYS_SCP_SUPPORT) += scp_dvfs.o
 scp-$(CONFIG_MTK_TINYSYS_SCP_SUPPORT) += scp_hwvoter_dbg.o
 
-ccflags-y += -D DEBUG_DO -fno-pic -mcmodel=large
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/scp/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 ccflags-y += -I$(srctree)/drivers/clk/mediatek/
-ccflags-y += -I$(srctree)/sound/soc/mediatek/common
+ccflags-y += -I$(srctree)/drivers/devfreq/
+ccflags-$(CONFIG_MTK_PMIC_CHIP_MT6335)+= -I$(srctree)/drivers/misc/mediatek/pmic/include/mt6335
+ccflags-$(CONFIG_MTK_PMIC_CHIP_MT6353)+= -I$(srctree)/drivers/misc/mediatek/pmic/include/mt6353
+ccflags-$(CONFIG_MTK_PMIC_CHIP_MT6355)+= -I$(srctree)/drivers/misc/mediatek/pmic/include/mt6355
+ccflags-$(CONFIG_MTK_PMIC_CHIP_MT6358)+= -I$(srctree)/drivers/misc/mediatek/pmic/include/mt6358
+ccflags-$(CONFIG_MTK_PMIC_CHIP_MT6359P)+= -I$(srctree)/drivers/misc/mediatek/pmic/include/mt6359p
+

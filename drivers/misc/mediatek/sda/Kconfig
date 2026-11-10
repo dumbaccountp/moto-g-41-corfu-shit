@@ -30,37 +30,4 @@ config MTK_BUS_PARITY_CHECK
 	  Enable this to get the report on detection or correction
 	  of errors.
 
-config MTK_IRQ_DBG
-	tristate "MediaTek IRQ dbg driver"
-	help
-	  This selects the device driver for the interrupt
-	  debug module. The module provides APIs of irq debug
-	  in the Mediatek SoC.
-
-	  Enable this to get the interrupt related APIs for
-	  debugging only.
-
-config MTK_DBGTOP
-	tristate "MTK DBGTOP driver"
-	help
-	  This selects the Mediatek(R) dbgtop driver.
-	  Provide APIs for interactions between debuggers
-	  and some hardware modules.
-
-config MTK_BTM_SUPPORT
-	tristate "MediaTek BUS TRACER MODULE Support"
-	help
-	  BUS TRACER MODULE is a debugging feature to record the historical
-	  information on bus. After rebooting, these information could
-	  be dumped for debugging. It can also debug with watchpoint,
-	  bypass, id, and rw filters
-
-config MTK_BTM_V1
-	tristate "MediaTek BUS TRACER MODULE V1"
-	depends on MTK_BTM_SUPPORT
-	help
-	  This kernel config can be used to enable
-	  BTMv1 driver for specific plaforms.
-	  It contains ap/infra/peri bus tracers.
-	  It need to enable MTK_BTM_SUPPORT for basic functions.
 endif

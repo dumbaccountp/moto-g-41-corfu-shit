@@ -11,8 +11,22 @@
 #ifndef __MTK_CLK_BUF_COMMON_H__
 #define __MTK_CLK_BUF_COMMON_H__
 
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/spinlock.h>
+#include <linux/interrupt.h>
+#include <linux/delay.h>
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
+#include <linux/string.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/ratelimit.h>
+#include <linux/workqueue.h>
+#include <linux/io.h>
+//#include <mt-plat/sync_write.h>
+//#include <mt-plat/upmu_common.h>
 
 #ifdef pr_fmt
 #undef pr_fmt

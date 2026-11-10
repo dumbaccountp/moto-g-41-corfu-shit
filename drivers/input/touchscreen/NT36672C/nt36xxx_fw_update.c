@@ -1,19 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2010 - 2018 Novatek, Inc.
- *
- * $Revision: 49359 $
- * $Date: 2019-08-19 16:20:18 +0800 (週一, 19 八月 2019) $
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
+ * Copyright (C) 2016 MediaTek Inc.
  */
 
 #include <linux/firmware.h>
@@ -34,7 +21,7 @@
 #define NVT_DUMP_PARTITION_LEN  (1024)
 #define NVT_DUMP_PARTITION_PATH "/data/local/tmp"
 
-static struct timespec64 start, end;
+static struct timeval start, end;
 const struct firmware *fw_entry;
 static size_t fw_need_write_size;
 static uint8_t *fwbuf;
@@ -390,7 +377,61 @@ return:
 loff_t file_offset;
 static int32_t nvt_read_ram_and_save_file(uint32_t addr, uint16_t len, char *name)
 {
-	return 0;
+	char file[256] = "";
+	uint8_t *fbufp = NULL;
+	int32_t ret = 0;
+	struct file *fp = NULL;
+	mm_segment_t org_fs;
+
+	sprintf(file, "%s/dump_%s.bin", NVT_DUMP_PARTITION_PATH, name);
+	NVT_LOG("Dump [%s] from 0x%08X to 0x%08X\n", file, addr, addr + len);
+
+	fbufp = (uint8_t *) kzalloc(len + 1, GFP_KERNEL);
+	if (fbufp == NULL) {
+		NVT_ERR("kzalloc for fbufp failed!\n");
+		ret = -ENOMEM;
+		goto alloc_buf_fail;
+	}
+
+	org_fs = get_fs();
+	set_fs(KERNEL_DS);
+	fp = filp_open(file, O_RDWR | O_CREAT, 0644);
+	if (fp == NULL || IS_ERR(fp)) {
+		ret = -ENOMEM;
+		NVT_ERR("open file failed\n");
+		goto open_file_fail;
+	}
+
+	/* SPI read */
+	//---set xdata index to addr---
+	nvt_set_page(addr);
+
+	fbufp[0] = addr & 0x7F;	//offset
+	CTP_SPI_READ(ts->client, fbufp, len + 1);
+
+	/* Write to file */
+	ret = vfs_write(fp, (char __user *)fbufp + 1, len, &file_offset);
+	if (ret != len) {
+		NVT_ERR("write file failed\n");
+		goto open_file_fail;
+	} else {
+		ret = 0;
+	}
+
+open_file_fail:
+	set_fs(org_fs);
+	if (!IS_ERR_OR_NULL(fp)) {
+		filp_close(fp, NULL);
+		fp = NULL;
+	}
+
+	if (!IS_ERR_OR_NULL(fbufp)) {
+		kfree(fbufp);
+		fbufp = NULL;
+	}
+alloc_buf_fail:
+
+	return ret;
 }
 
 /*******************************************************
@@ -769,7 +810,7 @@ static int32_t nvt_download_firmware_hw_crc(void)
 	uint8_t retry = 0;
 	int32_t ret = 0;
 
-	ktime_get_ts64(&start);
+	do_gettimeofday(&start);
 
 	while (1) {
 		/* bootloader reset to reset MCU */
@@ -817,7 +858,7 @@ fail:
 		}
 	}
 
-	ktime_get_ts64(&end);
+	do_gettimeofday(&end);
 
 	return ret;
 }
@@ -835,7 +876,7 @@ static int32_t nvt_download_firmware(void)
 	uint8_t retry = 0;
 	int32_t ret = 0;
 
-	ktime_get_ts64(&start);
+	do_gettimeofday(&start);
 
 	while (1) {
 		/*
@@ -895,7 +936,7 @@ fail:
 		}
 	}
 
-	ktime_get_ts64(&end);
+	do_gettimeofday(&end);
 
 	return ret;
 }
@@ -936,7 +977,7 @@ int32_t nvt_update_firmware(char *firmware_name)
 	}
 
 	NVT_LOG("Update firmware success! <%ld us>\n",
-		(end.tv_sec - start.tv_sec) * 1000000L + (end.tv_nsec - start.tv_nsec)/1000);
+		(end.tv_sec - start.tv_sec) * 1000000L + (end.tv_usec - start.tv_usec));
 
 	/* Get FW Info */
 	ret = nvt_get_fw_info();

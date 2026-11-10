@@ -11,20 +11,14 @@
 # GNU General Public License for more details.
 #
 
+ifeq ($(CONFIG_MTK_AEE_FEATURE),y)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
-ccflags-y += -I$(srctree)/drivers/iommu
-ccflags-y += -I$(srctree)/drivers/dma-buf/heaps
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/trusted_mem/
-
-obj-$(CONFIG_MTK_IOMMU_MISC_DBG)    += iommu_debug.o
-obj-$(CONFIG_MTK_IOMMU_MISC_SECURE) += iommu_secure.o
-obj-$(CONFIG_MTK_IOMMU_MISC_TEST)   += iommu_test.o
-obj-$(CONFIG_MTK_IOMMU_MISC)        += iommu_gz.o
-
-ifneq ($(filter y m, $(CONFIG_MTK_ENABLE_GENIEZONE)),)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/geniezone/public
-
-iommu_gz-objs := iommu_pseudo.o iommu_gz_sec.o
-else
-iommu_gz-objs := iommu_pseudo.o
 endif
+
+ifeq ($(CONFIG_TRUSTONIC_TEE_SUPPORT),y)
+ccflags-y += -I$(srctree)/drivers/tee/gud/$(CONFIG_TRUSTONIC_TEE_VERSION)/MobiCoreDriver/public
+ccflags-y += -I$(srctree)/drivers/tee/gud/$(CONFIG_TRUSTONIC_TEE_VERSION)/MobiCoreDriver/public/GP
+endif
+
+obj-$(CONFIG_MTK_IOMMU_MISC_SEC) += m4u_secure.o
+obj-$(CONFIG_MTK_IOMMU_MISC_DBG) += m4u_debug.o

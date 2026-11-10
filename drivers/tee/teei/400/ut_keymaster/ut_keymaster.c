@@ -141,7 +141,7 @@ static void keymaster_setup_cdev(struct keymaster_dev *dev, int index)
 		IMSG_ERROR("Error %d adding keymaster %d.\n", err, index);
 }
 
-int teei_keymaster_init(void)
+int keymaster_init(void)
 {
 	int result = 0;
 	struct device *class_dev = NULL;
@@ -167,7 +167,6 @@ int teei_keymaster_init(void)
 		IMSG_ERROR("keymaster device_create failed %d.\n", result);
 		goto class_destroy;
 	}
-
 	keymaster_devp = NULL;
 	keymaster_devp = vmalloc(sizeof(struct keymaster_dev));
 	if (keymaster_devp == NULL) {
@@ -191,9 +190,8 @@ unregister_chrdev_region:
 return_fn:
 	return result;
 }
-EXPORT_SYMBOL_GPL(teei_keymaster_init);
 
-void teei_keymaster_exit(void)
+void keymaster_exit(void)
 {
 	device_destroy(driver_class, devno);
 	class_destroy(driver_class);
@@ -201,4 +199,8 @@ void teei_keymaster_exit(void)
 	vfree(keymaster_devp);
 	unregister_chrdev_region(MKDEV(keymaster_major, 0), 1);
 }
-EXPORT_SYMBOL_GPL(teei_keymaster_exit);
+
+MODULE_AUTHOR("Microtrust");
+MODULE_LICENSE("Dual BSD/GPL");
+module_init(keymaster_init);
+module_exit(keymaster_exit);

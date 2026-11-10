@@ -7,14 +7,12 @@
 #define _XGF_H_
 
 #include <linux/rbtree.h>
-#include <linux/tracepoint.h>
-#include <linux/slab.h>
 
 #define HW_EVENT_NUM 2
 #define HW_MONITER_WINDOW 10
 #define HW_MONITER_LEVEL 8
 #define EMA_DIVISOR 10
-#define EMA_DIVIDEND 5
+#define EMA_DIVIDEND 7
 #define EMA_REST_DIVIDEND (EMA_DIVISOR - EMA_DIVIDEND)
 #define SP_ALLOW_NAME "UnityMain"
 #define SP_ALLOW_NAME2 "Thread-"
@@ -22,14 +20,6 @@
 #define XGF_DEP_FRAMES_MAX 20
 #define XGF_DO_SP_SUB 0
 #define XGF_MAX_UFRMAES 200
-#define XGF_UBOOST 0
-#define XGF_UBOOST_STDDEV_M 1
-#define TIME_50MS  50000000
-#define UB_SKIP_FRAME 20
-#define UB_BEGIN_FRAME 50
-#define XGF_MAX_SPID_LIST_LENGTH 20
-#define DEFAULT_DFRC 60
-#define TARGET_FPS_LEVEL 10
 #define N 8
 
 enum XGF_ERROR {
@@ -60,16 +50,6 @@ enum XGF_DEPS_CAT {
 	INNER_DEPS = 0,
 	OUTER_DEPS,
 	PREVI_DEPS
-};
-
-enum XGF_ALLOC {
-	XGF_RENDER = 0,
-	XGF_RENDER_SECTOR,
-	XGF_PID_REC,
-	XGF_DEP,
-	XGF_RUNTIME_SECT,
-	XGF_SPID,
-	XGFF_FRAME
 };
 
 struct xgf_sub_sect {
@@ -158,24 +138,6 @@ struct xgf_render {
 
 	int spid;
 	int dep_frames;
-
-	unsigned long long raw_l_runtime;
-	unsigned long long raw_r_runtime;
-
-	int hwui_flag;
-	struct xgf_ema2_predictor *ema2_pt;
-};
-
-struct xgff_frame {
-	struct hlist_node hlist;
-	pid_t parent;
-	pid_t tid;
-	unsigned long long bufid;
-	unsigned long frameid;
-	unsigned long long ts;
-
-	struct xgf_render xgfrender;
-	struct fbt_thread_loading *ploading;
 };
 
 struct xgf_dep {
@@ -184,7 +146,6 @@ struct xgf_dep {
 	pid_t tid;
 	int render_dep;
 	int frame_idx;
-	int action;
 };
 
 struct xgf_runtime_sect {
@@ -265,8 +226,7 @@ extern int (*fpsgo_xgf2ko_calculate_target_fps_fp)(int pid,
 	unsigned long long bufID,
 	int *target_fps_margin,
 	unsigned long long cur_dequeue_start_ts,
-	unsigned long long cur_queue_end_ts,
-	int eara_is_active);
+	unsigned long long cur_queue_end_ts);
 extern void (*fpsgo_xgf2ko_do_recycle_fp)(int pid,
 	unsigned long long bufID);
 extern long long (*xgf_ema2_predict_fp)(struct xgf_ema2_predictor *pt, long long X);
@@ -277,8 +237,9 @@ void xgf_trace(const char *fmt, ...);
 void xgf_reset_renders(void);
 int xgf_est_runtime(pid_t r_pid, struct xgf_render *render,
 			unsigned long long *runtime, unsigned long long ts);
-void *xgf_alloc(int size, int cmd);
-void xgf_free(void *pvBuf, int cmd);
+
+void *xgf_alloc(int size);
+void xgf_free(void *block);
 void *xgf_atomic_val_assign(int select);
 int *xgf_extra_sub_assign(void);
 int *xgf_spid_sub_assign(void);
@@ -304,23 +265,16 @@ int fpsgo_ctrl2xgf_nn_job_end(unsigned int tid, unsigned long long mid);
 
 int fpsgo_comp2xgf_qudeq_notify(int rpid, unsigned long long bufID, int cmd,
 	unsigned long long *run_time, unsigned long long *mid,
-	unsigned long long ts, int hwui_flag);
+	unsigned long long ts);
 void fpsgo_fstb2xgf_do_recycle(int fstb_active);
 void fpsgo_create_render_dep(void);
 int has_xgf_dep(pid_t tid);
-int uboost2xgf_get_info(int pid, unsigned long long bufID,
-	unsigned long long *timer_period, int *frame_idx);
 
-int fpsgo_fstb2xgf_get_target_fps(int pid, unsigned long long bufID,
-	int *target_fps_margin, unsigned long long cur_dequeue_start_ts,
-	unsigned long long cur_queue_end_ts, int eara_is_active);
 int fpsgo_xgf2ko_calculate_target_fps(int pid, unsigned long long bufID,
 	int *target_fps_margin, unsigned long long cur_dequeue_start_ts,
-	unsigned long long cur_queue_end_ts, int eara_is_active);
-int fpsgo_fstb2xgf_notify_recycle(int pid, unsigned long long bufID);
+	unsigned long long cur_queue_end_ts);
 void fpsgo_xgf2ko_do_recycle(int pid, unsigned long long bufID);
-void fpsgo_ctrl2xgf_set_display_rate(int dfrc_fps);
-void fpsgo_fstb2xgf_set_camera_flag(int camera_flag);
+void fpsgo_ctrl2xgf_display_rate(int dfrc_fps);
 int xgf_get_display_rate(void);
 int xgf_get_process_id(int pid);
 int xgf_check_main_sf_pid(int pid, int process_id);
@@ -378,7 +332,6 @@ struct fstb_trace_event {
 	int pid;
 };
 
-extern int xgf_trace_enable;
 extern struct xgf_trace_event *xgf_event_data;
 extern void *xgf_event_index;
 extern void *xgf_ko_enabled;
@@ -388,6 +341,8 @@ extern atomic_t fstb_event_data_idx;
 extern int fstb_event_buffer_size;
 extern int fstb_frame_num;
 extern int fstb_no_stable_thr;
+extern int fstb_no_stable_multiple;
+extern int fstb_no_stable_multiple_eara;
 extern int fstb_is_eara_active;
 extern int fstb_can_update_thr;
 extern int fstb_target_fps_margin_low_fps;
@@ -395,20 +350,8 @@ extern int fstb_target_fps_margin_high_fps;
 extern int fstb_separate_runtime_enable;
 extern int fstb_fps_num;
 extern int fstb_fps_choice[];
-extern int fstb_consider_deq;
-extern int fstb_no_r_timer_enable;
 
 int __init init_xgf(void);
-int __exit exit_xgf(void);
-
-struct fbt_thread_loading *fbt_xgff_list_loading_add(int pid,
-	unsigned long long buffer_id, unsigned long long ts);
-void fbt_xgff_list_loading_del(struct fbt_thread_loading *ploading);
-long fbt_xgff_get_loading_by_cluster(struct fbt_thread_loading *ploading,
-					unsigned long long ts,
-					unsigned int prefer_cluster);
-void fbt_xgff_loading_reset(struct fbt_thread_loading *ploading,
-				unsigned long long ts);
 
 extern int (*xgff_est_runtime_fp)(pid_t r_pid,
 		struct xgf_render *render,
@@ -416,14 +359,12 @@ extern int (*xgff_est_runtime_fp)(pid_t r_pid,
 		unsigned long long ts);
 int xgff_est_runtime(pid_t r_pid, struct xgf_render *render,
 			unsigned long long *runtime, unsigned long long ts);
-void xgff_clean_deps_list(struct xgf_render *render, int pos);
-int xgff_hw_events_update(int rpid, struct xgf_render *render);
+extern int (*xgff_update_start_prev_index_fp)(struct xgf_render *render);
+int xgff_update_start_prev_index(struct xgf_render *render);
 
+void xgff_clean_deps_list(struct xgf_render *render, int pos);
 int xgff_dep_frames_mod(struct xgf_render *render, int pos);
 struct xgf_dep *xgff_get_dep(
 	pid_t tid, struct xgf_render *render, int pos, int force);
-
-extern int (*xgff_update_start_prev_index_fp)(struct xgf_render *render);
-int xgff_update_start_prev_index(struct xgf_render *render);
 
 #endif

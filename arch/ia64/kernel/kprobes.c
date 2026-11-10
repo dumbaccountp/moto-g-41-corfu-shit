@@ -1,7 +1,20 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Kernel Probes (KProbes)
  *  arch/ia64/kernel/kprobes.c
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  * Copyright (C) IBM Corporation, 2002, 2004
  * Copyright (C) Intel Corporation, 2005
@@ -17,8 +30,8 @@
 #include <linux/preempt.h>
 #include <linux/extable.h>
 #include <linux/kdebug.h>
-#include <linux/pgtable.h>
 
+#include <asm/pgtable.h>
 #include <asm/sections.h>
 #include <asm/exception.h>
 
@@ -398,8 +411,7 @@ static void kretprobe_trampoline(void)
 
 int __kprobes trampoline_probe_handler(struct kprobe *p, struct pt_regs *regs)
 {
-	regs->cr_iip = __kretprobe_trampoline_handler(regs,
-		dereference_function_descriptor(kretprobe_trampoline), NULL);
+	regs->cr_iip = __kretprobe_trampoline_handler(regs, kretprobe_trampoline, NULL);
 	/*
 	 * By returning a non-zero value, we are telling
 	 * kprobe_handler() that we don't want the post_handler
@@ -415,7 +427,7 @@ void __kprobes arch_prepare_kretprobe(struct kretprobe_instance *ri,
 	ri->fp = NULL;
 
 	/* Replace the return addr with trampoline addr */
-	regs->b0 = (unsigned long)dereference_function_descriptor(kretprobe_trampoline);
+	regs->b0 = ((struct fnptr *)kretprobe_trampoline)->ip;
 }
 
 /* Check the instruction in the slot is break */
@@ -769,7 +781,7 @@ static int __kprobes pre_kprobes_handler(struct die_args *args)
 		return 1;
 	}
 
-#if !defined(CONFIG_PREEMPTION)
+#if !defined(CONFIG_PREEMPT)
 	if (p->ainsn.inst_flag == INST_FLAG_BOOSTABLE && !p->post_handler) {
 		/* Boost up -- we can execute copied instructions directly */
 		ia64_psr(regs)->ri = p->ainsn.slot;
@@ -907,6 +919,32 @@ int __kprobes kprobe_exceptions_notify(struct notifier_block *self,
 	return ret;
 }
 
+struct param_bsp_cfm {
+	unsigned long ip;
+	unsigned long *bsp;
+	unsigned long cfm;
+};
+
+static void ia64_get_bsp_cfm(struct unw_frame_info *info, void *arg)
+{
+	unsigned long ip;
+	struct param_bsp_cfm *lp = arg;
+
+	do {
+		unw_get_ip(info, &ip);
+		if (ip == 0)
+			break;
+		if (ip == lp->ip) {
+			unw_get_bsp(info, (unsigned long*)&lp->bsp);
+			unw_get_cfm(info, (unsigned long*)&lp->cfm);
+			return;
+		}
+	} while (unw_unwind(info) >= 0);
+	lp->bsp = NULL;
+	lp->cfm = 0;
+	return;
+}
+
 unsigned long arch_deref_entry_point(void *entry)
 {
 	return ((struct fnptr *)entry)->ip;
@@ -919,14 +957,14 @@ static struct kprobe trampoline_p = {
 int __init arch_init_kprobes(void)
 {
 	trampoline_p.addr =
-		dereference_function_descriptor(kretprobe_trampoline);
+		(kprobe_opcode_t *)((struct fnptr *)kretprobe_trampoline)->ip;
 	return register_kprobe(&trampoline_p);
 }
 
 int __kprobes arch_trampoline_kprobe(struct kprobe *p)
 {
 	if (p->addr ==
-		dereference_function_descriptor(kretprobe_trampoline))
+		(kprobe_opcode_t *)((struct fnptr *)kretprobe_trampoline)->ip)
 		return 1;
 
 	return 0;

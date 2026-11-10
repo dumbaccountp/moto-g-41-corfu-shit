@@ -6,8 +6,8 @@ DEFCONFIG_BASENAME		:= $(subst _defconfig,,$(KERNEL_DEFCONFIG))
 ifneq ($(TARGET_BUILD_VARIANT), user)
 DEFCONFIG_BASENAME		:= $(subst _debug,,$(DEFCONFIG_BASENAME))
 endif
-TARGET_DEFCONFIG		:= $(KERNEL_DIR)/kernel/configs/moto_extra.config
-PRODUCT_SPECIFIC_DEFCONFIGS	:= $(LJAPDEFCONFIGSRC)/moto-$(DEFCONFIG_BASENAME).config
+TARGET_DEFCONFIG		:= $(KERNEL_OUT)/mapphone_defconfig
+PRODUCT_SPECIFIC_DEFCONFIGS	:= $(DEFCONFIGSRC)/$(KERNEL_DEFCONFIG) $(LJAPDEFCONFIGSRC)/moto-$(DEFCONFIG_BASENAME).config
 
 KERNEL_DEBUG_DEFCONFIG          := $(LJAPDEFCONFIGSRC)/debug-$(DEFCONFIG_BASENAME).config
 PRODUCT_KERNEL_DEBUG_DEFCONFIG  := $(LJAPDEFCONFIGSRC)/$(PRODUCT_DEBUG_DEFCONFIG)
@@ -32,13 +32,6 @@ endif
 # append all additional configs
 ifneq ($(KERNEL_EXTRA_CONFIG),)
 PRODUCT_SPECIFIC_DEFCONFIGS += $(KERNEL_EXTRA_CONFIG:%=$(LJAPDEFCONFIGSRC)/%.config)
-endif
-
-#some configs need adjust on df build,but not final builds.
-#Actually df bulids include user/userdebug,so we use one specifci config files to
-#adjust such configs.
-ifneq ($(PRODUCT_IS_PRODUCTION),true)
-PRODUCT_SPECIFIC_DEFCONFIGS += $(LJAPDEFCONFIGSRC)/moto-$(DEFCONFIG_BASENAME)-df.config
 endif
 
 define do-make-defconfig

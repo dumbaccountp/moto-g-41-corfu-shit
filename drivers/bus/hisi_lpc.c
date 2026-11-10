@@ -74,7 +74,7 @@ struct hisi_lpc_dev {
 /* About 10us. This is specific for single IO operations, such as inb */
 #define LPC_PEROP_WAITCNT	100
 
-static int wait_lpc_idle(void __iomem *mbase, unsigned int waitcnt)
+static int wait_lpc_idle(unsigned char *mbase, unsigned int waitcnt)
 {
 	u32 status;
 
@@ -209,7 +209,7 @@ static u32 hisi_lpc_comm_in(void *hostdata, unsigned long pio, size_t dwidth)
 	struct hisi_lpc_dev *lpcdev = hostdata;
 	struct lpc_cycle_para iopara;
 	unsigned long addr;
-	__le32 rd_data = 0;
+	u32 rd_data = 0;
 	int ret;
 
 	if (!lpcdev || !dwidth || dwidth > LPC_MAX_DWIDTH)
@@ -244,12 +244,13 @@ static void hisi_lpc_comm_out(void *hostdata, unsigned long pio,
 	struct lpc_cycle_para iopara;
 	const unsigned char *buf;
 	unsigned long addr;
-	__le32 _val = cpu_to_le32(val);
 
 	if (!lpcdev || !dwidth || dwidth > LPC_MAX_DWIDTH)
 		return;
 
-	buf = (const unsigned char *)&_val;
+	val = cpu_to_le32(val);
+
+	buf = (const unsigned char *)&val;
 	addr = hisi_lpc_pio_to_addr(lpcdev, pio);
 
 	iopara.opflags = FG_INCRADDR_LPC;
@@ -503,13 +504,13 @@ static int hisi_lpc_acpi_probe(struct device *hostdev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(hostdev);
 	struct acpi_device *child;
-	struct platform_device *pdev;
 	int ret;
 
 	/* Only consider the children of the host */
 	list_for_each_entry(child, &adev->children, node) {
 		const char *hid = acpi_device_hid(child);
 		const struct hisi_lpc_acpi_cell *cell;
+		struct platform_device *pdev;
 		const struct resource *res;
 		bool found = false;
 		int num_res;
@@ -555,9 +556,10 @@ static int hisi_lpc_acpi_probe(struct device *hostdev)
 
 		if (!found) {
 			dev_warn(hostdev,
-				 "could not find cell for child device (%s), discarding\n",
+				 "could not find cell for child device (%s)\n",
 				 hid);
-			continue;
+			ret = -ENODEV;
+			goto fail;
 		}
 
 		pdev = platform_device_alloc(cell->name, PLATFORM_DEVID_AUTO);
@@ -571,24 +573,22 @@ static int hisi_lpc_acpi_probe(struct device *hostdev)
 
 		ret = platform_device_add_resources(pdev, res, num_res);
 		if (ret)
-			goto fail_put_device;
+			goto fail;
 
 		ret = platform_device_add_data(pdev, cell->pdata,
 					       cell->pdata_size);
 		if (ret)
-			goto fail_put_device;
+			goto fail;
 
 		ret = platform_device_add(pdev);
 		if (ret)
-			goto fail_put_device;
+			goto fail;
 
 		acpi_device_set_enumerated(child);
 	}
 
 	return 0;
 
-fail_put_device:
-	platform_device_put(pdev);
 fail:
 	hisi_lpc_acpi_remove(hostdev);
 	return ret;

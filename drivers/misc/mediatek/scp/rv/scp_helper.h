@@ -137,7 +137,6 @@ struct scp_work_struct {
 
 struct scp_reserve_mblock {
 	enum scp_reserve_mem_id_t num;
-	u32 alignment;
 	u64 start_phys;
 	u64 start_virt;
 	u64 size;
@@ -166,18 +165,16 @@ struct scp_region_info_st {
 	uint32_t ap_params_start;
 };
 
-extern struct scp_regs scpreg;
-extern const struct file_operations scp_A_log_file_ops;
-#if IS_ENABLED(CONFIG_MTK_TINYSYS_SCP_DEBUG_SUPPORT)
 /* scp device attribute */
 extern struct device_attribute dev_attr_scp_A_mobile_log_UT;
 extern struct device_attribute dev_attr_scp_A_logger_wakeup_AP;
+extern const struct file_operations scp_A_log_file_ops;
 
+extern struct scp_regs scpreg;
 extern struct device_attribute dev_attr_scp_mobile_log;
 extern struct device_attribute dev_attr_scp_A_get_last_log;
 extern struct device_attribute dev_attr_scp_A_status;
 extern struct device_attribute dev_attr_log_filter;
-#endif
 extern struct bin_attribute bin_attr_scp_dump;
 
 /* scp loggger */
@@ -233,6 +230,7 @@ extern void scp_enable_sram(void);
 extern int scp_sys_full_reset(void);
 extern void scp_reset_awake_counts(void);
 extern void scp_awake_init(void);
+extern unsigned int mt_get_abist_freq(unsigned int ID);
 
 #if SCP_RECOVERY_SUPPORT
 extern unsigned int scp_reset_by_cmd;
@@ -255,102 +253,53 @@ enum MTK_TINYSYS_SCP_KERNEL_OP {
 	MTK_TINYSYS_SCP_KERNEL_OP_WDT_SET,
 	MTK_TINYSYS_SCP_KERNEL_OP_HALT_SET,
 	MTK_TINYSYS_SCP_KERNEL_OP_WDT_CLEAR,
-	MTK_TINYSYS_SCP_KERNEL_OP_DUMP_TBUF,
-	MTK_TINYSYS_SCP_KERNEL_OP_DUMP_L2TCM,
-	MTK_TINYSYS_SCP_KERNEL_OP_DUMP_REG,
-	MTK_TINYSYS_SCP_KERNEL_OP_DUMP_RVBUS,
 	MTK_TINYSYS_SCP_KERNEL_OP_NUM,
 };
 
 #if SCP_RESERVED_MEM && IS_ENABLED(CONFIG_OF_RESERVED_MEM)
 static inline unsigned long scp_do_dump(void)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_DUMP_START,
-			0, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline unsigned long scp_do_polling(void)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_DUMP_POLLING,
-			0, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline uint64_t scp_do_rstn_set(uint64_t boot_ok)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_RESET_SET,
-			boot_ok, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline uint64_t scp_do_rstn_clr(void)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_RESET_RELEASE,
-			0, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline unsigned long scp_restore_l2tcm(void)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_RESTORE_L2TCM,
-			0, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline unsigned long scp_restore_dram(void)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_RESTORE_DRAM,
-			0, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline uint64_t scp_do_wdt_set(uint64_t coreid)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_WDT_SET,
-			coreid, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline uint64_t scp_do_halt_set(void)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_HALT_SET,
-			0, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 static inline uint64_t scp_do_wdt_clear(uint64_t coreid)
 {
-	struct arm_smccc_res res;
-
-	arm_smccc_smc(MTK_SIP_TINYSYS_SCP_CONTROL,
-			MTK_TINYSYS_SCP_KERNEL_OP_WDT_CLEAR,
-			coreid, 0, 0, 0, 0, 0, &res);
-	return res.a0;
+	return 0;
 }
 
 #endif

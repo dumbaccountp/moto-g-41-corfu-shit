@@ -1,10 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * AppArmor security module
  *
  * This file contains AppArmor label definitions
  *
  * Copyright 2017 Canonical Ltd.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation, version 2 of the
+ * License.
  */
 
 #ifndef __AA_LABEL_H
@@ -275,7 +279,6 @@ void aa_labelset_destroy(struct aa_labelset *ls);
 void aa_labelset_init(struct aa_labelset *ls);
 void __aa_labelset_update_subtree(struct aa_ns *ns);
 
-void aa_label_destroy(struct aa_label *label);
 void aa_label_free(struct aa_label *label);
 void aa_label_kref(struct kref *kref);
 bool aa_label_init(struct aa_label *label, int size, gfp_t gfp);

@@ -3,7 +3,6 @@
  * Copyright (c) 2015-2016, Linaro Limited
  * Copyright (c) 2015-2019, MICROTRUST Incorporated
  *
- *
  */
 #ifndef TEE_PRIVATE_H
 #define TEE_PRIVATE_H
@@ -132,10 +131,8 @@ extern void dma_buf_detach(struct dma_buf *dmabuf,
 
 extern void dma_buf_put(struct dma_buf *dmabuf);
 
-#if KERNEL_VERSION(4, 4, 1) <= LINUX_VERSION_CODE
 extern struct dma_buf *dma_buf_export(
 				const struct dma_buf_export_info *exp_info);
-#endif
 
 extern int dma_buf_fd(struct dma_buf *dmabuf, int flags);
 

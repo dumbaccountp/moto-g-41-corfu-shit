@@ -4,7 +4,6 @@
  */
 #include <linux/slab.h>
 #include <linux/clk-provider.h>
-#include <linux/io.h>
 
 #include "stratix10-clk.h"
 #include "clk.h"
@@ -49,21 +48,16 @@ static u8 clk_periclk_get_parent(struct clk_hw *hwclk)
 {
 	struct socfpga_periph_clk *socfpgaclk = to_periph_clk(hwclk);
 	u32 clk_src, mask;
-	u8 parent = 0;
+	u8 parent;
 
-	/* handle the bypass first */
 	if (socfpgaclk->bypass_reg) {
 		mask = (0x1 << socfpgaclk->bypass_shift);
 		parent = ((readl(socfpgaclk->bypass_reg) & mask) >>
 			   socfpgaclk->bypass_shift);
-		if (parent)
-			return parent;
-	}
-
-	if (socfpgaclk->hw.reg) {
+	} else {
 		clk_src = readl(socfpgaclk->hw.reg);
 		parent = (clk_src >> CLK_MGR_FREE_SHIFT) &
-			  CLK_MGR_FREE_MASK;
+			CLK_MGR_FREE_MASK;
 	}
 	return parent;
 }
@@ -78,29 +72,27 @@ static const struct clk_ops peri_cnt_clk_ops = {
 	.get_parent = clk_periclk_get_parent,
 };
 
-struct clk *s10_register_periph(const struct stratix10_perip_c_clock *clks,
-				void __iomem *reg)
+struct clk *s10_register_periph(const char *name, const char *parent_name,
+				const char * const *parent_names,
+				u8 num_parents, unsigned long flags,
+				void __iomem *reg, unsigned long offset)
 {
 	struct clk *clk;
 	struct socfpga_periph_clk *periph_clk;
-	struct clk_init_data init;
-	const char *name = clks->name;
-	const char *parent_name = clks->parent_name;
+	struct clk_init_data init = {};
 
 	periph_clk = kzalloc(sizeof(*periph_clk), GFP_KERNEL);
 	if (WARN_ON(!periph_clk))
 		return NULL;
 
-	periph_clk->hw.reg = reg + clks->offset;
+	periph_clk->hw.reg = reg + offset;
 
 	init.name = name;
 	init.ops = &peri_c_clk_ops;
-	init.flags = clks->flags;
+	init.flags = flags;
 
-	init.num_parents = clks->num_parents;
-	init.parent_names = parent_name ? &parent_name : NULL;
-	if (init.parent_names == NULL)
-		init.parent_data = clks->parent_data;
+	init.num_parents = num_parents;
+	init.parent_names = parent_names ? parent_names : &parent_name;
 
 	periph_clk->hw.hw.init = &init;
 
@@ -112,39 +104,39 @@ struct clk *s10_register_periph(const struct stratix10_perip_c_clock *clks,
 	return clk;
 }
 
-struct clk *s10_register_cnt_periph(const struct stratix10_perip_cnt_clock *clks,
-				    void __iomem *regbase)
+struct clk *s10_register_cnt_periph(const char *name, const char *parent_name,
+				    const char * const *parent_names,
+				    u8 num_parents, unsigned long flags,
+				    void __iomem *regbase, unsigned long offset,
+				    u8 fixed_divider, unsigned long bypass_reg,
+				    unsigned long bypass_shift)
 {
 	struct clk *clk;
 	struct socfpga_periph_clk *periph_clk;
-	struct clk_init_data init;
-	const char *name = clks->name;
-	const char *parent_name = clks->parent_name;
+	struct clk_init_data init = {};
 
 	periph_clk = kzalloc(sizeof(*periph_clk), GFP_KERNEL);
 	if (WARN_ON(!periph_clk))
 		return NULL;
 
-	if (clks->offset)
-		periph_clk->hw.reg = regbase + clks->offset;
+	if (offset)
+		periph_clk->hw.reg = regbase + offset;
 	else
 		periph_clk->hw.reg = NULL;
 
-	if (clks->bypass_reg)
-		periph_clk->bypass_reg = regbase + clks->bypass_reg;
+	if (bypass_reg)
+		periph_clk->bypass_reg = regbase + bypass_reg;
 	else
 		periph_clk->bypass_reg = NULL;
-	periph_clk->bypass_shift = clks->bypass_shift;
-	periph_clk->fixed_div = clks->fixed_divider;
+	periph_clk->bypass_shift = bypass_shift;
+	periph_clk->fixed_div = fixed_divider;
 
 	init.name = name;
 	init.ops = &peri_cnt_clk_ops;
-	init.flags = clks->flags;
+	init.flags = flags;
 
-	init.num_parents = clks->num_parents;
-	init.parent_names = parent_name ? &parent_name : NULL;
-	if (init.parent_names == NULL)
-		init.parent_data = clks->parent_data;
+	init.num_parents = num_parents;
+	init.parent_names = parent_names ? parent_names : &parent_name;
 
 	periph_clk->hw.hw.init = &init;
 

@@ -39,9 +39,7 @@
 #include <linux/isdn/capiutil.h>
 #include <linux/isdn/capicmd.h>
 
-#include "kcapi.h"
-
-MODULE_DESCRIPTION("CAPI4Linux: kernel CAPI layer and /dev/capi20 interface");
+MODULE_DESCRIPTION("CAPI4Linux: Userspace /dev/capi20 interface");
 MODULE_AUTHOR("Carsten Paeth");
 MODULE_LICENSE("GPL");
 
@@ -952,34 +950,6 @@ capi_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
-#ifdef CONFIG_COMPAT
-static long
-capi_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	int ret;
-
-	if (cmd == CAPI_MANUFACTURER_CMD) {
-		struct {
-			compat_ulong_t cmd;
-			compat_uptr_t data;
-		} mcmd32;
-
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
-		if (copy_from_user(&mcmd32, compat_ptr(arg), sizeof(mcmd32)))
-			return -EFAULT;
-
-		mutex_lock(&capi_mutex);
-		ret = capi20_manufacturer(mcmd32.cmd, compat_ptr(mcmd32.data));
-		mutex_unlock(&capi_mutex);
-
-		return ret;
-	}
-
-	return capi_unlocked_ioctl(file, cmd, (unsigned long)compat_ptr(arg));
-}
-#endif
-
 static int capi_open(struct inode *inode, struct file *file)
 {
 	struct capidev *cdev;
@@ -998,7 +968,7 @@ static int capi_open(struct inode *inode, struct file *file)
 	list_add_tail(&cdev->list, &capidev_list);
 	mutex_unlock(&capidev_list_lock);
 
-	return stream_open(inode, file);
+	return nonseekable_open(inode, file);
 }
 
 static int capi_release(struct inode *inode, struct file *file)
@@ -1026,9 +996,6 @@ static const struct file_operations capi_fops =
 	.write		= capi_write,
 	.poll		= capi_poll,
 	.unlocked_ioctl	= capi_unlocked_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl	= capi_compat_ioctl,
-#endif
 	.open		= capi_open,
 	.release	= capi_release,
 };
@@ -1196,6 +1163,12 @@ static int capinc_tty_chars_in_buffer(struct tty_struct *tty)
 	return mp->outbytes;
 }
 
+static int capinc_tty_ioctl(struct tty_struct *tty,
+			    unsigned int cmd, unsigned long arg)
+{
+	return -ENOIOCTLCMD;
+}
+
 static void capinc_tty_set_termios(struct tty_struct *tty, struct ktermios *old)
 {
 	pr_debug("capinc_tty_set_termios\n");
@@ -1271,6 +1244,7 @@ static const struct tty_operations capinc_ops = {
 	.flush_chars = capinc_tty_flush_chars,
 	.write_room = capinc_tty_write_room,
 	.chars_in_buffer = capinc_tty_chars_in_buffer,
+	.ioctl = capinc_tty_ioctl,
 	.set_termios = capinc_tty_set_termios,
 	.throttle = capinc_tty_throttle,
 	.unthrottle = capinc_tty_unthrottle,
@@ -1414,22 +1388,15 @@ static int __init capi_init(void)
 {
 	const char *compileinfo;
 	int major_ret;
-	int ret;
-
-	ret = kcapi_init();
-	if (ret)
-		return ret;
 
 	major_ret = register_chrdev(capi_major, "capi20", &capi_fops);
 	if (major_ret < 0) {
 		printk(KERN_ERR "capi20: unable to get major %d\n", capi_major);
-		kcapi_exit();
 		return major_ret;
 	}
 	capi_class = class_create(THIS_MODULE, "capi");
 	if (IS_ERR(capi_class)) {
 		unregister_chrdev(capi_major, "capi20");
-		kcapi_exit();
 		return PTR_ERR(capi_class);
 	}
 
@@ -1439,7 +1406,6 @@ static int __init capi_init(void)
 		device_destroy(capi_class, MKDEV(capi_major, 0));
 		class_destroy(capi_class);
 		unregister_chrdev(capi_major, "capi20");
-		kcapi_exit();
 		return -ENOMEM;
 	}
 
@@ -1465,8 +1431,6 @@ static void __exit capi_exit(void)
 	unregister_chrdev(capi_major, "capi20");
 
 	capinc_tty_exit();
-
-	kcapi_exit();
 }
 
 module_init(capi_init);

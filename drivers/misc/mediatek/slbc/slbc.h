@@ -18,12 +18,13 @@
 	return single_open(file, name ## _proc_show,		\
 			PDE_DATA(inode));			\
 }								\
-static const struct proc_ops name ## _proc_fops = {	\
-	.proc_open		= name ## _proc_open,			\
-	.proc_read		= seq_read,				\
-	.proc_lseek		= seq_lseek,				\
-	.proc_release	= single_release,			\
-	.proc_write		= name ## _proc_write,			\
+static const struct file_operations name ## _proc_fops = {	\
+	.owner		= THIS_MODULE,				\
+	.open		= name ## _proc_open,			\
+	.read		= seq_read,				\
+	.llseek		= seq_lseek,				\
+	.release	= single_release,			\
+	.write		= name ## _proc_write,			\
 }
 #endif /* PROC_FOPS_RW */
 
@@ -35,11 +36,12 @@ static const struct proc_ops name ## _proc_fops = {	\
 	return single_open(file, name ## _proc_show,		\
 			PDE_DATA(inode));			\
 }								\
-static const struct proc_ops name ## _proc_fops = {	\
-	.proc_open		= name ## _proc_open,			\
-	.proc_read		= seq_read,				\
-	.proc_lseek		= seq_lseek,				\
-	.proc_release	= single_release,			\
+static const struct file_operations name ## _proc_fops = {	\
+	.owner		= THIS_MODULE,				\
+	.open		= name ## _proc_open,			\
+	.read		= seq_read,				\
+	.llseek		= seq_lseek,				\
+	.release	= single_release,			\
 }
 #endif /* PROC_FOPS_RO */
 
@@ -58,16 +60,6 @@ struct slbc_config {
 	unsigned int cache_mode;
 };
 
-struct mtk_slbc {
-	struct device *dev;
-	void __iomem *regs;
-	unsigned int regsize;
-	void __iomem *sram_vaddr;
-	struct slbc_config *config;
-	struct wakeup_source *ws;
-	int slbc_qos_latency;
-};
-
 #define SLBC_ENTRY(id, sid, max, fix, p, extra, res, cache)	\
 {								\
 	.uid = id,						\
@@ -80,22 +72,7 @@ struct mtk_slbc {
 	.cache_mode = cache,					\
 }
 
-struct slbc_common_ops {
-	int (*slbc_request)(struct slbc_data *d);
-	int (*slbc_release)(struct slbc_data *d);
-	int (*slbc_power_on)(struct slbc_data *d);
-	int (*slbc_power_off)(struct slbc_data *d);
-	int (*slbc_secure_on)(struct slbc_data *d);
-	int (*slbc_secure_off)(struct slbc_data *d);
-	u32 (*slbc_sram_read)(u32 offset);
-	void (*slbc_sram_write)(u32 offset, u32 val);
-	void (*slbc_update_mm_bw)(unsigned int bw);
-	void (*slbc_update_mic_num)(unsigned int num);
-};
-
-extern u32 slbc_sram_read(u32 offset);
-extern void slbc_sram_write(u32 offset, u32 val);
-extern void slbc_register_common_ops(struct slbc_common_ops *ops);
-extern void slbc_unregister_common_ops(struct slbc_common_ops *ops);
+extern int slbc_activate(struct slbc_data *data);
+extern int slbc_deactivate(struct slbc_data *data);
 
 #endif /* _SLBC_H_ */

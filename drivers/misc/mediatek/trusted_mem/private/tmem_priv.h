@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
@@ -41,14 +42,13 @@ struct profile_mgr_desc *create_profile_mgr_desc(void);
 void trusted_mem_core_profile_dump(struct trusted_mem_device *mem_device);
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_SVP_DISABLE_SODI)
+#if defined(CONFIG_MTK_SVP_DISABLE_SODI)
 void spm_enable_sodi(bool en);
 #endif
-
 int memory_ssmr_debug_init(void);
 int trusted_mem_subsys_init(void);
 void trusted_mem_subsys_exit(void);
-#if IS_ENABLED(CONFIG_TEST_MTK_TRUSTED_MEMORY)
+#ifdef TCORE_UT_TESTS_SUPPORT
 int tmem_ut_server_init(void);
 void tmem_ut_server_exit(void);
 int tmem_ut_cases_init(void);
@@ -61,6 +61,10 @@ void mtee_mchunks_exit(void);
 #ifdef TEE_DEVICES_SUPPORT
 int tee_smem_devs_init(void);
 void tee_smem_devs_exit(void);
+#endif
+#if IS_ENABLED(CONFIG_MTK_GZ_KREE)
+int tmem_mpu_vio_init(void);
+void tmem_mpu_vio_exit(void);
 #endif
 
 #endif /* end of TMEM_PRIV_H */

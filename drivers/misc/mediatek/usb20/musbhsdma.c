@@ -11,11 +11,11 @@
 /* #include <asm/system.h> */
 #include "musb_core.h"
 #include "musbhsdma.h"
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 /* extern void __iomem	*USB_BASE; */
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 
 #define USB_DMACNTL_ADDR36_EN (1 << 14)
 #define USB_DMACNT_COUNT_MASK (0xffffff)
@@ -83,7 +83,7 @@ static struct dma_channel *dma_channel_allocate(struct dma_controller *c,
 	struct dma_channel *channel = NULL;
 	u8 bit;
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_QMU_SUPPORT)
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	/* reserve dma channel 0 for QMU */
 	for (bit = 1; bit < MUSB_HSDMA_CHANNELS; bit++) {
 #else
@@ -170,7 +170,7 @@ static void configure_channel(struct dma_channel *channel,
 	    | (musb_channel->transmit ? (1 << MUSB_HSDMA_TRANSMIT_SHIFT)
 	       : 0);
 
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	{
 		u32 val;
 
@@ -331,7 +331,7 @@ static int dma_channel_tx_status(struct dma_channel *channel)
 	 */
 	/* residue = musb_read_hsdma_count(mbase, bchannel); */
 	addr = musb_read_hsdma_addr(mbase, bchannel);
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 	addr = dma_append_high_addr(addr, mbase, bchannel);
 #endif
 	count = addr - musb_channel->start_addr;
@@ -404,7 +404,7 @@ irqreturn_t dma_controller_irq(int irq, void *private_data)
 			channel = &musb_channel->channel;
 			if (channel->status == MUSB_DMA_STATUS_BUSY) {
 				count = musb_read_hsdma_count(mbase, bchannel);
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 				count = dma_extract_count(count);
 #endif
 
@@ -437,7 +437,7 @@ irqreturn_t dma_controller_irq(int irq, void *private_data)
 				u8 devctl;
 
 				addr = musb_read_hsdma_addr(mbase, bchannel);
-#if IS_ENABLED(CONFIG_MTK_MUSB_DRV_36BIT)
+#ifdef CONFIG_MTK_MUSB_DRV_36BIT
 				addr =
 					dma_append_high_addr
 						(addr, mbase, bchannel);
@@ -599,7 +599,7 @@ u8 USB_DMA_status(u8 *pbDMAen, u8 *pbDMAdir)
 	u8 bDMAen = 0;
 	u8 bDMAdir = 0;
 
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 	for (bchannel = 0; bchannel < MUSB_HSDMA_CHANNELS; bchannel++) {
 		bDMAen |=
 		(usb_read_hsdma_ctrl(mtk_musb->mregs, bchannel) & 0x01)
@@ -632,7 +632,7 @@ EXPORT_SYMBOL(USB_DMA_status);
 
 u32 USB_DMA_address(u32 *len, u8 bchannel)
 {
-#if IS_ENABLED(CONFIG_OF)
+#ifdef CONFIG_OF
 	/* void __iomem *base = USB_BASE; */
 	if (len) {
 		*len =

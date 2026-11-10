@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012, Intel Corporation
  * Copyright (c) 2015, Red Hat, Inc.
  * Copyright (c) 2015, 2016 Linaro Ltd.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
  */
 
 #define pr_fmt(fmt) "ACPI: SPCR: " fmt
@@ -24,7 +28,7 @@ EXPORT_SYMBOL(qdf2400_e44_present);
 
 /*
  * Some Qualcomm Datacenter Technologies SoCs have a defective UART BUSY bit.
- * Detect them by examining the OEM fields in the SPCR header, similar to PCI
+ * Detect them by examining the OEM fields in the SPCR header, similiar to PCI
  * quirk detection in pci_mcfg.c.
  */
 static bool qdf2400_erratum_44_present(struct acpi_table_header *h)
@@ -111,7 +115,7 @@ int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 			table->serial_port.access_width))) {
 		default:
 			pr_err("Unexpected SPCR Access Width.  Defaulting to byte size\n");
-			fallthrough;
+			/* fall through */
 		case 8:
 			iotype = "mmio";
 			break;
@@ -128,7 +132,7 @@ int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 	switch (table->interface_type) {
 	case ACPI_DBG2_ARM_SBSA_32BIT:
 		iotype = "mmio32";
-		fallthrough;
+		/* fall through */
 	case ACPI_DBG2_ARM_PL011:
 	case ACPI_DBG2_ARM_SBSA_GENERIC:
 	case ACPI_DBG2_BCM2835:

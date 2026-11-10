@@ -32,10 +32,8 @@
 #define MAX_TTY_TX          8
 #define MAX_TTY_TX_PACKAGE  512
 
-#define FS_CH_C2K 4
-
 /* #define CONFIG_EVDO_DT_VIA_SUPPORT */
-#if IS_ENABLED(CONFIG_EVDO_DT_VIA_SUPPORT)
+#ifdef CONFIG_EVDO_DT_VIA_SUPPORT
 enum transfer_id {
 	RAWBULK_TID_MODEM,
 	RAWBULK_TID_ETS,
@@ -167,11 +165,6 @@ int rawbulk_push_upstream_buffer(int transfer_id, const void *buffer,
 int rawbulk_transfer_statistics(int transfer_id, char *buf);
 int rawbulk_transfer_state(int transfer_id);
 
-/* ko build */
-extern struct usb_function *rawbulk_alloc(struct usb_function_instance *fi,
-							int transfer_id);
-extern struct usb_function_instance *alloc_inst_rawbulk(int transfer_id);
-
 /* debug mechanism */
 extern unsigned int c2k_usb_dbg_level;	/* refer to rawbulk_transfer.c */
 static inline int c2k_dbg_level(unsigned int level)
@@ -257,6 +250,4 @@ extern int rawbulk_bind_config(struct usb_configuration *c, int transfer_id);
 extern int rawbulk_function_setup(struct usb_function *f,
 				const struct usb_ctrlrequest *ctrl);
 
-extern int rawbulk_transfer_init(void);
-extern void rawbulk_transfer_exit(void);
 #endif				/* __RAWBULK_HEADER_FILE__ */

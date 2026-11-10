@@ -15,47 +15,45 @@
 # for USB OTG silicon based on Mentor Graphics INVENTRA designs
 #
 
-ccflags-y := -I$(srctree)/drivers/usb/gadget/
-ccflags-y += -I$(srctree)/drivers/usb/gadget/function
-
 ifeq ($(MTK_ALPS_BOX_SUPPORT),yes)
 ccflags-y += -DMTK_ALPS_BOX_SUPPORT
 endif
 
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/
+usb20plat := $(subst ",,$(CONFIG_MTK_PLATFORM))
 
-# for SPM control usage
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
-
-# for musb main
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/usb20/musb_main/
-
-# for typec event
-ifeq ($(CONFIG_TCPC_CLASS),$(filter $(CONFIG_TCPC_CLASS),m y))
-	ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
+ifeq ($(CONFIG_MACH_MT6781),y)
+usb20plat := mt6781
+endif
+ifeq ($(CONFIG_MACH_MT6761),y)
+usb20plat := mt6765
+endif
+ifeq ($(CONFIG_MACH_MT6833),y)
+usb20plat := mt6833
 endif
 
-# define_trace.h needs to know how to find our header
-CFLAGS_musb_trace.o	:= -I$(src)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 
-# Driver module ko musb_hdrc
+#Platform
+obj-$(CONFIG_MACH_MT6765) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+obj-$(CONFIG_MACH_MT6761) += mt6765/
+obj-$(CONFIG_MACH_MT8163) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
 
-obj-$(CONFIG_USB_MTK_HDRC)	+= musb_hdrc.o
-musb_hdrc-y := musb_core.o musb_virthub.o musb_host.o musb_gadget_ep0.o musb_gadget.o musb_trace.o
+#Driver
+obj-$(CONFIG_USB_MTK_HDRC) += musb_hdrc.o
+musb_hdrc-$(CONFIG_USB_MTK_HDRC) := musb_core.o
+musb_hdrc-$(CONFIG_USB_MTK_HDRC) += musb_gadget_ep0.o musb_gadget.o
+musb_hdrc-$(CONFIG_USB_MTK_HDRC) += musb_virthub.o musb_host.o
+musb_hdrc-$(CONFIG_USB_MTK_HDRC) += musbhsdma.o
+musb_hdrc-$(CONFIG_DEBUG_FS) += musb_debugfs.o
 
-ifneq ($(CONFIG_MTK_MUSB_DUAL_ROLE),)
-	musb_hdrc-y	+= musb_dr.o
+# QMU Realted
+obj-$(CONFIG_MTK_MUSB_QMU_SUPPORT) += mtk_qmu.o musb_qmu.o
+ifeq ($(CONFIG_MTK_MUSB_QMU_SUPPORT),y)
+subdir-ccflags-$(CONFIG_MACH_MT8163) += -DMUSB_QMU_LIMIT_SUPPORT -DMUSB_QMU_LIMIT_RXQ_NUM=4 -DMUSB_QMU_LIMIT_TXQ_NUM=4
+endif
+ifeq ($(CONFIG_MTK_MUSB_QMU_SUPPORT),y)
+subdir-ccflags-$(CONFIG_MACH_MT8167) += -DMUSB_QMU_LIMIT_SUPPORT -DMUSB_QMU_LIMIT_RXQ_NUM=4 -DMUSB_QMU_LIMIT_TXQ_NUM=4
 endif
 
-ifneq ($(CONFIG_PROC_FS),)
-	musb_hdrc-y	+= musb_debugfs.o
-endif
-
-ifneq ($(CONFIG_MTK_MUSB_QMU_SUPPORT),)
-	musb_hdrc-y	+=  mtk_qmu.o musb_qmu.o
-endif
-
-musb_hdrc-y += musbhsdma.o usb20_host.o
-
-obj-$(CONFIG_USB_MTK_HDRC)	+= musb_main/
+obj-$(CONFIG_DUAL_ROLE_USB_INTF) += mtk_dual_role.o
 

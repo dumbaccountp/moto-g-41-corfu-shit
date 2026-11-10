@@ -13,21 +13,25 @@
 
 ifeq ($(CONFIG_MTK_ECCCI_DRIVER), y)
 
+ifndef MTK_PLATFORM
+MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
+endif
+
 ccflags-y += -I$(srctree)/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/inc
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/port
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/platform
+#ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/$(MTK_PLATFORM)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/conn_md/include/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccmni
-#ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6873
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6873
+#ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/udc
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/udc/udc_lib_inc
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/clkbuf_v1
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/hif
 
 # port objects
 obj-$(CONFIG_MTK_ECCCI_DRIVER) := ccci_port.o
@@ -35,6 +39,7 @@ ccci_port-y := port_cfg.o \
 		port_char.o \
 		port_ctlmsg.o \
 		port_udc.o \
+		port_misc.o \
 		port_ipc.o \
 		port_net.o \
 		port_poller.o \
@@ -46,8 +51,7 @@ ccci_port-y := port_cfg.o \
 
 endif
 
-# Disable SWTP on factory version for devonn
-ifeq ($(TARGET_PRODUCT),devonn_factory)
-ccflags-y += -DDISABLE_SWTP_FACTORY
+# Add for corfu series
+ifeq ($(filter corfu cofud coful milan,$(TARGET_PRODUCT)),)
+ccflags-y += -DSWTP_GPIO_STATE_CUST
 endif
-

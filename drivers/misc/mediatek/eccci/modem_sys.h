@@ -31,6 +31,11 @@ enum MD_COMM_TYPE {
 	CCIF_MPU_INTR,
 };
 
+enum LOW_POEWR_NOTIFY_TYPE {
+	LOW_BATTERY,
+	BATTERY_PERCENT,
+};
+
 enum MODEM_EE_FLAG {
 	EE_FLAG_ENABLE_WDT = (1 << 0),
 	EE_FLAG_DISABLE_WDT = (1 << 1),
@@ -44,6 +49,10 @@ enum LOGGING_MODE {
 	MODE_POLLING,		   /* 3 */
 	MODE_WAITSD,			/* 4 */
 };
+
+#define NORMAL_BOOT_ID 0
+#define META_BOOT_ID 1
+#define FACTORY_BOOT_ID	2
 
 #define MD_SETTING_ENABLE (1<<0)
 #define MD_SETTING_RELOAD (1<<1)
@@ -86,18 +95,26 @@ struct ccci_modem_ops {
 	int (*force_assert)(struct ccci_modem *md, enum MD_COMM_TYPE type);
 	int (*dump_info)(struct ccci_modem *md, enum MODEM_DUMP_FLAG flag,
 		void *buff, int length);
+	int (*low_power_notify)(struct ccci_modem *md,
+		enum LOW_POEWR_NOTIFY_TYPE type, int level);
 	int (*ee_callback)(struct ccci_modem *md, enum MODEM_EE_FLAG flag);
 	int (*send_ccb_tx_notify)(struct ccci_modem *md, int core_id);
 	int (*reset_pccif)(struct ccci_modem *md);
 };
 
 struct md_sys1_info {
+		void __iomem *ap_ccif_base;
+		void __iomem *md_ccif_base;
 		int channel_id;		/* CCIF channel */
 		atomic_t ccif_irq_enabled;
 		unsigned int ap_ccif_irq_id;
 		unsigned long ap_ccif_irq_flags;
 
+#ifdef FEATURE_SCP_CCCI_SUPPORT
+		struct work_struct scp_md_state_sync_work;
+#endif
 		void __iomem *md_rgu_base;
+		void __iomem *l1_rgu_base;
 		void __iomem *md_global_con0;
 
 #ifdef MD_PEER_WAKEUP
@@ -115,6 +132,7 @@ struct md_sys1_info {
 
 		void __iomem *md_boot_slave_Vector;
 		void __iomem *md_boot_slave_Key;
+		void __iomem *md_boot_slave_En;
 };
 
 struct md_sys3_info {
@@ -175,21 +193,28 @@ int ccci_md_register(struct ccci_modem *modem);
 
 static inline struct ccci_modem *ccci_md_get_modem_by_id(int md_id)
 {
-	if ((md_id < 0) || (md_id >= MAX_MD_NUM))
+	if (md_id >= MAX_MD_NUM || md_id < 0)
 		return NULL;
 	return modem_sys[md_id];
 }
 
 static inline struct device *ccci_md_get_dev_by_id(int md_id)
 {
-	if ((md_id < 0) || (md_id >= MAX_MD_NUM))
+	if (md_id >= MAX_MD_NUM || md_id < 0)
 		return NULL;
 	return &modem_sys[md_id]->plat_dev->dev;
 }
 
+static inline int ccci_md_in_ee_dump(int md_id)
+{
+	if (md_id >= MAX_MD_NUM || md_id < 0)
+		return -CCCI_ERR_MD_INDEX_NOT_FOUND;
+	return modem_sys[md_id]->per_md_data.is_in_ee_dump;
+}
+
 static inline void *ccci_md_get_hw_info(int md_id)
 {
-	if ((md_id < 0) || (md_id >= MAX_MD_NUM))
+	if (md_id >= MAX_MD_NUM || md_id < 0)
 		return NULL;
 	return modem_sys[md_id]->hw_info;
 }
@@ -227,7 +252,7 @@ extern int get_md_customer_val(unsigned char *value, unsigned int len);
 #endif
 extern bool spm_is_md1_sleep(void);
 
-//extern unsigned int trace_sample_time;
+extern unsigned int trace_sample_time;
 
 extern u32 mt_irq_get_pending(unsigned int irq);
 
@@ -235,12 +260,4 @@ extern u32 mt_irq_get_pending(unsigned int irq);
 extern int gf_port_list_reg[GF_PORT_LIST_MAX];
 extern int gf_port_list_unreg[GF_PORT_LIST_MAX];
 extern int ccci_ipc_set_garbage_filter(struct ccci_modem *md, int reg);
-void ccci_md_config_layout_6293(struct ccci_modem *md);
-
-extern int ccci_modem_init_common(struct platform_device *plat_dev,
-	struct ccci_dev_cfg *dev_cfg, struct md_hw_info *md_hw);
-
-extern int mrdump_mini_add_extra_file(unsigned long vaddr, unsigned long paddr,
-	unsigned long size, const char *name);
-
 #endif	/* __CCCI_MODEM_H__ */

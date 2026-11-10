@@ -1,25 +1,23 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2016 MediaTek Inc.
- * Author: Zhiyong Tao <zhiyong.tao@mediatek.com>
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/device.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/mod_devicetable.h>
+#include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
-#include <linux/of_platform.h>
-#include <linux/property.h>
 #include <linux/iopoll.h>
 #include <linux/io.h>
 #include <linux/iio/iio.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/nvmem-consumer.h>
+#include "../../misc/mediatek/include/mt-plat/mtk_devinfo.h"
 
 /* Register definitions */
 #define MT6577_AUXADC_CON0                    0x00
@@ -113,14 +111,11 @@ struct adc_cali_info {
 
 static struct adc_cali_info adc_cali;
 
-static int mt_auxadc_update_cali(struct device *dev)
+static void mt_auxadc_update_cali(struct device *dev)
 {
 	struct device_node *np = dev->of_node;
 #if IS_ENABLED(CONFIG_MTK_DEVINFO)
 	struct nvmem_device *nvmem_dev;
-	struct device_node *efuse_node;
-	struct platform_device *efuse_pdev;
-	struct device_link  *link;
 #endif
 	u32 reg;
 	int ret = 0;
@@ -142,32 +137,6 @@ static int mt_auxadc_update_cali(struct device *dev)
 			goto err;
 
 #if IS_ENABLED(CONFIG_MTK_DEVINFO)
-		efuse_node = of_find_compatible_node(NULL, NULL,
-						     "mediatek,devinfo");
-		if (!efuse_node) {
-			dev_notice(dev, "find mediatek,devinfo fail\n");
-			ret = -ENODEV;
-			goto err;
-		}
-		efuse_pdev = of_find_device_by_node(efuse_node);
-		if (!efuse_pdev) {
-			dev_notice(dev, "find efuse_pdev fail\n");
-			ret = -ENODEV;
-			goto err;
-		}
-		link = device_link_add(dev, &efuse_pdev->dev,
-			DL_FLAG_AUTOPROBE_CONSUMER);
-		if (!link) {
-			dev_notice(dev, "add efuse device_link fail\n");
-			ret = -ENODEV;
-			goto err;
-		}
-		/* supplier is not probed */
-		if (link->status == DL_STATE_DORMANT) {
-			ret = -EPROBE_DEFER;
-			goto err;
-		}
-
 		ret = of_property_read_u32(np, "mediatek,cali-efuse-reg-offset",
 			&adc_cali.efuse_reg_offset);
 		if (ret)
@@ -175,7 +144,6 @@ static int mt_auxadc_update_cali(struct device *dev)
 		nvmem_dev = nvmem_device_get(dev, "mtk_efuse");
 		if (IS_ERR(nvmem_dev)) {
 			dev_notice(dev, "failed to get mtk_efuse device\n");
-			ret = -ENODEV;
 			goto err;
 		}
 		ret = nvmem_device_read(nvmem_dev,
@@ -183,7 +151,6 @@ static int mt_auxadc_update_cali(struct device *dev)
 		if (ret != 4) {
 			dev_notice(dev, "error efuse read size: %d\n", ret);
 			nvmem_device_put(nvmem_dev);
-			ret = -ENODEV;
 			goto err;
 		}
 		nvmem_device_put(nvmem_dev);
@@ -215,11 +182,10 @@ static int mt_auxadc_update_cali(struct device *dev)
 			adc_cali.cali_oe = adc_cali.efuse_oe - 512;
 		}
 
-		return 0;
+		return;
 	}
 err:
-	dev_notice(dev, "fail to get some dt info! ret=%d\n", ret);
-	return ret;
+	dev_notice(dev, "fail to get some dt info!\n");
 }
 
 static int mt_auxadc_get_cali_data(int rawdata, bool enable_cali)
@@ -270,7 +236,7 @@ static int mt6577_auxadc_read(struct iio_dev *indio_dev,
 				 MT6577_AUXADC_SLEEP_US,
 				 MT6577_AUXADC_TIMEOUT_US);
 	if (ret < 0) {
-		dev_err(indio_dev->dev.parent,
+		dev_notice(indio_dev->dev.parent,
 			"wait for channel[%d] ready bit clear time out\n",
 			chan->channel);
 		goto err_timeout;
@@ -289,7 +255,7 @@ static int mt6577_auxadc_read(struct iio_dev *indio_dev,
 					 MT6577_AUXADC_SLEEP_US,
 					 MT6577_AUXADC_TIMEOUT_US);
 		if (ret < 0) {
-			dev_err(indio_dev->dev.parent,
+			dev_notice(indio_dev->dev.parent,
 				"wait for auxadc idle time out\n");
 			goto err_timeout;
 		}
@@ -301,7 +267,7 @@ static int mt6577_auxadc_read(struct iio_dev *indio_dev,
 				 MT6577_AUXADC_SLEEP_US,
 				 MT6577_AUXADC_TIMEOUT_US);
 	if (ret < 0) {
-		dev_err(indio_dev->dev.parent,
+		dev_notice(indio_dev->dev.parent,
 			"wait for channel[%d] data ready time out\n",
 			chan->channel);
 		goto err_timeout;
@@ -346,7 +312,7 @@ static int mt6577_auxadc_read_raw(struct iio_dev *indio_dev,
 	case IIO_CHAN_INFO_PROCESSED:
 		*val = mt6577_auxadc_read(indio_dev, chan);
 		if (*val < 0) {
-			dev_err(indio_dev->dev.parent,
+			dev_notice(indio_dev->dev.parent,
 				"failed to sample data on channel[%d]\n",
 				chan->channel);
 			return *val;
@@ -376,7 +342,7 @@ static int __maybe_unused mt6577_auxadc_resume(struct device *dev)
 
 	ret = clk_prepare_enable(adc_dev->adc_clk);
 	if (ret) {
-		pr_err("failed to enable auxadc clock\n");
+		pr_notice("failed to enable auxadc clock\n");
 		return ret;
 	}
 
@@ -459,6 +425,7 @@ static int mt6577_auxadc_probe(struct platform_device *pdev)
 {
 	struct mt6577_auxadc_device *adc_dev;
 	unsigned long adc_clk_rate;
+	struct resource *res;
 	struct iio_dev *indio_dev;
 	int ret;
 
@@ -467,44 +434,43 @@ static int mt6577_auxadc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	adc_dev = iio_priv(indio_dev);
+	indio_dev->dev.parent = &pdev->dev;
 	indio_dev->name = dev_name(&pdev->dev);
 	indio_dev->info = &mt6577_auxadc_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = mt6577_auxadc_iio_channels;
 	indio_dev->num_channels = ARRAY_SIZE(mt6577_auxadc_iio_channels);
 
-	adc_dev->reg_base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	adc_dev->reg_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(adc_dev->reg_base)) {
-		dev_err(&pdev->dev, "failed to get auxadc base address\n");
+		dev_notice(&pdev->dev, "failed to get auxadc base address\n");
 		return PTR_ERR(adc_dev->reg_base);
 	}
 
 	adc_dev->adc_clk = devm_clk_get(&pdev->dev, "main");
 	if (IS_ERR(adc_dev->adc_clk)) {
-		dev_err(&pdev->dev, "failed to get auxadc clock\n");
+		dev_notice(&pdev->dev, "failed to get auxadc clock\n");
 		return PTR_ERR(adc_dev->adc_clk);
 	}
 
 	ret = clk_prepare_enable(adc_dev->adc_clk);
 	if (ret) {
-		dev_err(&pdev->dev, "failed to enable auxadc clock\n");
+		dev_notice(&pdev->dev, "failed to enable auxadc clock\n");
 		return ret;
 	}
 
 	adc_clk_rate = clk_get_rate(adc_dev->adc_clk);
 	if (!adc_clk_rate) {
 		ret = -EINVAL;
-		dev_err(&pdev->dev, "null clock rate\n");
+		dev_notice(&pdev->dev, "null clock rate\n");
 		goto err_disable_clk;
 	}
 
-	adc_dev->dev_comp = device_get_match_data(&pdev->dev);
+	adc_dev->dev_comp = of_device_get_match_data(&pdev->dev);
 
-	if (adc_dev->dev_comp->sample_data_cali) {
-		ret = mt_auxadc_update_cali(&pdev->dev);
-		if (ret)
-			goto err_disable_clk;
-	}
+	if (adc_dev->dev_comp->sample_data_cali)
+		mt_auxadc_update_cali(&pdev->dev);
 
 	mutex_init(&adc_dev->lock);
 
@@ -516,7 +482,7 @@ static int mt6577_auxadc_probe(struct platform_device *pdev)
 
 	ret = iio_device_register(indio_dev);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "failed to register iio device\n");
+		dev_notice(&pdev->dev, "failed to register iio device\n");
 		goto err_power_off;
 	}
 
@@ -559,6 +525,7 @@ static const struct of_device_id mt6577_auxadc_of_match[] = {
 	{ .compatible = "mediatek,mt7622-auxadc", .data = &mt8173_compat},
 	{ .compatible = "mediatek,mt8173-auxadc", .data = &mt8173_compat},
 	{ .compatible = "mediatek,mt6765-auxadc", .data = &mt6765_compat},
+	{ .compatible = "mediatek,mt6768-auxadc", .data = &mt6765_compat},
 	{ }
 };
 MODULE_DEVICE_TABLE(of, mt6577_auxadc_of_match);
@@ -572,7 +539,19 @@ static struct platform_driver mt6577_auxadc_driver = {
 	.probe	= mt6577_auxadc_probe,
 	.remove	= mt6577_auxadc_remove,
 };
-module_platform_driver(mt6577_auxadc_driver);
+
+static int __init mt6577_auxadc_init(void)
+{
+	return platform_driver_register(&mt6577_auxadc_driver);
+}
+
+static void __exit mt6577_auxadc_exit(void)
+{
+	platform_driver_unregister(&mt6577_auxadc_driver);
+}
+
+subsys_initcall(mt6577_auxadc_init);
+module_exit(mt6577_auxadc_exit);
 
 MODULE_AUTHOR("Zhiyong Tao <zhiyong.tao@mediatek.com>");
 MODULE_DESCRIPTION("MTK AUXADC Device Driver");

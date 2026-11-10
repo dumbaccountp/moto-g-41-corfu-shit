@@ -10,19 +10,12 @@
 #include <asm/memory.h>
 #include <asm/smp_plat.h>
 #include <asm-generic/sections.h>
-#if IS_ENABLED(CONFIG_MEDIATEK_CACHE_API)
-#include <linux/soc/mediatek/mtk_cache.h>
-#endif
+
 #if IS_ENABLED(CONFIG_MTK_AEE_IPANIC)
 #include <mt-plat/mboot_params.h>
 #endif
 
 #include "mrdump_helper.h"
-
-#define DEBUG_COMPATIBLE "mediatek,aee_debug_kinfo"
-
-#define MBOOT_PARAMS_DRAM_OFF	0x1000
-#define MBOOT_PARAMS_DRAM_SIZE	0x1000
 
 extern int kernel_addr_valid(unsigned long addr);
 #define mrdump_virt_addr_valid(kaddr) \
@@ -39,8 +32,8 @@ struct mrdump_params {
 };
 
 extern struct mrdump_control_block *mrdump_cblock;
+
 extern const unsigned long kallsyms_addresses[] __weak;
-extern const int kallsyms_offsets[] __weak;
 extern const u8 kallsyms_names[] __weak;
 extern const u8 kallsyms_token_table[] __weak;
 extern const u16 kallsyms_token_index[] __weak;
@@ -51,14 +44,25 @@ __attribute__((weak, section(".rodata")));
 #ifdef MODULE
 int mrdump_module_init_mboot_params(void);
 #endif
-void mrdump_cblock_init(const struct mrdump_params *mparams);
-void mrdump_cblock_late_init(void);
-int mrdump_full_init(const char *version);
+int mrdump_hw_init(bool drm_enabled);
+void mrdump_cblock_init(phys_addr_t cb_addr, phys_addr_t cb_size);
+int mrdump_full_init(void);
 int mrdump_mini_init(const struct mrdump_params *mparams);
 
-uint64_t mrdump_get_mpt(void);
 void mrdump_save_control_register(void *creg);
 
+extern void mrdump_mini_ke_cpu_regs(struct pt_regs *regs);
+extern int mrdump_modules_info(unsigned char *buffer, size_t sz_buf);
+
+/* for WDT timeout case : dump timer/schedule/irq/softirq etc...
+ * debug information
+ */
+#ifdef CONFIG_MTK_SCHED_EXTENSION
+extern void sysrq_sched_debug_show_at_AEE(void);
+#endif
+#if IS_ENABLED(CONFIG_MTK_WQ_DEBUG)
+extern void wq_debug_dump(void);
+#endif
 
 #if defined(__arm__)
 static inline void crash_setup_regs(struct pt_regs *newregs,

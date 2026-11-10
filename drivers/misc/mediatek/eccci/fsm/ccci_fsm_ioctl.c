@@ -3,6 +3,9 @@
  * Copyright (C) 2016 MediaTek Inc.
  */
 
+#ifdef CONFIG_MTK_SIM_LOCK_POWER_ON_WRITE_PROTECT
+/* #include <mt-plat/env.h> Fix me, header file not found */
+#endif
 #include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/module.h>
@@ -42,11 +45,11 @@ unsigned int get_sim_switch_type(void)
 
 static int fsm_md_data_ioctl(int md_id, unsigned int cmd, unsigned long arg)
 {
-	int ret = 0, retry = 0;
-	int data = 0;
-	char buffer[64] = {0};
-	unsigned int sim_slot_cfg[4] = {0};
-	char ap_platform[5] = {0};
+	int ret = 0, retry;
+	int data;
+	char buffer[64];
+	unsigned int sim_slot_cfg[4];
+	char ap_platform[5];
 	int md_gen = 0;
 	struct device_node *node = NULL;
 	struct ccci_per_md *per_md_data = ccci_get_per_md_data(md_id);
@@ -60,16 +63,33 @@ static int fsm_md_data_ioctl(int md_id, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case CCCI_IOC_GET_MD_PROTOCOL_TYPE:
-		snprintf(buffer, sizeof(buffer), "%d",
-			md_gen);
-		snprintf((void *)ap_platform, sizeof(ap_platform), "%d",
-			md_gen);
+
+
+#if (MD_GENERATION < 6292)
+		if (copy_to_user((void __user *)arg, "DHL", sizeof("DHL"))) {
+			CCCI_ERROR_LOG(md_id, FSM,
+				"CCCI_IOC_GET_MD_PROTOCOL_TYPE: copy_from_user fail\n");
+			return -EFAULT;
+		}
+#else
+		/*fix me :The buffer is not used in and can be deleted*/
+		ret = snprintf(buffer, sizeof(buffer), "%d", MD_GENERATION);
+		if (ret < 0 || ret >= sizeof(buffer)) {
+			CCCI_ERROR_LOG(md_id, FSM,
+				"%s-%d:snprintf fail,ret = %d\n", __func__, __LINE__, ret);
+			ret = -EFAULT;
+		}
+		ret = 0;
+//		snprintf(buffer, sizeof(buffer), "%d",md_gen);
+
+		snprintf((void *)ap_platform, sizeof(ap_platform), "%d", md_gen);
 		if (copy_to_user((void __user *)arg,
 			ap_platform, sizeof(ap_platform))) {
 			CCCI_ERROR_LOG(md_id, FSM,
 				"CCCI_IOC_GET_MD_PROTOCOL_TYPE: copy_from_user fail\n");
 			return -EFAULT;
 		}
+#endif
 		break;
 	case CCCI_IOC_SEND_BATTERY_INFO:
 		data = (int)battery_get_bat_voltage();
@@ -99,6 +119,29 @@ static int fsm_md_data_ioctl(int md_id, unsigned int cmd, unsigned long arg)
 			;
 		ret = 0;
 		break;
+#ifdef CONFIG_MTK_SIM_LOCK_POWER_ON_WRITE_PROTECT
+#ifdef ENABLE_SIM_LOCK_RANDOM
+	case CCCI_IOC_SIM_LOCK_RANDOM_PATTERN: /* Fix me */
+		if (copy_from_user(&val, (void __user *)arg,
+				sizeof(unsigned int)))
+			CCCI_ERROR_LOG(md_id, FSM,
+			"CCCI_IOC_SIM_LOCK_RANDOM_PATTERN: copy_from_user fail\n");
+
+		CCCI_NORMAL_LOG(md_id, FSM,
+			"get SIM lock random pattern %x\n", data);
+
+		ret = snprintf(buffer, sizeof(buffer), "%x", data);
+		if (ret < 0 || ret >= sizeof(buffer)) {
+			CCCI_ERROR_LOG(md_id, FSM,
+				"%s-%d:snprintf fail,ret = %d\n", __func__, __LINE__, ret);
+			ret = -EFAULT;
+			break;
+		}
+		ret = 0;
+		set_env("sml_sync", buffer);
+		break;
+#endif
+#endif
 	case CCCI_IOC_SET_MD_BOOT_MODE:
 		if (copy_from_user(&data, (void __user *)arg,
 				sizeof(unsigned int))) {
@@ -413,15 +456,27 @@ long ccci_fsm_ioctl(int md_id, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	case CCCI_IOC_GET_MD_STATE:
 		state_for_user = ccci_fsm_get_md_state_for_user(md_id);
-		ret = put_user((unsigned int)state_for_user,
-				(unsigned int __user *)arg);
-
+		if (state_for_user >= 0) {
+			ret = put_user((unsigned int)state_for_user,
+					(unsigned int __user *)arg);
+		} else {
+			CCCI_ERROR_LOG(md_id, FSM,
+				"Get MD state fail: %d\n", state_for_user);
+			ret = state_for_user;
+		}
 		break;
 	case CCCI_IOC_GET_OTHER_MD_STATE:
 		state_for_user =
 		ccci_fsm_get_md_state_for_user(GET_OTHER_MD_ID(md_id));
-		ret = put_user((unsigned int)state_for_user,
-				(unsigned int __user *)arg);
+		if (state_for_user >= 0) {
+			ret = put_user((unsigned int)state_for_user,
+					(unsigned int __user *)arg);
+		} else {
+			CCCI_ERROR_LOG(md_id, FSM,
+				"Get other MD state fail: %d\n",
+				state_for_user);
+			ret = state_for_user;
+		}
 		break;
 	case CCCI_IOC_MD_RESET:
 		CCCI_NORMAL_LOG(md_id, FSM,

@@ -7,27 +7,11 @@
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include "apusys_trace.h"
-#include "sw_logger.h"
 
 static noinline int tracing_mark_write(const char *buf)
 {
 	TRACE_PUTS(buf);
 	return 0;
-}
-
-void trace_tag_customer(const char *fmt, ...)
-{
-	char buf[TRACE_LEN];
-	uint32_t ret;
-	va_list args;
-
-	va_start(args, fmt);
-	ret = vsnprintf(buf, TRACE_LEN, fmt, args);
-	if (ret < 0)
-		pr_info("%s: vsnprintf error\n", __func__);
-	va_end(args);
-
-	tracing_mark_write(buf);
 }
 
 void trace_tag_begin(const char *format, ...)
@@ -42,6 +26,7 @@ void trace_tag_begin(const char *format, ...)
 
 	tracing_mark_write(buf);
 }
+EXPORT_SYMBOL(trace_tag_begin);
 
 void trace_tag_end(void)
 {
@@ -54,6 +39,7 @@ void trace_tag_end(void)
 
 	tracing_mark_write(buf);
 }
+EXPORT_SYMBOL(trace_tag_end);
 
 void trace_async_tag(bool isBegin, const char *format, ...)
 {
@@ -72,3 +58,4 @@ void trace_async_tag(bool isBegin, const char *format, ...)
 
 	tracing_mark_write(buf);
 }
+EXPORT_SYMBOL(trace_async_tag);

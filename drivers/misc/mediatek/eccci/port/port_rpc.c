@@ -10,7 +10,6 @@
 #include <linux/wait.h>
 #include <linux/module.h>
 #include <linux/poll.h>
-#include <linux/mm_types.h>
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
 #endif
@@ -26,15 +25,16 @@
 #include <linux/of_address.h>
 #include "ccci_config.h"
 #include "ccci_common_config.h"
-#include <linux/arm-smccc.h>
-#include <linux/soc/mediatek/mtk_sip_svc.h>
 
-#define TRNG_MAGIC		0x74726e67
 #ifdef FEATURE_INFORM_NFC_VSIM_CHANGE
 #include <mach/mt6605.h>
 #endif
 #ifdef FEATURE_RF_CLK_BUF
 #include <mtk-clkbuf-bridge.h>
+#include <mtk_clkbuf_ctl.h>
+#endif
+#ifdef CONFIG_MTK_OTP
+#include <mt-plat/mtk_otp.h>
 #endif
 
 #include "ccci_core.h"
@@ -42,10 +42,6 @@
 #include "ccci_bm.h"
 #include "ccci_modem.h"
 #include "port_rpc.h"
-#ifdef CONFIG_MOTO_DRDI_SUPPORT
-#include "mt-plat/mtk_ccci_common.h"
-#endif
-
 #define MAX_QUEUE_LENGTH 16
 
 static struct gpio_item gpio_mapping_table[] = {
@@ -80,9 +76,24 @@ static int get_md_gpio_val(unsigned int num)
 
 static int get_md_adc_val(__attribute__((unused))unsigned int num)
 {
-	int val = ccci_get_adc_val();
+#ifdef CONFIG_MTK_AUXADC
+	int data[4] = { 0, 0, 0, 0 };
+	int val = 0;
+	int ret = 0;
 
-	return val;
+	ret = IMM_GetOneChannelValue(num, data, &val);
+	if (ret == 0)
+		return val;
+	else
+		return ret;
+#endif
+
+#ifdef CONFIG_MEDIATEK_MT6577_AUXADC
+	return ccci_get_adc_val();
+#endif
+	CCCI_ERROR_LOG(0, RPC, "%s:ERR:CONFIG AUXADC and IIO not ready",
+		__func__);
+	return -1;
 }
 
 
@@ -94,10 +105,17 @@ static int get_td_eint_info(char *eint_name, unsigned int len)
 static int get_md_adc_info(__attribute__((unused))char *adc_name,
 			   __attribute__((unused))unsigned int len)
 {
-	int num = ccci_get_adc_num();
+#ifdef CONFIG_MTK_AUXADC
+	return IMM_get_adc_channel_num(adc_name, len);
+#endif
 
-	CCCI_NORMAL_LOG(0, RPC, "ADC channel num:%d\n", num);
-	return num;
+#ifdef CONFIG_MEDIATEK_MT6577_AUXADC
+	return ccci_get_adc_num();
+#endif
+
+	CCCI_ERROR_LOG(0, RPC, "%s:ERR:CONFIG AUXADC and IIO not ready",
+		__func__);
+	return -1;
 }
 
 static char *md_gpio_name_convert(char *gpio_name, unsigned int len)
@@ -174,6 +192,29 @@ static int get_md_gpio_info(char *gpio_name,
 	return gpio_id;
 }
 
+static void md_drdi_gpio_status_scan(void)
+{
+	int i;
+	int size;
+	int gpio_id;
+	int gpio_md_view;
+	char *curr;
+	int val;
+
+	CCCI_BOOTUP_LOG(0, RPC, "scan didr gpio status\n");
+	for (i = 0; i < ARRAY_SIZE(gpio_mapping_table); i++) {
+		curr = gpio_mapping_table[i].gpio_name_from_md;
+		size = strlen(curr) + 1;
+		gpio_md_view = -1;
+		gpio_id = get_md_gpio_info(curr, size, &gpio_md_view);
+		if (gpio_id >= 0) {
+			val = get_md_gpio_val(gpio_id);
+			CCCI_BOOTUP_LOG(0, RPC, "GPIO[%s]%d(%d@md),val:%d\n",
+					curr, gpio_id, gpio_md_view, val);
+		}
+	}
+}
+
 static int get_dram_type_clk(int *clk, int *type)
 {
 	return -1;
@@ -219,8 +260,8 @@ struct eint_node_struct eint_node_prop = {
 
 static int get_eint_attr_val(int md_id, struct device_node *node, int index)
 {
-	int value = 0;
-	int ret = 0, type = 0;
+	int value;
+	int ret = 0, type;
 
 	/* unit of AP eint is us, but unit of MD eint is ms.
 	 * So need covertion here.
@@ -378,7 +419,7 @@ static void get_md_dtsi_debug(void)
 {
 	struct ccci_rpc_md_dtsi_input input;
 	struct ccci_rpc_md_dtsi_output output;
-	int ret;
+	int ret = 0;
 
 	input.req = RPC_REQ_PROP_VALUE;
 	output.retValue = 0;
@@ -446,9 +487,6 @@ static void ccci_rpc_get_gpio_adc(struct ccci_rpc_gpio_adc_intput *input,
 				val = get_md_adc_val(num);
 				output->adcChMeasSum += val;
 			}
-			CCCI_NORMAL_LOG(0, RPC,
-					"%s, reqMask:%d, adcChmeasCount:%u, adcChMeasSum:%u\n",
-					__func__, input->reqMask, i, output->adcChMeasSum);
 		}
 	} else {
 		if (input->reqMask & RPC_REQ_ADC_PIN) {
@@ -463,9 +501,6 @@ static void ccci_rpc_get_gpio_adc(struct ccci_rpc_gpio_adc_intput *input,
 				val = get_md_adc_val(input->adcChNum);
 				output->adcChMeasSum += val;
 			}
-			CCCI_NORMAL_LOG(0, RPC,
-					"%s, reqMask:%d, adcChmeasCount:%u, adcChMeasSum:%u\n",
-					__func__, input->reqMask, i, output->adcChMeasSum);
 		}
 	}
 }
@@ -524,9 +559,6 @@ static void ccci_rpc_get_gpio_adc_v2(struct ccci_rpc_gpio_adc_intput_v2 *input,
 				val = get_md_adc_val(num);
 				output->adcChMeasSum += val;
 			}
-			CCCI_NORMAL_LOG(0, RPC,
-					"%s, reqMask:%d, adcChmeasCount:%u, adcChMeasSum:%u\n",
-					__func__, input->reqMask, i, output->adcChMeasSum);
 		}
 	} else {
 		if (input->reqMask & RPC_REQ_ADC_PIN) {
@@ -541,9 +573,6 @@ static void ccci_rpc_get_gpio_adc_v2(struct ccci_rpc_gpio_adc_intput_v2 *input,
 				val = get_md_adc_val(input->adcChNum);
 				output->adcChMeasSum += val;
 			}
-			CCCI_NORMAL_LOG(0, RPC,
-					"%s, reqMask:%d, adcChmeasCount:%u, adcChMeasSum:%u\n",
-					__func__, input->reqMask, i, output->adcChMeasSum);
 		}
 	}
 }
@@ -1047,6 +1076,31 @@ static void ccci_rpc_work_helper(struct port_t *port, struct rpc_pkt *pkt,
 			break;
 		}
 #endif
+
+#ifdef CONFIG_MTK_OTP
+		/* Fall through */
+		case IPC_RPC_EFUSE_BLOWING:
+			{
+				unsigned int *buf_data;
+				unsigned int cmd;
+
+				buf_data = (unsigned int *) (pkt[0].buf);
+				cmd = *buf_data;
+
+				tmp_data[1] = otp_ccci_handler(cmd);
+				pkt_num = 0;
+				tmp_data[0] = 0;
+				pkt[pkt_num].len = sizeof(unsigned int);
+				pkt[pkt_num++].buf = (void *)&tmp_data[0];
+				pkt[pkt_num].len = sizeof(unsigned int);
+				pkt[pkt_num++].buf = (void *)&tmp_data[1];
+				CCCI_NORMAL_LOG(md_id, RPC,
+					"[IPC_RPC_EFUSE_BLOWING] cmd = 0x%X, return 0x%X\n",
+					cmd, tmp_data[1]);
+				break;
+			}
+#endif
+
 	case IPC_RPC_CCCI_LHIF_MAPPING:
 		{
 			struct ccci_rpc_queue_mapping *remap;
@@ -1115,34 +1169,6 @@ static void ccci_rpc_work_helper(struct port_t *port, struct rpc_pkt *pkt,
 		CCCI_NORMAL_LOG(md_id, RPC,
 			"enter QUERY CARD_TYPE operation in ccci_rpc_work\n");
 		break;
-	case IPC_RPC_TRNG:
-		{
-			struct arm_smccc_res res = {0};
-
-			if (pkt_num != 1) {
-				CCCI_ERROR_LOG(md_id, RPC,
-				"invalid parameter for [0x%X]: pkt_num=%d!\n",
-					     p_rpc_buf->op_id, pkt_num);
-				tmp_data[0] = FS_PARAM_ERROR;
-				pkt_num = 0;
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)&tmp_data[0];
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)&tmp_data[0];
-				break;
-			}
-			arm_smccc_smc(MTK_SIP_KERNEL_GET_RND,
-				TRNG_MAGIC, 0, 0, 0, 0, 0, 0, &res);
-			pkt_num = 0;
-			tmp_data[0] = 0;
-			tmp_data[1] = res.a0;
-			pkt[pkt_num].len = sizeof(unsigned int);
-			pkt[pkt_num++].buf = (void *)&tmp_data[0];
-			pkt[pkt_num].len = sizeof(unsigned int);
-			pkt[pkt_num++].buf = (void *)&tmp_data[1];
-			break;
-
-		}
 	case IPC_RPC_IT_OP:
 		{
 			int i;
@@ -1172,76 +1198,7 @@ static void ccci_rpc_work_helper(struct port_t *port, struct rpc_pkt *pkt,
 			1, pkt[1].len, *((unsigned int *)pkt[1].buf));
 			break;
 		}
-#ifdef CONFIG_MOTO_DRDI_SUPPORT
-	case IPC_RPC_PRODUCT_OP:
-		{
-			struct ccci_product_data_t *product_data = NULL;
-			unsigned int product_data_len = 0;
 
-			CCCI_NORMAL_LOG(md_id, RPC,
-				"enter IPC_RPC_PRODUCT_OP\n");
-			product_data = ccci_rpc_get_product_data(&product_data_len);
-			if (!product_data) {
-				CCCI_ERROR_LOG(md_id, RPC, "%s:get product_data fail\n",
-					__func__);
-			}
-
-			if (product_data_len <= 0) {
-				tmp_data[0] = -1;
-				pkt_num = 0;
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[1]);
-				break;
-			}
-
-			pkt_num = 0;
-			pkt[pkt_num].len = sizeof(unsigned int);
-			pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-			pkt[pkt_num].len = product_data_len;
-			pkt[pkt_num++].buf = (void *)product_data;
-
-			break;
-		}
-#endif
-
-#ifdef CONFIG_MOTO_CCCI_SEC_SUPPORT
-	case IPC_RPC_CIDDATA_OP:
-		{
-			struct ccci_security_data_t *security_data = NULL;
-			unsigned int security_data_len = 0;
-			unsigned int offset = 0;
-			unsigned int stepsize = 0;
-			offset = *(unsigned int *)(pkt[0].buf) & 0xffff;
-			stepsize = (*(unsigned int *)(pkt[0].buf)>>16) & 0xffff;
-
-			CCCI_NORMAL_LOG(md_id, RPC,
-				"enter IPC_RPC_CIDDATA_OP offset :%d, stepsize:%d\n", offset, stepsize);
-			security_data = ccci_rpc_get_security_data(&security_data_len);
-
-			if (!security_data || security_data_len <= 0) {
-
-				CCCI_ERROR_LOG(md_id, RPC, "%s:get security_data fail\n", __func__);
-				tmp_data[0] = -1;
-				pkt_num = 0;
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[1]);
-				break;
-			}
-
-			pkt_num = 0;
-			pkt[pkt_num].len = sizeof(unsigned int);
-			pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-
-			pkt[pkt_num].len = stepsize;
-			pkt[pkt_num++].buf = (void *)(&security_data->cid_data[offset]);
-
-			break;
-		}
-#endif
 	default:
 		CCCI_NORMAL_LOG(md_id, RPC,
 		"[Error]Unknown Operation ID (0x%08X)\n",
@@ -1282,8 +1239,10 @@ static void rpc_msg_handler(struct port_t *port, struct sk_buff *skb)
 				skb->len, RPC_MAX_BUF_SIZE);
 		goto err_out;
 	}
-	if (rpc_buf->header.reserved > RPC_REQ_BUFFER_NUM ||
-	    rpc_buf->para_num > RPC_MAX_ARG_NUM) {
+	if (rpc_buf->header.reserved < 0 ||
+		rpc_buf->header.reserved > RPC_REQ_BUFFER_NUM ||
+	    rpc_buf->para_num < 0 ||
+		rpc_buf->para_num > RPC_MAX_ARG_NUM) {
 		CCCI_ERROR_LOG(md_id, RPC,
 			"invalid RPC index %d/%d\n",
 			rpc_buf->header.reserved, rpc_buf->para_num);
@@ -1380,73 +1339,12 @@ static void rpc_msg_handler(struct port_t *port, struct sk_buff *skb)
 /*
  * define character device operation for rpc_u
  */
-static int port_rpc_dev_mmap(struct file *fp, struct vm_area_struct *vma)
-{
-	struct port_t *port = fp->private_data;
-	int md_id, len, ret;
-	unsigned long pfn;
-	struct ccci_smem_region *amms_smem = NULL;
-
-	if (port == NULL) {
-		CCCI_ERROR_LOG(-1, RPC, "%s:port is NULL\n", __func__);
-		return -1;
-	}
-
-	md_id = port->md_id;
-	if (port->rx_ch != CCCI_RPC_RX)
-		return -EFAULT;
-
-	amms_smem = ccci_md_get_smem_by_user_id(md_id,
-		SMEM_USER_MD_DRDI);
-	if (!amms_smem) {
-		CCCI_ERROR_LOG(md_id, RPC, "%s:%d:ccci_md_get_smem_by_user_id fail\n",
-			__func__, __LINE__);
-		return -1;
-	}
-
-	if (amms_smem->size != BANK4_DRDI_SMEM_SIZE)
-		CCCI_ERROR_LOG(md_id, RPC, "%s:%d:SMEM_USER_MD_DRDI size invalid(0x%x)\n",
-			__func__, __LINE__, amms_smem->size);
-	amms_smem->size &= ~(PAGE_SIZE - 1);
-	CCCI_NORMAL_LOG(md_id, RPC,
-			"remap drdi smem addr:0x%llx len:%d  map-len:%lx\n",
-			(unsigned long long)amms_smem->base_ap_view_phy,
-			amms_smem->size, vma->vm_end - vma->vm_start);
-	if ((vma->vm_end - vma->vm_start) != amms_smem->size) {
-		CCCI_ERROR_LOG(md_id, RPC,
-			"smem size error:%s,vm_start=0x%llx,vm_end=0x%llx,smem_size=0x%x\n",
-			port->name, vma->vm_start, vma->vm_end, amms_smem->size);
-		return -EINVAL;
-	}
-
-	len = amms_smem->size;
-	pfn = amms_smem->base_ap_view_phy;
-	pfn >>= PAGE_SHIFT;
-	/* ensure that memory does not get swapped to disk */
-	vma->vm_flags |= VM_IO;
-	/* ensure non-cacheable */
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	ret = remap_pfn_range(vma, vma->vm_start, pfn,
-				len, vma->vm_page_prot);
-	if (ret) {
-		CCCI_ERROR_LOG(md_id, RPC,
-			"drdi_smem remap failed %d/%lx, 0x%llx -> 0x%llx\n",
-			ret, pfn,
-			(unsigned long long)amms_smem->base_ap_view_phy,
-			(unsigned long long)vma->vm_start);
-		return -EAGAIN;
-	}
-
-	return 0;
-}
-
 static const struct file_operations rpc_dev_fops = {
 	.owner = THIS_MODULE,
 	.open = &port_dev_open, /*use default API*/
 	.read = &port_dev_read, /*use default API*/
 	.write = &port_dev_write, /*use default API*/
 	.release = &port_dev_close,/*use default API*/
-	.mmap = &port_rpc_dev_mmap,/*use internal API*/
 };
 static int port_rpc_init(struct port_t *port)
 {
@@ -1481,6 +1379,7 @@ static int port_rpc_init(struct port_t *port)
 	if (first_init) {
 		get_dtsi_eint_node(port->md_id);
 		get_md_dtsi_debug();
+		md_drdi_gpio_status_scan();
 		first_init = 0;
 	}
 	return 0;
@@ -1521,7 +1420,6 @@ int port_rpc_recv_match(struct port_t *port, struct sk_buff *skb)
 
 		case IPC_RPC_QUERY_AP_SYS_PROPERTY:
 		case IPC_RPC_SAR_TABLE_IDX_QUERY_OP:
-		case IPC_RPC_AMMS_DRDI_CONTROL:
 			is_userspace_msg = 1;
 			break;
 		default:

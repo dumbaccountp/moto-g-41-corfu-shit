@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018 MediaTek Inc.
- * Author: Longfei Wang <longfei.wang@mediatek.com>
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #include <linux/interrupt.h>
@@ -17,8 +16,8 @@
 #include "mtk_vcodec_enc_pm.h"
 #include "mtk_vcodec_intr.h"
 #include "mtk_vcu.h"
-#include "mtk_heap.h"
-#include "iommu_pseudo.h"
+
+
 
 static unsigned int venc_h265_get_profile(struct venc_inst *inst,
 	unsigned int profile)
@@ -128,11 +127,11 @@ static int venc_encode_header(struct venc_inst *inst,
 	if (bs_buf == NULL)
 		inst->vsi->venc.venc_bs_va = 0;
 	else
-		inst->vsi->venc.venc_bs_va = (u64)(bs_buf->index + 1);
+		inst->vsi->venc.venc_bs_va = (u64)(uintptr_t)bs_buf;
 
 	inst->vsi->venc.venc_fb_va = 0;
 
-	mtk_vcodec_debug(inst, "vsi venc_bs_va %lld",
+	mtk_vcodec_debug(inst, "vsi venc_bs_va 0x%llx",
 			 inst->vsi->venc.venc_bs_va);
 
 	ret = vcu_enc_encode(&inst->vcu_inst, VENC_BS_MODE_SEQ_HDR, NULL,
@@ -155,13 +154,17 @@ static int venc_encode_frame(struct venc_inst *inst,
 	if (bs_buf == NULL)
 		inst->vsi->venc.venc_bs_va = 0;
 	else
-		inst->vsi->venc.venc_bs_va = (u64)(bs_buf->index + 1);
+		inst->vsi->venc.venc_bs_va = (u64)(uintptr_t)bs_buf;
 
 	if (frm_buf == NULL)
 		inst->vsi->venc.venc_fb_va = 0;
 	else {
-		inst->vsi->venc.venc_fb_va = (u64)(frm_buf->index + 1);
+		inst->vsi->venc.venc_fb_va = (u64)(uintptr_t)frm_buf;
 		inst->vsi->venc.timestamp = frm_buf->timestamp;
+		inst->vsi->venc.roimap = frm_buf->roimap;
+
+		mtk_vcodec_debug(inst, "ROI: 0x%X", inst->vsi->venc.roimap);
+		mtk_vcodec_debug(inst, "QP: 0x%X", inst->vsi->venc.qpmap);
 	}
 	ret = vcu_enc_encode(&inst->vcu_inst, VENC_BS_MODE_FRAME, frm_buf,
 						 bs_buf, bs_size);
@@ -170,7 +173,7 @@ static int venc_encode_frame(struct venc_inst *inst,
 
 	++inst->frm_cnt;
 	mtk_vcodec_debug(inst,
-		 "Format: frame_va %lld (%c%c%c%c) bs_va:%lld (%c%c%c%c)",
+		 "Format: frame_va %llx (%c%c%c%c) bs_va:%llx (%c%c%c%c)",
 		  inst->vsi->venc.venc_fb_va,
 		  fm_fourcc & 0xFF, (fm_fourcc >> 8) & 0xFF,
 		  (fm_fourcc >> 16) & 0xFF, (fm_fourcc >> 24) & 0xFF,
@@ -195,11 +198,11 @@ static int venc_encode_frame_final(struct venc_inst *inst,
 	if (bs_buf == NULL)
 		inst->vsi->venc.venc_bs_va = 0;
 	else
-		inst->vsi->venc.venc_bs_va = (u64)(bs_buf->index + 1);
+		inst->vsi->venc.venc_bs_va = (u64)(uintptr_t)bs_buf;
 	if (frm_buf == NULL)
 		inst->vsi->venc.venc_fb_va = 0;
 	else
-		inst->vsi->venc.venc_fb_va = (u64)(frm_buf->index + 1);
+		inst->vsi->venc.venc_fb_va = (u64)(uintptr_t)frm_buf;
 
 	ret = vcu_enc_encode(&inst->vcu_inst, VENC_BS_MODE_FRAME_FINAL, frm_buf,
 						 bs_buf, bs_size);
@@ -217,7 +220,7 @@ static int venc_init(struct mtk_vcodec_ctx *ctx, unsigned long *handle)
 {
 	int ret = 0;
 	struct venc_inst *inst;
-	struct vcu_v4l2_callback_func cb;
+	u32 fourcc = ctx->q_data[MTK_Q_DATA_DST].fmt->fourcc;
 
 	inst = kzalloc(sizeof(*inst), GFP_KERNEL);
 	if (!inst) {
@@ -227,37 +230,62 @@ static int venc_init(struct mtk_vcodec_ctx *ctx, unsigned long *handle)
 
 	inst->ctx = ctx;
 	inst->vcu_inst.ctx = ctx;
-	inst->vcu_inst.dev = VCU_FPTR(vcu_get_plat_device)(ctx->dev->plat_dev);
-	inst->vcu_inst.id = IPI_VENC_COMMON;
+	inst->vcu_inst.dev = ctx->dev->vcu_plat_dev;
+
+	switch (fourcc) {
+	case V4L2_PIX_FMT_H264: {
+		if (ctx->oal_vcodec == 1)
+			inst->vcu_inst.id = IPI_VENC_HYBRID_H264;
+		else
+			inst->vcu_inst.id = IPI_VENC_H264;
+		break;
+	}
+
+	case V4L2_PIX_FMT_VP8: {
+		inst->vcu_inst.id = IPI_VENC_VP8;
+		break;
+	}
+
+	case V4L2_PIX_FMT_MPEG4: {
+		inst->vcu_inst.id = IPI_VENC_MPEG4;
+		break;
+	}
+
+	case V4L2_PIX_FMT_H263: {
+		inst->vcu_inst.id = IPI_VENC_H263;
+		break;
+	}
+	case V4L2_PIX_FMT_H265: {
+		inst->vcu_inst.id = IPI_VENC_H265;
+		break;
+	}
+	case V4L2_PIX_FMT_HEIF: {
+		inst->vcu_inst.id = IPI_VENC_HEIF;
+		break;
+	}
+
+	default: {
+		mtk_vcodec_err(inst, "%s fourcc not supported", __func__);
+		break;
+	}
+	}
+
 	inst->hw_base = mtk_vcodec_get_enc_reg_addr(inst->ctx, VENC_SYS);
 	inst->vcu_inst.handler = vcu_enc_ipi_handler;
-	(*handle) = (unsigned long)inst;
 
 	mtk_vcodec_debug_enter(inst);
-
-	mtk_vcodec_add_ctx_list(ctx);
 
 	ret = vcu_enc_init(&inst->vcu_inst);
 
 	inst->vsi = (struct venc_vsi *)inst->vcu_inst.vsi;
 
-	memset(&cb, 0, sizeof(struct vcu_v4l2_callback_func));
-	cb.enc_prepare = venc_encode_prepare;
-	cb.enc_unprepare = venc_encode_unprepare;
-	cb.enc_pmqos_gce_begin = venc_encode_pmqos_gce_begin;
-	cb.enc_pmqos_gce_end = venc_encode_pmqos_gce_end;
-	cb.gce_timeout_dump = mtk_vcodec_gce_timeout_dump;
-	cb.enc_lock = venc_lock;
-	cb.enc_unlock = venc_unlock;
-	VCU_FPTR(vcu_set_v4l2_callback)(inst->vcu_inst.dev, &cb);
-
 	mtk_vcodec_debug_leave(inst);
 
 	if (ret) {
-		mtk_vcodec_del_ctx_list(ctx);
 		kfree(inst);
 		(*handle) = (unsigned long)NULL;
-	}
+	} else
+		(*handle) = (unsigned long)inst;
 
 	return ret;
 }
@@ -327,8 +355,6 @@ static void venc_get_free_buffers(struct venc_inst *inst,
 			     struct ring_input_list *list,
 			     struct venc_done_result *pResult)
 {
-	u64 bs_index, fb_index;
-
 	if (list->count == 0) {
 		mtk_vcodec_debug(inst, "[FB] there is no free buffers");
 		pResult->bs_va = 0;
@@ -340,14 +366,12 @@ static void venc_get_free_buffers(struct venc_inst *inst,
 
 	pResult->bs_size = list->bs_size[list->read_idx];
 	pResult->is_key_frm = list->is_key_frm[list->read_idx];
-	bs_index = list->venc_bs_va_list[list->read_idx];
-	pResult->bs_va = (unsigned long)inst->ctx->bs_list[bs_index];
-	fb_index = list->venc_fb_va_list[list->read_idx];
-	pResult->frm_va = (unsigned long)inst->ctx->fb_list[fb_index];
+	pResult->bs_va = list->venc_bs_va_list[list->read_idx];
+	pResult->frm_va = list->venc_fb_va_list[list->read_idx];
 
-	mtk_vcodec_debug(inst, "bsva %lx %lld frva %lx %lld bssize %d iskey %d",
-		pResult->bs_va, bs_index,
-		pResult->frm_va, fb_index,
+	mtk_vcodec_debug(inst, "bsva %lx frva %lx bssize %d iskey %d",
+		pResult->bs_va,
+		pResult->frm_va,
 		pResult->bs_size,
 		pResult->is_key_frm);
 
@@ -390,26 +414,34 @@ static int venc_get_param(unsigned long handle,
 	inst->vcu_inst.ctx = inst->ctx;
 
 	switch (type) {
-	case GET_PARAM_VENC_CAP_FRAME_SIZES:
-	case GET_PARAM_VENC_CAP_SUPPORTED_FORMATS:
+	case VENC_GET_PARAM_CAPABILITY_FRAME_SIZES:
+	case VENC_GET_PARAM_CAPABILITY_SUPPORTED_FORMATS:
 		vcu_enc_query_cap(&inst->vcu_inst, type, out);
 		break;
-	case GET_PARAM_FREE_BUFFERS:
+	case VENC_GET_PARAM_FREE_BUFFERS:
 		if (inst->vsi == NULL)
 			return -EINVAL;
 		venc_get_free_buffers(inst, &inst->vsi->list_free, out);
 		break;
-	case GET_PARAM_ROI_RC_QP: {
+	case VENC_GET_PARAM_ROI_RC_QP: {
 		if (inst->vsi == NULL || out == NULL)
 			return -EINVAL;
 		*(int *)out = inst->vsi->config.roi_rc_qp;
 		break;
 	}
-	case GET_PARAM_RESOLUTION_CHANGE:
+	case VENC_GET_PARAM_RESOLUTION_CHANGE:
 		if (inst->vsi == NULL)
 			return -EINVAL;
 		venc_get_resolution_change(inst, &inst->vsi->config, out);
 		break;
+
+	case VENC_GET_PARAM_REFBUF_FRAME_NUM: {
+		if (inst->vsi == NULL || out == NULL)
+			return -EINVAL;
+		*(int *)out = inst->vsi->config.maxrefbufFrameNum;
+		break;
+	}
+
 	default:
 		mtk_vcodec_err(inst, "invalid get parameter type=%d", type);
 		ret = -EINVAL;
@@ -426,17 +458,14 @@ static int venc_set_param(unsigned long handle,
 	int i;
 	int ret = 0;
 	struct venc_inst *inst = (struct venc_inst *)handle;
-	unsigned int fmt = 0;
 
-	if (inst == NULL)
+	if (inst == NULL || inst->vsi == NULL)
 		return -EINVAL;
 
-	mtk_vcodec_debug(inst, "->type=%d", type);
+	mtk_vcodec_debug(inst, "->type=%d, ipi_id=%d", type, inst->vcu_inst.id);
 
 	switch (type) {
 	case VENC_SET_PARAM_ENC:
-		if (inst->vsi == NULL)
-			return -EINVAL;
 		inst->vsi->config.input_fourcc = enc_prm->input_yuv_fmt;
 		inst->vsi->config.bitrate = enc_prm->bitrate;
 		inst->vsi->config.pic_w = enc_prm->width;
@@ -456,20 +485,19 @@ static int venc_set_param(unsigned long handle,
 		inst->vsi->config.max_h = enc_prm->max_h;
 		inst->vsi->config.num_b_frame = enc_prm->num_b_frame;
 		inst->vsi->config.slbc_ready = enc_prm->slbc_ready;
-		inst->vsi->config.slbc_addr = enc_prm->slbc_addr;
 		inst->vsi->config.i_qp = enc_prm->i_qp;
 		inst->vsi->config.p_qp = enc_prm->p_qp;
 		inst->vsi->config.b_qp = enc_prm->b_qp;
 		inst->vsi->config.svp_mode = enc_prm->svp_mode;
-		if (inst->vsi->config.svp_mode)
-			inst->vsi->config.svp_is_hal_secure_handle = is_disable_map_sec();
 		inst->vsi->config.tsvc = enc_prm->tsvc;
-		inst->vsi->config.highquality = enc_prm->highquality;
 		inst->vsi->config.max_qp = enc_prm->max_qp;
 		inst->vsi->config.min_qp = enc_prm->min_qp;
-		inst->vsi->config.i_p_qp_delta = enc_prm->ip_qpdelta;
+		inst->vsi->config.i_p_qp_delta = enc_prm->i_p_qp_delta;
 		inst->vsi->config.qp_control_mode = enc_prm->qp_control_mode;
-		inst->vsi->config.frame_level_qp = enc_prm->framelvl_qp;
+		if (enc_prm->qp_control_mode) {
+			inst->vsi->config.frame_level_qp =
+				enc_prm->frame_level_qp;
+		}
 		inst->vsi->config.dummynal = enc_prm->dummynal;
 
 		if (enc_prm->color_desc) {
@@ -477,21 +505,20 @@ static int venc_set_param(unsigned long handle,
 				enc_prm->color_desc,
 				sizeof(struct mtk_color_desc));
 		}
+		inst->vsi->config.maxrefpnum = enc_prm->maxrefpnum;
 
-		fmt = inst->ctx->q_data[MTK_Q_DATA_DST].fmt->fourcc;
-		mtk_vcodec_debug(inst, "fmt:%u", fmt);
-
-		if (fmt == V4L2_PIX_FMT_H264) {
+		if (inst->vcu_inst.id == IPI_VENC_H264 ||
+			inst->vcu_inst.id == IPI_VENC_HYBRID_H264) {
 			inst->vsi->config.profile = enc_prm->profile;
 			inst->vsi->config.level = enc_prm->level;
-		} else if (fmt == V4L2_PIX_FMT_H265 ||
-				fmt == V4L2_PIX_FMT_HEIF) {
+		} else if (inst->vcu_inst.id == IPI_VENC_H265 ||
+				inst->vcu_inst.id == IPI_VENC_HEIF) {
 			inst->vsi->config.profile =
 				venc_h265_get_profile(inst, enc_prm->profile);
 			inst->vsi->config.level =
 				venc_h265_get_level(inst, enc_prm->level,
 					enc_prm->tier);
-		} else if (fmt == V4L2_PIX_FMT_MPEG4) {
+		} else if (inst->vcu_inst.id == IPI_VENC_MPEG4) {
 			inst->vsi->config.profile =
 				venc_mpeg4_get_profile(inst, enc_prm->profile);
 			inst->vsi->config.level =
@@ -516,18 +543,13 @@ static int venc_set_param(unsigned long handle,
 		ret = vcu_enc_set_param(&inst->vcu_inst, type, enc_prm);
 		break;
 	case VENC_SET_PARAM_COLOR_DESC:
-		if (inst->vsi == NULL)
-			return -EINVAL;
 		memcpy(&inst->vsi->config.color_desc, enc_prm->color_desc,
 			sizeof(struct mtk_color_desc));
 		ret = vcu_enc_set_param(&inst->vcu_inst, type, enc_prm);
 		break;
-	case VENC_SET_PARAM_PROPERTY:
-		mtk_vcodec_err(inst, "VCU not support SET_PARAM_VDEC_PROPERTY\n");
-		break;
+	case VENC_SET_PARAM_LOG:
+		vcu_set_log(enc_prm->log);
 	default:
-		if (inst->vsi == NULL)
-			return -EINVAL;
 		ret = vcu_enc_set_param(&inst->vcu_inst, type, enc_prm);
 		inst->ctx->async_mode = !(inst->vsi->sync_mode);
 		break;
@@ -547,8 +569,6 @@ static int venc_deinit(unsigned long handle)
 
 	ret = vcu_enc_deinit(&inst->vcu_inst);
 
-	mtk_vcodec_del_ctx_list(inst->ctx);
-
 	mtk_vcodec_debug_leave(inst);
 	kfree(inst);
 
@@ -563,9 +583,9 @@ static const struct venc_common_if venc_if = {
 	.deinit = venc_deinit,
 };
 
-const struct venc_common_if *get_enc_vcu_if(void);
+const struct venc_common_if *get_enc_common_if(void);
 
-const struct venc_common_if *get_enc_vcu_if(void)
+const struct venc_common_if *get_enc_common_if(void)
 {
 	return &venc_if;
 }

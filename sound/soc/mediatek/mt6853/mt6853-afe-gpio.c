@@ -115,7 +115,7 @@ static int mt6853_afe_gpio_select(struct mtk_base_afe *afe,
 	int ret = 0;
 
 	if (type < 0 || type >= MT6853_AFE_GPIO_GPIO_NUM) {
-		dev_err(afe->dev, "%s(), error, invalid gpio type %d\n",
+		dev_err(afe->dev, "%s(), error, invaild gpio type %d\n",
 			__func__, type);
 		return -EINVAL;
 	}
@@ -128,51 +128,56 @@ static int mt6853_afe_gpio_select(struct mtk_base_afe *afe,
 
 	ret = pinctrl_select_state(aud_pinctrl,
 				   aud_gpios[type].gpioctrl);
-	if (ret)
+	if (ret) {
 		dev_err(afe->dev, "%s(), error, can not set gpio type %d\n",
 			__func__, type);
-
+		AUDIO_AEE("can not set gpio type");
+	}
 	return ret;
 }
 
 static int mt6853_afe_gpio_adda_dl(struct mtk_base_afe *afe, bool enable)
 {
-	if (enable)
+	if (enable) {
 		return mt6853_afe_gpio_select(afe,
 					      MT6853_AFE_GPIO_DAT_MOSI_ON);
-	else
+	} else {
 		return mt6853_afe_gpio_select(afe,
 					      MT6853_AFE_GPIO_DAT_MOSI_OFF);
+	}
 }
 
 static int mt6853_afe_gpio_adda_ul(struct mtk_base_afe *afe, bool enable)
 {
-	if (enable)
+	if (enable) {
 		return mt6853_afe_gpio_select(afe,
 					      MT6853_AFE_GPIO_DAT_MISO_ON);
-	else
+	} else {
 		return mt6853_afe_gpio_select(afe,
 					      MT6853_AFE_GPIO_DAT_MISO_OFF);
+	}
 }
 
 static int mt6853_afe_gpio_adda_ch34_dl(struct mtk_base_afe *afe, bool enable)
 {
-	if (enable)
+	if (enable) {
 		return mt6853_afe_gpio_select(afe,
 			MT6853_AFE_GPIO_DAT_MOSI_CH34_ON);
-	else
+	} else {
 		return mt6853_afe_gpio_select(afe,
 			MT6853_AFE_GPIO_DAT_MOSI_CH34_OFF);
+	}
 }
 
 static int mt6853_afe_gpio_adda_ch34_ul(struct mtk_base_afe *afe, bool enable)
 {
-	if (enable)
+	if (enable) {
 		return mt6853_afe_gpio_select(afe,
 			MT6853_AFE_GPIO_DAT_MISO_CH34_ON);
-	else
+	} else {
 		return mt6853_afe_gpio_select(afe,
 			MT6853_AFE_GPIO_DAT_MISO_CH34_OFF);
+	}
 }
 
 int mt6853_afe_gpio_request(struct mtk_base_afe *afe, bool enable,
@@ -238,10 +243,10 @@ int mt6853_afe_gpio_request(struct mtk_base_afe *afe, bool enable,
 	default:
 		mutex_unlock(&gpio_request_mutex);
 		dev_warn(afe->dev, "%s(), invalid dai %d\n", __func__, dai);
+		AUDIO_AEE("invalid dai");
 		return -EINVAL;
 	}
 	mutex_unlock(&gpio_request_mutex);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mt6853_afe_gpio_request);
 

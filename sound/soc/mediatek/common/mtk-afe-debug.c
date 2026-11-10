@@ -77,19 +77,18 @@ exit:
 }
 EXPORT_SYMBOL_GPL(mtk_afe_debugfs_write);
 
-void mtk_afe_write_reg(struct mtk_base_afe *afe, void *arg)
+/* debug function */
+void mtk_afe_debug_write_reg(struct file *file, void *arg)
 {
+	struct mtk_base_afe *afe = file->private_data;
 	char *token1 = NULL;
 	char *token2 = NULL;
 	char *temp = arg;
 	char delim[] = " ,";
 	unsigned long reg_addr = 0;
 	unsigned long reg_value = 0;
-	unsigned int reg_value_after = 0;
+	unsigned int reg_value_after;
 	int ret = 0;
-
-	if (!afe)
-		return;
 
 	token1 = strsep(&temp, delim);
 	token2 = strsep(&temp, delim);
@@ -110,16 +109,6 @@ void mtk_afe_write_reg(struct mtk_base_afe *afe, void *arg)
 	} else {
 		dev_warn(afe->dev, "token1 or token2 is NULL!\n");
 	}
-
-}
-EXPORT_SYMBOL_GPL(mtk_afe_write_reg);
-
-/* debug function *//* debug function */
-void mtk_afe_debug_write_reg(struct file *file, void *arg)
-{
-	struct mtk_base_afe *afe = file->private_data;
-
-	mtk_afe_write_reg(afe, arg);
 }
 EXPORT_SYMBOL_GPL(mtk_afe_debug_write_reg);
 

@@ -6,8 +6,12 @@
 #ifndef __CCCI_UTIL_LOG_H__
 #define __CCCI_UTIL_LOG_H__
 
-extern int mrdump_mini_add_extra_file(unsigned long vaddr, unsigned long paddr,
-	unsigned long size, const char *name);
+#if IS_ENABLED(CONFIG_MTK_AEE_IPANIC)
+extern void mrdump_mini_add_misc(unsigned long addr, unsigned long size,
+	unsigned long start, char *name);
+#endif
+
+#define BRING_UP_LOG_MODE
 
 /* #define BRING_UP_LOG_MODE */
 #ifndef BRING_UP_LOG_MODE

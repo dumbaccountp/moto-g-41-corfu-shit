@@ -6,19 +6,9 @@
 #ifndef __EEPROM_UTILS_H
 #define __EEPROM_UTILS_H
 
-#include <linux/ktime.h>
-#include <linux/time64.h>
-#include <linux/timekeeping.h>
+#include <linux/time.h>
 
-#define must_log(...) pr_debug(__VA_ARGS__)
-
-#define error_log(...) pr_debug("error: " __VA_ARGS__)
-
-#define debug_log(...) pr_debug(__VA_ARGS__)
-
-unsigned int debug_flag(void);
-
-void EEPROM_PROFILE_INIT(struct timespec64 *ptv);
-void EEPROM_PROFILE(struct timespec64 *ptv, char *tag);
+void EEPROM_PROFILE_INIT(struct timeval *ptv);
+void EEPROM_PROFILE(struct timeval *ptv, char *tag);
 
 #endif

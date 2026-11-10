@@ -1,5 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * Copyright (C) Jonathan Naylor G4KLX (g4klx@g4klx.demon.co.uk)
  * Copyright (C) Alan Cox GW4PTS (alan@lxorguk.ukuu.org.uk)
@@ -191,7 +194,6 @@ static void rose_kill_by_device(struct net_device *dev)
 			rose_disconnect(s, ENETUNREACH, ROSE_OUT_OF_ORDER, 0);
 			if (rose->neighbour)
 				rose->neighbour->use--;
-			dev_put(rose->device);
 			rose->device = NULL;
 		}
 	}
@@ -366,7 +368,7 @@ void rose_destroy_socket(struct sock *sk)
  */
 
 static int rose_setsockopt(struct socket *sock, int level, int optname,
-		sockptr_t optval, unsigned int optlen)
+	char __user *optval, unsigned int optlen)
 {
 	struct sock *sk = sock->sk;
 	struct rose_sock *rose = rose_sk(sk);
@@ -378,7 +380,7 @@ static int rose_setsockopt(struct socket *sock, int level, int optname,
 	if (optlen < sizeof(int))
 		return -EINVAL;
 
-	if (copy_from_sockptr(&opt, optval, sizeof(int)))
+	if (get_user(opt, (int __user *)optval))
 		return -EFAULT;
 
 	switch (optname) {
@@ -592,8 +594,6 @@ static struct sock *rose_make_new(struct sock *osk)
 	rose->idle	= orose->idle;
 	rose->defer	= orose->defer;
 	rose->device	= orose->device;
-	if (rose->device)
-		dev_hold(rose->device);
 	rose->qbitincl	= orose->qbitincl;
 
 	return sk;
@@ -647,7 +647,6 @@ static int rose_release(struct socket *sock)
 		break;
 	}
 
-	dev_put(rose->device);
 	sock->sk = NULL;
 	release_sock(sk);
 	sock_put(sk);
@@ -690,10 +689,8 @@ static int rose_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		rose->source_call = user->call;
 		ax25_uid_put(user);
 	} else {
-		if (ax25_uid_policy && !capable(CAP_NET_BIND_SERVICE)) {
-			dev_put(dev);
+		if (ax25_uid_policy && !capable(CAP_NET_BIND_SERVICE))
 			return -EACCES;
-		}
 		rose->source_call   = *source;
 	}
 
@@ -724,6 +721,7 @@ static int rose_connect(struct socket *sock, struct sockaddr *uaddr, int addr_le
 	struct rose_sock *rose = rose_sk(sk);
 	struct sockaddr_rose *addr = (struct sockaddr_rose *)uaddr;
 	unsigned char cause, diagnostic;
+	struct net_device *dev;
 	ax25_uid_assoc *user;
 	int n, err = 0;
 
@@ -780,12 +778,9 @@ static int rose_connect(struct socket *sock, struct sockaddr *uaddr, int addr_le
 	}
 
 	if (sock_flag(sk, SOCK_ZAPPED)) {	/* Must bind first - autobinding in this may or may not work */
-		struct net_device *dev;
-
 		sock_reset_flag(sk, SOCK_ZAPPED);
 
-		dev = rose_dev_first();
-		if (!dev) {
+		if ((dev = rose_dev_first()) == NULL) {
 			err = -ENETUNREACH;
 			goto out_release;
 		}
@@ -793,7 +788,6 @@ static int rose_connect(struct socket *sock, struct sockaddr *uaddr, int addr_le
 		user = ax25_findbyuid(current_euid());
 		if (!user) {
 			err = -EINVAL;
-			dev_put(dev);
 			goto out_release;
 		}
 
@@ -935,7 +929,7 @@ static int rose_accept(struct socket *sock, struct socket *newsock, int flags,
 	/* Now attach up the new socket */
 	skb->sk = NULL;
 	kfree_skb(skb);
-	sk_acceptq_removed(sk);
+	sk->sk_ack_backlog--;
 
 out_release:
 	release_sock(sk);
@@ -1040,7 +1034,7 @@ int rose_rx_call_request(struct sk_buff *skb, struct net_device *dev, struct ros
 	make_rose->va        = 0;
 	make_rose->vr        = 0;
 	make_rose->vl        = 0;
-	sk_acceptq_added(sk);
+	sk->sk_ack_backlog++;
 
 	rose_insert_socket(make);
 
@@ -1305,6 +1299,12 @@ static int rose_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		return put_user(amount, (unsigned int __user *) argp);
 	}
 
+	case SIOCGSTAMP:
+		return sock_get_timestamp(sk, (struct timeval __user *) argp);
+
+	case SIOCGSTAMPNS:
+		return sock_get_timestampns(sk, (struct timespec __user *) argp);
+
 	case SIOCGIFADDR:
 	case SIOCSIFADDR:
 	case SIOCGIFDSTADDR:
@@ -1472,7 +1472,6 @@ static const struct proto_ops rose_proto_ops = {
 	.getname	=	rose_getname,
 	.poll		=	datagram_poll,
 	.ioctl		=	rose_ioctl,
-	.gettstamp	=	sock_gettstamp,
 	.listen		=	rose_listen,
 	.shutdown	=	sock_no_shutdown,
 	.setsockopt	=	rose_setsockopt,
@@ -1504,7 +1503,7 @@ static int __init rose_proto_init(void)
 	int rc;
 
 	if (rose_ndevs > 0x7FFFFFFF/sizeof(struct net_device *)) {
-		printk(KERN_ERR "ROSE: rose_proto_init - rose_ndevs parameter too large\n");
+		printk(KERN_ERR "ROSE: rose_proto_init - rose_ndevs parameter to large\n");
 		rc = -EINVAL;
 		goto out;
 	}

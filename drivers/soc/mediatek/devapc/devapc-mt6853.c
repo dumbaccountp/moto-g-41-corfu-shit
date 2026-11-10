@@ -7,7 +7,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/io.h>
+#include <asm-generic/io.h>
 
 #include "devapc-mt6853.h"
 
@@ -469,6 +469,7 @@ void devapc_catch_illegal_range(phys_addr_t phys_addr, size_t size)
 		BUG_ON(1);
 	}
 }
+EXPORT_SYMBOL(devapc_catch_illegal_range);
 
 static struct mtk_devapc_dbg_status mt6853_devapc_dbg_stat = {
 	.enable_ut = PLAT_DBG_UT_DEFAULT,
@@ -535,7 +536,6 @@ static const uint32_t mt6853_devapc_pds[] = {
 	PD_SHIFT_STA_OFFSET,
 	PD_SHIFT_SEL_OFFSET,
 	PD_SHIFT_CON_OFFSET,
-	PD_VIO_DBG3_OFFSET,
 };
 
 static struct mtk_devapc_soc mt6853_data = {

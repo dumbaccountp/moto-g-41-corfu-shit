@@ -19,14 +19,15 @@
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
 #endif
-#if IS_ENABLED(CONFIG_OF)
-#include <linux/of.h>
-#include <linux/of_fdt.h>
-#include <linux/of_irq.h>
-#include <linux/of_address.h>
+
+#ifdef CONFIG_MTK_SIM_LOCK_POWER_ON_WRITE_PROTECT
+/* #include <mt-plat/env.h> Fix me, header file not found */
 #endif
 
 #include "mt-plat/mtk_ccci_common.h"
+#ifndef DISABLE_MTK_BOOT_MODE
+#include <mt-plat/mtk_boot_common.h>
+#endif
 
 #include "ccci_config.h"
 #include "ccci_common_config.h"
@@ -51,7 +52,6 @@ atomic_t udc_status = ATOMIC_INIT(0);
 #define CHECK_MD_ID(md_id)
 #define CHECK_HIF_ID(hif_id)
 #define CHECK_QUEUE_ID(queue_id)
-int port_md_gen;
 
 struct ccci_proc_user {
 	unsigned int busy;
@@ -82,30 +82,36 @@ char *ccci_port_get_dev_name(unsigned int rx_user_id)
 }
 EXPORT_SYMBOL(ccci_port_get_dev_name);
 
-int send_new_time_to_md_after_6297(int md_id, int tz)
+#if MD_GENERATION > (6295)
+int send_new_time_to_new_md(int md_id, int tz)
 {
-	struct timespec64 tv;
+	struct timeval tv;
 	unsigned int timeinfo[4];
 	char ccci_time[45];
 	int ret;
 	int index;
 	char *name = "ccci_0_202";
+	int has_write;
 
-	ktime_get_real_ts64(&tv);
+	do_gettimeofday(&tv);
 	timeinfo[0] = tv.tv_sec;
 	timeinfo[1] = sizeof(tv.tv_sec) > 4 ? tv.tv_sec >> 32 : 0;
 	timeinfo[2] = tz;
 	timeinfo[3] = sys_tz.tz_dsttime;
 
-	scnprintf(ccci_time, sizeof(ccci_time), "%010u,%010u,%010u,%010u",
+	has_write = snprintf(ccci_time, sizeof(ccci_time), "%010u,%010u,%010u,%010u",
 			timeinfo[0], timeinfo[1], timeinfo[2], timeinfo[3]);
-	CCCI_NORMAL_LOG(md_id, CHAR, "CTime update: %s\n", ccci_time);
-
+	if (has_write < 0 || has_write >= sizeof(ccci_time)) {
+		CCCI_ERROR_LOG(-1, CHAR, "get ccci time fail, has_write = %d\n",
+			has_write);
+		return -1;
+	}
 	index = mtk_ccci_request_port(name);
 	ret = mtk_ccci_send_data(index, ccci_time, strlen(ccci_time) + 1);
 
 	return ret;
 }
+#endif
 
 int port_dev_kernel_read(struct port_t *port, char *buf, int size)
 {
@@ -164,7 +170,13 @@ READ_START:
 		 */
 		if (port->rx_skb_list.qlen == 0)
 			port_ask_more_req_to_md(port);
-
+		if (port->rx_skb_list.qlen < 0) {
+			spin_unlock_irqrestore(&port->rx_skb_list.lock, flags);
+			CCCI_ERROR_LOG(-1, CHAR,
+				"%s:port->rx_skb_list.qlen < 0 %s\n",
+				__func__, port->name);
+			return -EFAULT;
+		}
 	} else {
 		read_len = size;
 	}
@@ -254,7 +266,6 @@ int mtk_ccci_send_data(int index, const char *buf, int size)
 		tx_port->name);
 	return -1;
 }
-EXPORT_SYMBOL(mtk_ccci_send_data);
 
 int mtk_ccci_read_data(int index, char *buf, size_t count)
 {
@@ -265,14 +276,6 @@ int mtk_ccci_read_data(int index, char *buf, size_t count)
 	if (ret < 0)
 		return -EINVAL;
 
-	if (port_md_gen < 6297) {
-		if (rx_port->flags & PORT_F_GEN95_NOT_SUPPORT) {
-			CCCI_NORMAL_LOG(-1, TAG,
-				 "%s:not support %s\n", __func__, rx_port->name);
-			return -1;
-		}
-	}
-
 	if (atomic_read(&rx_port->usage_cnt)) {
 		ret = port_dev_kernel_read(rx_port, buf, count);
 	} else {
@@ -282,7 +285,6 @@ int mtk_ccci_read_data(int index, char *buf, size_t count)
 	}
 	return ret;
 }
-EXPORT_SYMBOL(mtk_ccci_read_data);
 
 static inline void proxy_set_critical_user(struct port_proxy *proxy_p,
 	int user_id, int enabled)
@@ -312,9 +314,10 @@ int port_dev_open(struct inode *inode, struct file *file)
 	struct port_t *port;
 
 	port = port_get_by_node(major, minor);
-	if (port == NULL) {
-		CCCI_ERROR_LOG(0, CHAR, "port_get_by_node fail\n");
-		return -1;
+	if (!port) {
+		CCCI_ERROR_LOG(1, CHAR,
+			"%s:port_get_by_node fail\n", __func__);
+		return -ENODEV;
 	}
 	if (port->rx_ch != CCCI_CCB_CTRL && atomic_read(&port->usage_cnt)) {
 		CCCI_ERROR_LOG(port->md_id, CHAR,
@@ -381,9 +384,7 @@ ssize_t port_dev_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 
 READ_START:
 	/* 1. get incoming request */
-	spin_lock_irqsave(&port->rx_skb_list.lock, flags);
 	if (skb_queue_empty(&port->rx_skb_list)) {
-		spin_unlock_irqrestore(&port->rx_skb_list.lock, flags);
 		if (!(file->f_flags & O_NONBLOCK)) {
 			spin_lock_irq(&port->rx_wq.lock);
 			ret = wait_event_interruptible_locked_irq(port->rx_wq,
@@ -397,9 +398,7 @@ READ_START:
 			ret = -EAGAIN;
 			goto exit;
 		}
-	} else
-		spin_unlock_irqrestore(&port->rx_skb_list.lock, flags);
-
+	}
 	CCCI_DEBUG_LOG(md_id, CHAR,
 		"read on %s for %zu\n", port->name, count);
 	spin_lock_irqsave(&port->rx_skb_list.lock, flags);
@@ -436,6 +435,13 @@ READ_START:
 		 */
 		if (port->rx_skb_list.qlen == 0)
 			port_ask_more_req_to_md(port);
+		if (port->rx_skb_list.qlen < 0) {
+			spin_unlock_irqrestore(&port->rx_skb_list.lock, flags);
+			CCCI_ERROR_LOG(md_id, CHAR,
+				"%s:port->rx_skb_list.qlen < 0 %s\n",
+				__func__, port->name);
+			return -EFAULT;
+		}
 	} else {
 		read_len = count;
 	}
@@ -797,11 +803,10 @@ static void port_dump_string(struct port_t *port, int dir,
 #define DUMP_BUF_SIZE 32
 	unsigned char *char_ptr = (unsigned char *)msg_buf;
 	char buf[DUMP_BUF_SIZE];
-	int i, j;
+	int i, j, ret;
 	u64 ts_nsec;
 	unsigned long rem_nsec;
 	char *replace_str = NULL;
-	int ret = 0;
 
 	for (i = 0, j = 0; i < len && i < DUMP_BUF_SIZE &&
 		j + 4 < DUMP_BUF_SIZE; i++) {
@@ -827,16 +832,23 @@ static void port_dump_string(struct port_t *port, int dir,
 			}
 			ret = snprintf(buf+j, DUMP_BUF_SIZE - j,
 				"%s", replace_str);
+			if (ret <= 0 || ret >= DUMP_BUF_SIZE - j) {
+				CCCI_ERROR_LOG(port->md_id, TAG,
+					"%s snprintf replace_str fail\n",
+					__func__);
+				break;
+			}
 			j += 2;
 		} else {
 			ret = snprintf(buf+j, DUMP_BUF_SIZE - j,
 				"[%02X]", char_ptr[i]);
+			if (ret <= 0 || ret >= DUMP_BUF_SIZE - j) {
+				CCCI_ERROR_LOG(port->md_id, TAG,
+					"%s snprintf char_ptr0[%d] fail\n",
+					__func__, i);
+				break;
+			}
 			j += 4;
-		}
-		if (ret < 0) {
-			CCCI_ERROR_LOG(port->md_id, TAG,
-				"%s-%d:snprintf fail,ret = %d\n", __func__, __LINE__, ret);
-			break;
 		}
 	}
 	buf[j] = '\0';
@@ -847,8 +859,7 @@ static void port_dump_string(struct port_t *port, int dir,
 			"[%5lu.%06lu]C:%d,%d(%d,%d,%d) %s: %d<%s\n",
 			(unsigned long)ts_nsec, rem_nsec / 1000,
 			port->flags, port->rx_ch,
-			port->rx_skb_list.qlen,
-			atomic_read(&port->rx_pkg_cnt),
+			port->rx_skb_list.qlen, port->rx_pkg_cnt,
 			port->rx_drop_cnt, "R", len, buf);
 	else
 		CCCI_HISTORY_LOG(port->md_id, TAG,
@@ -894,8 +905,7 @@ static void port_dump_raw_data(struct port_t *port, int dir,
 			"[%5lu.%06lu]C:%d,%d(%d,%d,%d) %s: %d<",
 			(unsigned long)ts_nsec, rem_nsec / 1000,
 			port->flags, port->rx_ch,
-			port->rx_skb_list.qlen,
-			atomic_read(&port->rx_pkg_cnt),
+			port->rx_skb_list.qlen, port->rx_pkg_cnt,
 			port->rx_drop_cnt, "R", len);
 	else
 		CCCI_HISTORY_LOG(port->md_id, TAG,
@@ -996,7 +1006,7 @@ int port_recv_skb(struct port_t *port, struct sk_buff *skb)
 			port_adjust_skb(port, skb);
 		if (ccci_h->channel == CCCI_STATUS_RX)
 			port->skb_handler(port, skb);
-		else  {
+		else {
 			__skb_queue_tail(&port->rx_skb_list, skb);
 			if (ccci_h->channel == CCCI_SYSTEM_RX) {
 				ts_nsec = sched_clock();
@@ -1008,8 +1018,10 @@ int port_recv_skb(struct port_t *port, struct sk_buff *skb)
 					ccci_h->seq_num);
 			}
 		}
-
-		atomic_inc(&port->rx_pkg_cnt);
+		/* set udc status */
+		if (ccci_h->channel == CCCI_UDC_RX)
+			set_udc_status(skb);
+		port->rx_pkg_cnt++;
 		spin_unlock_irqrestore(&port->rx_skb_list.lock, flags);
 		__pm_wakeup_event(port->rx_wakelock, jiffies_to_msecs(HZ/2));
 		spin_lock_irqsave(&port->rx_wq.lock, flags);
@@ -1228,7 +1240,8 @@ static inline int proxy_check_critical_user(struct port_proxy *proxy_p)
 	int md_id = proxy_p->md_id;
 
 	if (proxy_get_critical_user(proxy_p, CRIT_USR_MUXD) == 0) {
-		if (get_boot_mode_from_dts() == META_BOOT_ID) {
+#ifndef DISABLE_MTK_BOOT_MODE
+		if (is_meta_mode() || is_advanced_meta_mode()) {
 			if (proxy_get_critical_user(proxy_p,
 				CRIT_USR_META) == 0) {
 				CCCI_NORMAL_LOG(md_id, TAG,
@@ -1240,6 +1253,7 @@ static inline int proxy_check_critical_user(struct port_proxy *proxy_p)
 			CCCI_ERROR_LOG(md_id, TAG,
 				"DHL ctrl is still open in META mode\n");
 		} else {
+#endif
 			if (proxy_get_critical_user(proxy_p,
 				CRIT_USR_MDLOG) == 0 &&
 				proxy_get_critical_user(proxy_p,
@@ -1249,7 +1263,9 @@ static inline int proxy_check_critical_user(struct port_proxy *proxy_p)
 				ret = 0;
 				goto __EXIT_FUN__;
 			}
+#ifndef DISABLE_MTK_BOOT_MODE
 		}
+#endif
 	}
 __EXIT_FUN__:
 	return ret;
@@ -1274,24 +1290,15 @@ static inline void proxy_setup_channel_mapping(struct port_proxy *proxy_p)
 	/*setup port mapping*/
 	for (i = 0; i < proxy_p->port_number; i++) {
 		port = proxy_p->ports + i;
-		if (port->rx_ch >= 0 && port->rx_ch < CCCI_MAX_CH_NUM)
+
+		if (port->rx_ch < CCCI_MAX_CH_NUM)
 			port_list[port->rx_ch] = port;
-		else {
-			CCCI_ERROR_LOG(proxy_p->md_id, TAG,
-				"%s:%s rx_ch=%d error\n",
-				__func__, port->name, port->rx_ch);
-			continue;
-		}
-		if (port->tx_ch >= 0 && port->tx_ch < CCCI_MAX_CH_NUM)
+		if (port->tx_ch < CCCI_MAX_CH_NUM)
 			port_list[port->tx_ch] = port;
-		else {
-			CCCI_ERROR_LOG(proxy_p->md_id, TAG,
-				"%s:%s tx_ch=%d error\n",
-				__func__, port->name, port->tx_ch);
-			continue;
-		}
+
 		/*setup RX_CH=>port list mapping*/
-		list_add_tail(&port->entry, &proxy_p->rx_ch_ports[port->rx_ch]);
+		if (port->rx_ch < CCCI_MAX_CH_NUM)
+			list_add_tail(&port->entry, &proxy_p->rx_ch_ports[port->rx_ch]);
 
 		/* skip no data transmission port,
 		 * such as CCCI_DUMMY_CH type port
@@ -1578,7 +1585,7 @@ static inline void proxy_dispatch_md_status(struct port_proxy *proxy_p,
 		port = proxy_p->ports + i;
 		if ((state == GATED) && (port->flags &
 			PORT_F_CH_TRAFFIC)) {
-			atomic_set(&port->rx_pkg_cnt, 0);
+			port->rx_pkg_cnt = 0;
 			port->rx_drop_cnt = 0;
 			port->tx_pkg_cnt = 0;
 		}
@@ -1592,25 +1599,12 @@ static inline void proxy_dump_status(struct port_proxy *proxy_p)
 	struct port_t *port = NULL;
 	/* hardcode, port number should not be larger than 64 */
 	unsigned long long port_full = 0;
-	unsigned int i, str_len = 0;
-	char full_port[124];
-	int ret;
+	unsigned int i;
 
 	for (i = 0; i < proxy_p->port_number; i++) {
 		port = proxy_p->ports + i;
-		if (port->flags & PORT_F_RX_FULLED) {
+		if (port->flags & PORT_F_RX_FULLED)
 			port_full |= (1LL << i);
-			if (str_len < 124) {
-				ret = snprintf(full_port + str_len,
-					(124 - str_len), "%s;", port->name);
-				if (ret <= 0) {
-					CCCI_ERROR_LOG(proxy_p->md_id, TAG,
-						"port_full len > 124\n");
-					break;
-				}
-				str_len += ret;
-			}
-		}
 		if (port->tx_busy_count != 0 || port->rx_busy_count != 0) {
 			CCCI_REPEAT_LOG(proxy_p->md_id, TAG,
 				"port %s busy count %d/%d\n", port->name,
@@ -1623,13 +1617,19 @@ static inline void proxy_dump_status(struct port_proxy *proxy_p)
 	}
 	if (port_full)
 		CCCI_ERROR_LOG(proxy_p->md_id, TAG,
-			"port_full status=%llx, %s\n", port_full, full_port);
+			"port_full status=%llx\n", port_full);
 }
 
 static inline int proxy_register_char_dev(struct port_proxy *proxy_p)
 {
 	int ret = 0;
 	dev_t dev = 0;
+
+	if (!proxy_p) {
+		CCCI_ERROR_LOG(-1, CHAR, "%s:proxy_p is null\n",
+		__func__);
+		return -1;
+	}
 
 	if (proxy_p->major) {
 		dev = MKDEV(proxy_p->major, proxy_p->minor_base);
@@ -1658,13 +1658,6 @@ static inline void proxy_init_all_ports(struct port_proxy *proxy_p)
 	/* init port */
 	for (i = 0; i < proxy_p->port_number; i++) {
 		port = proxy_p->ports + i;
-		if (port_md_gen < 6297) {
-			if (port->flags & PORT_F_GEN95_NOT_SUPPORT) {
-				CCCI_NORMAL_LOG(proxy_p->md_id, TAG,
-					 "%s:not support %s\n", __func__, port->name);
-				continue;
-			}
-		}
 		port_struct_init(port, proxy_p);
 		if (port->tx_ch == CCCI_SYSTEM_TX)
 			proxy_p->sys_port = port;
@@ -1728,7 +1721,7 @@ static inline void proxy_set_traffic_flag(struct port_proxy *proxy_p,
 static inline struct port_proxy *proxy_alloc(int md_id)
 {
 	int ret = 0;
-	struct port_proxy *proxy_p;
+	struct port_proxy *proxy_p = NULL;
 
 	/* Allocate port_proxy obj and set all member zero */
 	proxy_p = kzalloc(sizeof(struct port_proxy), GFP_KERNEL);
@@ -1921,10 +1914,10 @@ static int ccci_lp_mem_close(struct inode *inode, struct file *file)
 	return 0;
 }
 
-const struct proc_ops ccci_dbm_ops = {
-	.proc_open = ccci_lp_mem_open,
-	.proc_read = ccci_lp_mem_read,
-	.proc_release = ccci_lp_mem_close,
+const struct file_operations ccci_dbm_ops = {
+	.open = ccci_lp_mem_open,
+	.read = ccci_lp_mem_read,
+	.release = ccci_lp_mem_close,
 };
 
 static void ccci_proc_init(void)
@@ -1942,22 +1935,12 @@ static void ccci_proc_init(void)
 int ccci_port_init(int md_id)
 {
 	struct port_proxy *proxy_p = NULL;
-	struct device_node *node = NULL;
 
 	if (md_id < 0 || md_id >= MAX_MD_NUM) {
 		CCCI_ERROR_LOG(-1, TAG,
 			"invalid md_id = %d\n", md_id);
 		return -1;
 	}
-
-	node = of_find_compatible_node(NULL, NULL,
-		"mediatek,mddriver");
-	if (node)
-		of_property_read_u32(node,
-			"mediatek,md_generation", &port_md_gen);
-	CCCI_NORMAL_LOG(md_id, TAG, "%s: port_md_gen=%d\n",
-		__func__, port_md_gen);
-
 	CHECK_MD_ID(md_id);
 	ccci_proc_init();
 	proxy_p = proxy_alloc(md_id);
@@ -2102,10 +2085,6 @@ int ccci_port_check_critical_user(int md_id)
 	return proxy_check_critical_user(proxy_p);
 }
 
-/*
- * This API is called by ccci fsm,
- * and used to check critical user only ccci_fsd exited.
- */
 int ccci_port_critical_user_only_fsd(int md_id)
 {
 	struct port_proxy *proxy_p;
@@ -2122,6 +2101,7 @@ int ccci_port_critical_user_only_fsd(int md_id)
 
 	return 0;
 }
+
 
 /*
  * This API is called by ccci fsm,
@@ -2181,8 +2161,7 @@ void ccci_port_set_traffic_flag(int md_id, unsigned int dump_flag)
 	proxy_set_traffic_flag(proxy_p, dump_flag);
 }
 
-#if IS_ENABLED(CONFIG_MTK_ECCCI_C2K_USB)
-/* only md3 can usb bypass */
+#ifdef CONFIG_MTK_ECCCI_C2K /* only md3 can usb bypass */
 int modem_dtr_set(int on, int low_latency)
 {
 	struct c2k_ctrl_port_msg c2k_ctl_msg;
@@ -2198,15 +2177,21 @@ int modem_dtr_set(int on, int low_latency)
 	else
 		c2k_ctl_msg.option &= 0xFB;
 
+#if (MD_GENERATION <= 6292)
+	md_id = MD_SYS3;
+	CCCI_NORMAL_LOG(md_id, TAG, "usb bypass dtr set(%d)(0x%x)\n",
+		on, (u32) (*((u32 *)&c2k_ctl_msg)));
+	ccci_port_send_msg_to_md(md_id, CCCI_CONTROL_TX, C2K_STATUS_IND_MSG,
+		(u32) (*((u32 *)&c2k_ctl_msg)), 1);
+#else
 	md_id = MD_SYS1;
 	CCCI_NORMAL_LOG(md_id, TAG, "usb bypass dtr set(%d)(0x%x)\n",
 		on, (u32) (*((u32 *)&c2k_ctl_msg)));
 	ccci_port_send_msg_to_md(md_id, CCCI_SYSTEM_TX, C2K_PPP_LINE_STATUS,
 		(u32) (*((u32 *)&c2k_ctl_msg)), 1);
-
+#endif
 	return ret;
 }
-EXPORT_SYMBOL(modem_dtr_set);
 
 int modem_dcd_state(void)
 {
@@ -2220,11 +2205,18 @@ int modem_dcd_state(void)
 	c2k_ctl_msg.id_low = C2K_STATUS_QUERY_MSG & 0xFF;
 	c2k_ctl_msg.option = 0;
 
+#if (MD_GENERATION <= 6292)
+	md_id = MD_SYS3;
+	ret = ccci_port_send_msg_to_md(md_id, CCCI_CONTROL_TX,
+			C2K_STATUS_QUERY_MSG,
+			(u32) (*((u32 *)&c2k_ctl_msg)), 1);
+#else
 	md_id = MD_SYS1;
 	ret = ccci_port_send_msg_to_md(md_id, CCCI_SYSTEM_TX,
 			C2K_PPP_LINE_STATUS,
 			(u32) (*((u32 *)&c2k_ctl_msg)), 1);
 
+#endif
 	CCCI_NORMAL_LOG(md_id, TAG,
 		"usb bypass query state(0x%x)\n",
 		(u32) (*((u32 *)&c2k_ctl_msg)));
@@ -2239,7 +2231,6 @@ int modem_dcd_state(void)
 	}
 	return dcd_state;
 }
-EXPORT_SYMBOL(modem_dcd_state);
 
 int ccci_c2k_rawbulk_intercept(int ch_id, unsigned int interception)
 {
@@ -2249,8 +2240,11 @@ int ccci_c2k_rawbulk_intercept(int ch_id, unsigned int interception)
 	struct list_head *port_list = NULL;
 	char matched = 0;
 	int ch_id_tx, ch_id_rx = 0;
+#if (MD_GENERATION <= 6292)
+	int md_id = MD_SYS3;
+#else
 	int md_id = MD_SYS1;
-
+#endif
 	struct ccci_per_md *per_md_data = ccci_get_per_md_data(md_id);
 
 	/* USB bypass's channel id offset,
@@ -2263,9 +2257,13 @@ int ccci_c2k_rawbulk_intercept(int ch_id, unsigned int interception)
 
 	/*only data and log channel are legal*/
 	if (ch_id == DATA_PPP_CH_C2K) {
+#if (MD_GENERATION <= 6292)
+		ch_id_tx = CCCI_C2K_PPP_DATA;
+		ch_id_rx = CCCI_C2K_PPP_DATA;
+#else
 		ch_id_tx = CCCI_C2K_PPP_TX;
 		ch_id_rx = CCCI_C2K_PPP_RX;
-
+#endif
 	} else if (ch_id == MDLOG_CH_C2K) {
 		ch_id_tx = CCCI_MD_LOG_TX;
 		ch_id_rx = CCCI_MD_LOG_RX;
@@ -2305,7 +2303,7 @@ int ccci_c2k_rawbulk_intercept(int ch_id, unsigned int interception)
 
 	return ret;
 }
-EXPORT_SYMBOL(ccci_c2k_rawbulk_intercept);
+
 
 int ccci_c2k_buffer_push(int ch_id, void *buf, int count)
 {
@@ -2322,7 +2320,11 @@ int ccci_c2k_buffer_push(int ch_id, void *buf, int count)
 	unsigned char blk1 = 0;
 	/* non-blocking for all request from USB */
 	unsigned char blk2 = 0;
+#if (MD_GENERATION <= 6292)
+	int md_id = MD_SYS3;
+#else
 	int md_id = MD_SYS1;
+#endif
 
 	/* USB bypass's channel id offset, please refer to viatel_rawbulk.h */
 	if (ch_id >= FS_CH_C2K)
@@ -2332,8 +2334,13 @@ int ccci_c2k_buffer_push(int ch_id, void *buf, int count)
 
 	/* only data and log channel are legal */
 	if (ch_id == DATA_PPP_CH_C2K) {
+#if (MD_GENERATION <= 6292)
+		ch_id_tx = CCCI_C2K_PPP_DATA;
+		ch_id_rx = CCCI_C2K_PPP_DATA;
+#else
 		ch_id_tx = CCCI_C2K_PPP_TX;
 		ch_id_rx = CCCI_C2K_PPP_RX;
+#endif
 	} else if (ch_id == MDLOG_CH_C2K) {
 		ch_id_tx = CCCI_MD_LOG_TX;
 		ch_id_rx = CCCI_MD_LOG_RX;
@@ -2396,7 +2403,6 @@ push_err_out:
 	}
 	return -ENODEV;
 }
-EXPORT_SYMBOL(ccci_c2k_buffer_push);
 
 #endif
 

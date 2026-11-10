@@ -17,7 +17,7 @@ struct sockaddr {
 };
 
 struct in_addr {
-	unsigned long s_addr; /* that’s a 32-bit long, or 4 bytes */
+	unsigned long s_addr; /* that¡¦s a 32-bit long, or 4 bytes */
 };
 
 struct sockaddr_in {

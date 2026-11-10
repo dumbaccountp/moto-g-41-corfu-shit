@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2019, MICROTRUST Incorporated
+# Copyright (c) 2015-2020, MICROTRUST Incorporated
 # All Rights Reserved.
 #
 # This program is free software; you can redistribute it and/or
@@ -10,7 +10,6 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
-$(info "whf src=")
 obj-y += tee.o
 tee-objs += tee_core.o
 tee-objs += tee_shm.o

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
  * (C) COPYRIGHT 2010-2021 ARM Limited. All rights reserved.
@@ -36,7 +36,7 @@
 #include <linux/of.h>
 
 static const struct kbase_pm_policy *const all_policy_list[] = {
-#if IS_ENABLED(CONFIG_MALI_MTK_BRINGUP)
+#ifdef MTK_POWER_POLICY_AO
 	&kbase_pm_always_on_policy_ops,
 	&kbase_pm_coarse_demand_policy_ops
 #else

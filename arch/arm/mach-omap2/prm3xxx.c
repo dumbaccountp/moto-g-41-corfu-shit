@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP3xxx PRM module functions
  *
@@ -7,6 +6,10 @@
  * Benoît Cousson
  * Paul Walmsley
  * Rajendra Nayak <rnayak@ti.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -708,7 +711,6 @@ static int omap3xxx_prm_late_init(void)
 	}
 
 	irq_num = of_irq_get(np, 0);
-	of_node_put(np);
 	if (irq_num == -EPROBE_DEFER)
 		return irq_num;
 

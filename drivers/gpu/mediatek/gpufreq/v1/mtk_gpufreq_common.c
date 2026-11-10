@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2019 MediaTek Inc.
+ * Copyright (c) 2021 MediaTek Inc.
  */
 
 /**
@@ -14,23 +14,28 @@
  * ===============================================
  */
 #include <linux/slab.h>
-#include <aee.h>
+#include <mt-plat/aee.h>
 #include <aed.h>
 #include "mtk_gpufreq_common.h"
 
-#if IS_ENABLED(CONFIG_MTK_AEE_AED)
+#ifdef CONFIG_MTK_AEE_AED
 static struct gpu_assert_info g_pending_info;
 static int g_have_pending_info;
 #endif
 
 static void dump_except(enum g_exception_enum except_type, char *except_str)
 {
-#if IS_ENABLED(CONFIG_MTK_AEE_AED)
+#ifdef CONFIG_MTK_AEE_AED
 	if (except_str == NULL) {
 		pr_info("%s: NULL string\n", __func__);
 		return;
 	}
-	if (aee_get_mode() != AEE_MODE_NOT_INIT) {
+	if (except_type < 0 ||
+		except_type >= (sizeof(g_exception_string) / sizeof(char *))) {
+		pr_info("%s: except_type %d out of range\n", __func__, except_type);
+		return;
+	}
+	if (aee_mode != AEE_MODE_NOT_INIT) {
 		aee_kernel_warning("GPU_FREQ",
 			"\n\n%s\nCRDISPATCH_KEY:%s\n",
 			except_str,
@@ -73,9 +78,9 @@ void gpu_assert(bool cond, enum g_exception_enum except_type,
  */
 void check_pending_info(void)
 {
-#if IS_ENABLED(CONFIG_MTK_AEE_AED)
+#ifdef CONFIG_MTK_AEE_AED
 	if (g_have_pending_info &&
-		aee_get_mode() != AEE_MODE_NOT_INIT) {
+		aee_mode != AEE_MODE_NOT_INIT) {
 		g_have_pending_info = 0;
 		dump_except(
 			g_pending_info.exception_type,

@@ -8,7 +8,7 @@
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
 #include <linux/workqueue.h>
-#include <linux/memblock.h>
+#include <linux/bootmem.h>
 #include <linux/uaccess.h>
 #include <linux/sysctl.h>
 #include <linux/cpuset.h>
@@ -26,6 +26,7 @@
 #include <linux/nodemask.h>
 #include <linux/node.h>
 #include <asm/sysinfo.h>
+#include <asm/numa.h>
 
 #define PTF_HORIZONTAL	(0UL)
 #define PTF_VERTICAL	(1UL)
@@ -62,6 +63,8 @@ static struct mask_info drawer_info;
 struct cpu_topology_s390 cpu_topology[NR_CPUS];
 EXPORT_SYMBOL_GPL(cpu_topology);
 
+cpumask_t cpus_with_topology;
+
 static cpumask_t cpu_group_map(struct mask_info *info, unsigned int cpu)
 {
 	cpumask_t mask;
@@ -83,12 +86,11 @@ static cpumask_t cpu_group_map(struct mask_info *info, unsigned int cpu)
 		cpumask_copy(&mask, cpu_present_mask);
 		break;
 	default:
-		fallthrough;
+		/* fallthrough */
 	case TOPOLOGY_MODE_SINGLE:
 		cpumask_copy(&mask, cpumask_of(cpu));
 		break;
 	}
-	cpumask_and(&mask, &mask, cpu_online_mask);
 	return mask;
 }
 
@@ -104,7 +106,6 @@ static cpumask_t cpu_thread_map(unsigned int cpu)
 	for (i = 0; i <= smp_cpu_mtid; i++)
 		if (cpu_present(cpu + i))
 			cpumask_set_cpu(cpu + i, &mask);
-	cpumask_and(&mask, &mask, cpu_online_mask);
 	return mask;
 }
 
@@ -137,6 +138,7 @@ static void add_cpus_to_mask(struct topology_core *tl_core,
 			cpumask_set_cpu(lcpu + i, &drawer->mask);
 			cpumask_set_cpu(lcpu + i, &book->mask);
 			cpumask_set_cpu(lcpu + i, &socket->mask);
+			cpumask_set_cpu(lcpu + i, &cpus_with_topology);
 			smp_cpu_set_polarization(lcpu + i, tl_core->pp);
 		}
 	}
@@ -243,10 +245,10 @@ int topology_set_cpu_management(int fc)
 	return rc;
 }
 
-void update_cpu_masks(void)
+static void update_cpu_masks(void)
 {
-	struct cpu_topology_s390 *topo, *topo_package, *topo_sibling;
-	int cpu, sibling, pkg_first, smt_first, id;
+	struct cpu_topology_s390 *topo;
+	int cpu, id;
 
 	for_each_possible_cpu(cpu) {
 		topo = &cpu_topology[cpu];
@@ -254,7 +256,6 @@ void update_cpu_masks(void)
 		topo->core_mask = cpu_group_map(&socket_info, cpu);
 		topo->book_mask = cpu_group_map(&book_info, cpu);
 		topo->drawer_mask = cpu_group_map(&drawer_info, cpu);
-		topo->booted_cores = 0;
 		if (topology_mode != TOPOLOGY_MODE_HW) {
 			id = topology_mode == TOPOLOGY_MODE_PACKAGE ? 0 : cpu;
 			topo->thread_id = cpu;
@@ -262,23 +263,11 @@ void update_cpu_masks(void)
 			topo->socket_id = id;
 			topo->book_id = id;
 			topo->drawer_id = id;
+			if (cpu_present(cpu))
+				cpumask_set_cpu(cpu, &cpus_with_topology);
 		}
 	}
-	for_each_online_cpu(cpu) {
-		topo = &cpu_topology[cpu];
-		pkg_first = cpumask_first(&topo->core_mask);
-		topo_package = &cpu_topology[pkg_first];
-		if (cpu == pkg_first) {
-			for_each_cpu(sibling, &topo->core_mask) {
-				topo_sibling = &cpu_topology[sibling];
-				smt_first = cpumask_first(&topo_sibling->thread_mask);
-				if (sibling == smt_first)
-					topo_package->booted_cores++;
-			}
-		} else {
-			topo->booted_cores = topo_package->booted_cores;
-		}
-	}
+	numa_update_cpu_topology();
 }
 
 void store_topology(struct sysinfo_15_1_x *info)
@@ -300,6 +289,7 @@ static int __arch_update_cpu_topology(void)
 	int rc = 0;
 
 	mutex_lock(&smp_cpu_state_mutex);
+	cpumask_clear(&cpus_with_topology);
 	if (MACHINE_HAS_TOPOLOGY) {
 		rc = 1;
 		store_topology(info);
@@ -356,9 +346,9 @@ static atomic_t topology_poll = ATOMIC_INIT(0);
 static void set_topology_timer(void)
 {
 	if (atomic_add_unless(&topology_poll, -1, 0))
-		mod_timer(&topology_timer, jiffies + msecs_to_jiffies(100));
+		mod_timer(&topology_timer, jiffies + HZ / 10);
 	else
-		mod_timer(&topology_timer, jiffies + msecs_to_jiffies(60 * MSEC_PER_SEC));
+		mod_timer(&topology_timer, jiffies + HZ * 60);
 }
 
 void topology_expect_change(void)
@@ -530,10 +520,7 @@ static void __init alloc_masks(struct sysinfo_15_1_x *info,
 		nr_masks *= info->mag[TOPOLOGY_NR_MAG - offset - 1 - i];
 	nr_masks = max(nr_masks, 1);
 	for (i = 0; i < nr_masks; i++) {
-		mask->next = memblock_alloc(sizeof(*mask->next), 8);
-		if (!mask->next)
-			panic("%s: Failed to allocate %zu bytes align=0x%x\n",
-			      __func__, sizeof(*mask->next), 8);
+		mask->next = memblock_virt_alloc(sizeof(*mask->next), 8);
 		mask = mask->next;
 	}
 }
@@ -551,10 +538,7 @@ void __init topology_init_early(void)
 	}
 	if (!MACHINE_HAS_TOPOLOGY)
 		goto out;
-	tl_info = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-	if (!tl_info)
-		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
-		      __func__, PAGE_SIZE, PAGE_SIZE);
+	tl_info = memblock_virt_alloc(PAGE_SIZE, PAGE_SIZE);
 	info = tl_info;
 	store_topology(info);
 	pr_info("The CPU configuration topology of the machine is: %d %d %d %d %d %d / %d\n",
@@ -594,17 +578,19 @@ static int __init topology_setup(char *str)
 early_param("topology", topology_setup);
 
 static int topology_ctl_handler(struct ctl_table *ctl, int write,
-				void *buffer, size_t *lenp, loff_t *ppos)
+				void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int enabled = topology_is_enabled();
 	int new_mode;
+	int zero = 0;
+	int one = 1;
 	int rc;
 	struct ctl_table ctl_entry = {
 		.procname	= ctl->procname,
 		.data		= &enabled,
 		.maxlen		= sizeof(int),
-		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_ONE,
+		.extra1		= &zero,
+		.extra2		= &one,
 	};
 
 	rc = proc_douintvec_minmax(&ctl_entry, write, buffer, lenp, ppos);

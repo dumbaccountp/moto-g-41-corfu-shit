@@ -43,7 +43,6 @@
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/moduleparam.h>
-#include <linux/indirect_call_wrapper.h>
 
 #include "mlx4_en.h"
 
@@ -58,8 +57,11 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 
 	ring = kzalloc_node(sizeof(*ring), GFP_KERNEL, node);
 	if (!ring) {
-		en_err(priv, "Failed allocating TX ring\n");
-		return -ENOMEM;
+		ring = kzalloc(sizeof(*ring), GFP_KERNEL);
+		if (!ring) {
+			en_err(priv, "Failed allocating TX ring\n");
+			return -ENOMEM;
+		}
 	}
 
 	ring->size = size;
@@ -262,10 +264,6 @@ static void mlx4_en_stamp_wqe(struct mlx4_en_priv *priv,
 	}
 }
 
-INDIRECT_CALLABLE_DECLARE(u32 mlx4_en_free_tx_desc(struct mlx4_en_priv *priv,
-						   struct mlx4_en_tx_ring *ring,
-						   int index, u64 timestamp,
-						   int napi_mode));
 
 u32 mlx4_en_free_tx_desc(struct mlx4_en_priv *priv,
 			 struct mlx4_en_tx_ring *ring,
@@ -333,11 +331,6 @@ u32 mlx4_en_free_tx_desc(struct mlx4_en_priv *priv,
 
 	return tx_info->nr_txbb;
 }
-
-INDIRECT_CALLABLE_DECLARE(u32 mlx4_en_recycle_tx_desc(struct mlx4_en_priv *priv,
-						      struct mlx4_en_tx_ring *ring,
-						      int index, u64 timestamp,
-						      int napi_mode));
 
 u32 mlx4_en_recycle_tx_desc(struct mlx4_en_priv *priv,
 			    struct mlx4_en_tx_ring *ring,
@@ -421,8 +414,8 @@ static void mlx4_en_handle_err_cqe(struct mlx4_en_priv *priv, struct mlx4_err_cq
 	queue_work(mdev->workqueue, &priv->restart_task);
 }
 
-int mlx4_en_process_tx_cq(struct net_device *dev,
-			  struct mlx4_en_cq *cq, int napi_budget)
+bool mlx4_en_process_tx_cq(struct net_device *dev,
+			   struct mlx4_en_cq *cq, int napi_budget)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	struct mlx4_cq *mcq = &cq->mcq;
@@ -444,7 +437,7 @@ int mlx4_en_process_tx_cq(struct net_device *dev,
 	u32 ring_cons;
 
 	if (unlikely(!priv->port_up))
-		return 0;
+		return true;
 
 	netdev_txq_bql_complete_prefetchw(ring->tx_queue);
 
@@ -485,9 +478,7 @@ int mlx4_en_process_tx_cq(struct net_device *dev,
 				timestamp = mlx4_en_get_cqe_ts(cqe);
 
 			/* free next descriptor */
-			last_nr_txbb = INDIRECT_CALL_2(ring->free_tx_desc,
-						       mlx4_en_free_tx_desc,
-						       mlx4_en_recycle_tx_desc,
+			last_nr_txbb = ring->free_tx_desc(
 					priv, ring, ring_index,
 					timestamp, napi_budget);
 
@@ -518,7 +509,7 @@ int mlx4_en_process_tx_cq(struct net_device *dev,
 	WRITE_ONCE(ring->cons, ring_cons + txbbs_skipped);
 
 	if (cq->type == TX_XDP)
-		return done;
+		return done < budget;
 
 	netdev_tx_completed_queue(ring->tx_queue, packets, bytes);
 
@@ -530,7 +521,7 @@ int mlx4_en_process_tx_cq(struct net_device *dev,
 		ring->wake_queue++;
 	}
 
-	return done;
+	return done < budget;
 }
 
 void mlx4_en_tx_irq(struct mlx4_cq *mcq)
@@ -550,14 +541,14 @@ int mlx4_en_poll_tx_cq(struct napi_struct *napi, int budget)
 	struct mlx4_en_cq *cq = container_of(napi, struct mlx4_en_cq, napi);
 	struct net_device *dev = cq->dev;
 	struct mlx4_en_priv *priv = netdev_priv(dev);
-	int work_done;
+	bool clean_complete;
 
-	work_done = mlx4_en_process_tx_cq(dev, cq, budget);
-	if (work_done >= budget)
+	clean_complete = mlx4_en_process_tx_cq(dev, cq, budget);
+	if (!clean_complete)
 		return budget;
 
-	if (napi_complete_done(napi, work_done))
-		mlx4_en_arm_cq(priv, cq);
+	napi_complete(napi);
+	mlx4_en_arm_cq(priv, cq);
 
 	return 0;
 }
@@ -723,15 +714,16 @@ static void build_inline_wqe(struct mlx4_en_tx_desc *tx_desc,
 }
 
 u16 mlx4_en_select_queue(struct net_device *dev, struct sk_buff *skb,
-			 struct net_device *sb_dev)
+			 struct net_device *sb_dev,
+			 select_queue_fallback_t fallback)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	u16 rings_p_up = priv->num_tx_rings_p_up;
 
 	if (netdev_get_num_tc(dev))
-		return netdev_pick_tx(dev, skb, NULL);
+		return fallback(dev, skb, NULL);
 
-	return netdev_pick_tx(dev, skb, NULL) % rings_p_up;
+	return fallback(dev, skb, NULL) % rings_p_up;
 }
 
 static void mlx4_bf_copy(void __iomem *dst, const void *src,
@@ -810,7 +802,9 @@ static bool mlx4_en_build_dma_wqe(struct mlx4_en_priv *priv,
 
 	/* Map fragments if any */
 	for (i_frag = shinfo->nr_frags - 1; i_frag >= 0; i_frag--) {
-		const skb_frag_t *frag = &shinfo->frags[i_frag];
+		const struct skb_frag_struct *frag;
+
+		frag = &shinfo->frags[i_frag];
 		byte_count = skb_frag_size(frag);
 		dma = skb_frag_dma_map(ddev, frag,
 				       0, byte_count,
@@ -868,7 +862,6 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct mlx4_en_tx_desc *tx_desc;
 	struct mlx4_wqe_data_seg *data;
 	struct mlx4_en_tx_info *tx_info;
-	u32 __maybe_unused ring_cons;
 	int tx_ind;
 	int nr_txbb;
 	int desc_size;
@@ -882,6 +875,7 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 	bool stop_queue;
 	bool inline_ok;
 	u8 data_offset;
+	u32 ring_cons;
 	bool bf_ok;
 
 	tx_ind = skb_get_queue_mapping(skb);
@@ -1038,6 +1032,7 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 		ring->packets++;
 	}
 	ring->bytes += tx_info->nr_bytes;
+	netdev_tx_sent_queue(ring->tx_queue, tx_info->nr_bytes);
 	AVG_PERF_COUNTER(priv->pstats.tx_pktsz_avg, skb->len);
 
 	if (tx_info->inl)
@@ -1075,10 +1070,7 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 		netif_tx_stop_queue(ring->tx_queue);
 		ring->queue_stopped++;
 	}
-
-	send_doorbell = __netdev_tx_sent_queue(ring->tx_queue,
-					       tx_info->nr_bytes,
-					       netdev_xmit_more());
+	send_doorbell = !skb->xmit_more || netif_xmit_stopped(ring->tx_queue);
 
 	real_size = (real_size / 16) & 0x3f;
 
@@ -1101,6 +1093,7 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 		 */
 		smp_rmb();
 
+		ring_cons = READ_ONCE(ring->cons);
 		if (unlikely(!mlx4_en_is_tx_ring_full(ring))) {
 			netif_tx_wake_queue(ring->tx_queue);
 			ring->wake_queue++;

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * lib/debug_locks.c
  *
@@ -15,6 +14,11 @@
 #include <linux/spinlock.h>
 #include <linux/debug_locks.h>
 
+#ifdef CONFIG_LOCKDEP
+#include <linux/sched/clock.h>
+unsigned long long debug_locks_off_ts;
+#endif
+
 /*
  * We want to turn all lock-debugging facilities on/off at once,
  * via a global flag. The reason is that once a single bug has been
@@ -22,7 +26,7 @@
  * that would just muddy the log. So we report the first one and
  * shut up after that.
  */
-int debug_locks __read_mostly = 1;
+int debug_locks = 1;
 EXPORT_SYMBOL_GPL(debug_locks);
 
 /*
@@ -30,7 +34,7 @@ EXPORT_SYMBOL_GPL(debug_locks);
  * 'silent failure': nothing is printed to the console when
  * a locking bug is detected.
  */
-int debug_locks_silent __read_mostly;
+int debug_locks_silent;
 EXPORT_SYMBOL_GPL(debug_locks_silent);
 
 /*
@@ -38,8 +42,15 @@ EXPORT_SYMBOL_GPL(debug_locks_silent);
  */
 int debug_locks_off(void)
 {
-	if (debug_locks && __debug_locks_off() && !debug_locks_silent)
-		return 1;
+	if (debug_locks && __debug_locks_off()) {
+#ifdef CONFIG_LOCKDEP
+		debug_locks_off_ts = sched_clock();
+#endif
+		if (!debug_locks_silent) {
+			console_verbose();
+			return 1;
+		}
+	}
 	return 0;
 }
 EXPORT_SYMBOL_GPL(debug_locks_off);

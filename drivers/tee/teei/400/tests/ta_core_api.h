@@ -143,6 +143,6 @@ extern int compare_array_with_pattern(unsigned char *buffer,
 					get_order(ROUND_UP(size, SZ_4K)))
 extern int case_res;
 
-#define UNUSED(x) ((void)(x))
+#define UNUSED(x) (void)(x)
 
 #endif

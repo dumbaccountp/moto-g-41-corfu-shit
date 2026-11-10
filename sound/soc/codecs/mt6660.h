@@ -7,27 +7,43 @@
 #define __SND_SOC_MT6660_H
 
 #include <linux/mutex.h>
-#include <linux/regmap.h>
 
-#pragma pack(push, 1)
-struct mt6660_platform_data {
-	u8 init_setting_num;
-	u32 *init_setting_addr;
-	u32 *init_setting_mask;
-	u32 *init_setting_val;
+struct dbg_internal {
+	struct dentry *rt_root;
+	struct dentry *ic_root;
+	bool rt_dir_create;
+	struct mutex io_lock;
+	u16 reg;
+	u16 size;
+	u16 data_buffer_size;
+	void *data_buffer;
+	bool access_lock;
+};
+
+struct dbg_info {
+	const char *dirname;
+	const char *devname;
+	const char *typestr;
+	void *io_drvdata;
+	int (*io_read)(void *drvdata, u16 reg, void *val, u16 size);
+	int (*io_write)(void *drvdata, u16 reg, const void *val, u16 size);
+	struct dbg_internal internal;
 };
 
 struct mt6660_chip {
 	struct i2c_client *i2c;
 	struct device *dev;
+	struct snd_soc_component *component;
 	struct platform_device *param_dev;
-	struct mt6660_platform_data plat_data;
+	struct mutex var_lock;
 	struct mutex io_lock;
-	struct regmap *regmap;
+	struct dbg_info dbg_info;
 	u16 chip_rev;
-	u8 dev_cnt;
+	int pwr_cnt;
 };
-#pragma pack(pop)
+
+int mt6660_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id);
+int mt6660_i2c_remove(struct i2c_client *client);
 
 #define MT6660_REG_DEVID		(0x00)
 #define MT6660_REG_SYSTEM_CTRL		(0x03)
@@ -74,9 +90,5 @@ struct mt6660_chip {
 #define MT6660_REG_RESV23		(0xBD)
 #define MT6660_REG_RESV31		(0xD3)
 #define MT6660_REG_RESV40		(0xE0)
-
-/* Export function */
-int mt6660_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id);
-int mt6660_i2c_remove(struct i2c_client *client);
 
 #endif /* __SND_SOC_MT6660_H */

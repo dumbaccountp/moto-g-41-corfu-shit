@@ -74,26 +74,5 @@ void teei_cpus_read_unlock(void);
 void teei_cpus_write_lock(void);
 void teei_cpus_write_unlock(void);
 
-extern struct reserved_mem *reserved_mem;
-
-extern int soter_driver_init(void);
-extern void soter_driver_exit(void);
-
-extern int teei_tee_init(void);
-extern void teei_tee_exit(void);
-
-extern int teei_vfs_init(void);
-extern void teei_vfs_exit(void);
-
-extern int teei_keymaster_init(void);
-extern void teei_keymaster_exit(void);
-
-extern int teei_fp_init(void);
-extern void teei_fp_exit(void);
-
-extern void bootprof_log_boot(char *str);
-extern void cpus_write_lock(void);
-extern void cpus_write_unlock(void);
-
 int teei_set_switch_pri(unsigned long policy);
 #endif /* __TEEI_CLIENT_MAIN_H__ */

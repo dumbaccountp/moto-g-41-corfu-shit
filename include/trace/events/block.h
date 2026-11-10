@@ -212,21 +212,6 @@ DEFINE_EVENT(block_rq, block_rq_issue,
 );
 
 /**
- * block_rq_merge - merge request with another one in the elevator
- * @q: queue holding operation
- * @rq: block IO operation operation request
- *
- * Called when block operation request @rq from queue @q is merged to another
- * request queued in the elevator.
- */
-DEFINE_EVENT(block_rq, block_rq_merge,
-
-	TP_PROTO(struct request_queue *q, struct request *rq),
-
-	TP_ARGS(q, rq)
-);
-
-/**
  * block_bio_bounce - used bounce buffer when processing block operation
  * @q: queue holding the block operation
  * @bio: block operation
@@ -269,15 +254,16 @@ TRACE_EVENT(block_bio_bounce,
  * block_bio_complete - completed all work on the block operation
  * @q: queue holding the block operation
  * @bio: block operation completed
+ * @error: io error value
  *
  * This tracepoint indicates there is no further work to do on this
  * block IO operation @bio.
  */
 TRACE_EVENT(block_bio_complete,
 
-	TP_PROTO(struct request_queue *q, struct bio *bio),
+	TP_PROTO(struct request_queue *q, struct bio *bio, int error),
 
-	TP_ARGS(q, bio),
+	TP_ARGS(q, bio, error),
 
 	TP_STRUCT__entry(
 		__field( dev_t,		dev		)
@@ -291,7 +277,7 @@ TRACE_EVENT(block_bio_complete,
 		__entry->dev		= bio_dev(bio);
 		__entry->sector		= bio->bi_iter.bi_sector;
 		__entry->nr_sector	= bio_sectors(bio);
-		__entry->error		= blk_status_to_errno(bio->bi_status);
+		__entry->error		= error;
 		blk_fill_rwbs(__entry->rwbs, bio->bi_opf, bio->bi_iter.bi_size);
 	),
 
@@ -648,198 +634,6 @@ TRACE_EVENT(block_rq_remap,
 		  MAJOR(__entry->old_dev), MINOR(__entry->old_dev),
 		  (unsigned long long)__entry->old_sector, __entry->nr_bios)
 );
-
-#if IS_ENABLED(CONFIG_MTK_BLOCK_IO_PM_DEBUG)
-
-#define show_rpm_status(status) __print_symbolic(status,		\
-		{ RPM_ACTIVE,		"RPM_ACTIVE"},			\
-		{ RPM_RESUMING,		"RPM_RESUMING"},		\
-		{ RPM_SUSPENDED,	"RPM_SUSPENDED"},		\
-		{ RPM_SUSPENDING,	"RPM_SUSPENDING"})
-
-DECLARE_EVENT_CLASS(blk_pm_ret,
-
-	TP_PROTO(struct request_queue *q, int ret),
-
-	TP_ARGS(q, ret),
-
-	TP_STRUCT__entry(
-		__field(dev_t,		dev			)
-		__field(int,		rpm_status		)
-		__field(int,		pm_only			)
-		__field(int,		mq_freeze_depth		)
-		__field(int,		dying			)
-		__field(int,		ret			)
-	),
-
-	TP_fast_assign(
-		__entry->dev		= disk_devt(
-			dev_to_disk(kobj_to_dev((q)->kobj.parent)));
-		__entry->rpm_status	= q->rpm_status;
-		__entry->pm_only	= blk_queue_pm_only(q);
-		__entry->mq_freeze_depth = q->mq_freeze_depth;
-		__entry->dying		= blk_queue_dying(q);
-		__entry->ret		= ret;
-	),
-
-	TP_printk("dev=%d,%d rpm_status=%s pm_only=%d mq_freeze_depth=%d dying=%d ret=%d",
-		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  show_rpm_status(__entry->rpm_status),
-		  __entry->pm_only,
-		  __entry->mq_freeze_depth,
-		  __entry->dying,
-		  __entry->ret)
-);
-
-DECLARE_EVENT_CLASS(blk_pm_err,
-
-	TP_PROTO(struct request_queue *q, int err),
-
-	TP_ARGS(q, err),
-
-	TP_STRUCT__entry(
-		__field(dev_t,		dev			)
-		__field(int,		rpm_status		)
-		__field(int,		pm_only			)
-		__field(int,		mq_freeze_depth		)
-		__field(int,		dying			)
-		__field(int,		err			)
-	),
-
-	TP_fast_assign(
-		__entry->dev		= disk_devt(
-			dev_to_disk(kobj_to_dev((q)->kobj.parent)));
-		__entry->rpm_status	= q->rpm_status;
-		__entry->pm_only	= blk_queue_pm_only(q);
-		__entry->mq_freeze_depth = q->mq_freeze_depth;
-		__entry->dying		= blk_queue_dying(q);
-		__entry->err		= err;
-	),
-
-	TP_printk("dev=%d,%d rpm_status=%s pm_only=%d mq_freeze_depth=%d dying=%d err=%d",
-		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  show_rpm_status(__entry->rpm_status),
-		  __entry->pm_only,
-		  __entry->mq_freeze_depth,
-		  __entry->dying,
-		  __entry->err)
-);
-
-DECLARE_EVENT_CLASS(blk_pm,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q),
-
-	TP_STRUCT__entry(
-		__field(dev_t,		dev			)
-		__field(int,		rpm_status		)
-		__field(int,		pm_only			)
-		__field(int,		mq_freeze_depth		)
-		__field(int,		dying			)
-	),
-
-	TP_fast_assign(
-		__entry->dev		= disk_devt(dev_to_disk(kobj_to_dev((q)->kobj.parent)));
-		__entry->rpm_status	= q->rpm_status;
-		__entry->pm_only	= blk_queue_pm_only(q);
-		__entry->mq_freeze_depth = q->mq_freeze_depth;
-		__entry->dying		= blk_queue_dying(q);
-	),
-
-	TP_printk("dev=%d,%d rpm_status=%s pm_only=%d mq_freeze_depth=%d dying=%d",
-		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  show_rpm_status(__entry->rpm_status),
-		  __entry->pm_only,
-		  __entry->mq_freeze_depth,
-		  __entry->dying)
-);
-
-DEFINE_EVENT(blk_pm, blk_pre_runtime_suspend_start,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm_ret, blk_pre_runtime_suspend_end,
-
-	TP_PROTO(struct request_queue *q, int ret),
-
-	TP_ARGS(q, ret)
-);
-
-DEFINE_EVENT(blk_pm_err, blk_post_runtime_suspend_start,
-
-	TP_PROTO(struct request_queue *q, int err),
-
-	TP_ARGS(q, err)
-);
-
-DEFINE_EVENT(blk_pm_err, blk_post_runtime_suspend_end,
-
-	TP_PROTO(struct request_queue *q, int err),
-
-	TP_ARGS(q, err)
-);
-
-DEFINE_EVENT(blk_pm, blk_pre_runtime_resume_start,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm, blk_pre_runtime_resume_end,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm, blk_post_runtime_resume_start,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm, blk_post_runtime_resume_end,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm, blk_set_runtime_active_start,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm, blk_set_runtime_active_end,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm, blk_queue_enter_sleep,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-DEFINE_EVENT(blk_pm, blk_queue_enter_wakeup,
-
-	TP_PROTO(struct request_queue *q),
-
-	TP_ARGS(q)
-);
-
-#endif /* CONFIG_MTK_BLOCK_IO_PM_DEBUG */
 
 #endif /* _TRACE_BLOCK_H */
 

@@ -55,6 +55,11 @@ static int service_tx_status_request(
 
 	switch (recip) {
 	case USB_RECIP_DEVICE:
+#if defined(CONFIG_USBIF_COMPLIANCE)
+		if (ctrlrequest->wIndex == 0xf000) {
+			result[0] = musb->g.host_request;
+		} else {
+#endif
 			result[0] = musb->is_self_powered <<
 				USB_DEVICE_SELF_POWERED;
 			result[0] |= musb->may_wakeup <<
@@ -66,6 +71,9 @@ static int service_tx_status_request(
 					<< USB_DEVICE_A_ALT_HNP_SUPPORT;
 				result[0] |= musb->g.a_hnp_support
 					<< USB_DEVICE_A_HNP_SUPPORT;
+#if defined(CONFIG_USBIF_COMPLIANCE)
+		}
+#endif
 		}
 		break;
 
@@ -181,6 +189,13 @@ static inline void musb_try_b_hnp_enable(struct musb *musb)
 	DBG(2, "HNP: Setting HR\n");
 	devctl = musb_readb(mbase, MUSB_DEVCTL);
 	musb_writeb(mbase, MUSB_DEVCTL, devctl | MUSB_DEVCTL_HR);
+#if defined(CONFIG_USBIF_COMPLIANCE)
+	devctl = musb_readb(mbase, MUSB_DEVCTL);
+	u8 opstate = musb_readb(mbase, MUSB_OPSTATE);
+
+	pr_info("HNP: Setting HR Done - DEVCTL: 0x%x, OPSTATE: 0x%x\n"
+			, devctl, opstate);
+#endif
 }
 
 /*
@@ -324,8 +339,12 @@ __acquires(musb->lock)
 					break;
 				case USB_DEVICE_TEST_MODE:
 					if (musb->g.speed != USB_SPEED_HIGH)
+#if defined(CONFIG_USBIF_COMPLIANCE)
+						pr_debug("SET_FEATURE - NOT HIGH SPEED - speed: 0x%x\n"
+							, musb->g.speed);
+#else
 						goto stall;
-
+#endif
 					if (ctrlrequest->wIndex & 0xff)
 						goto stall;
 
@@ -379,11 +398,40 @@ __acquires(musb->lock)
 						musb->test_mode_nr =
 							MUSB_TEST_FORCE_HOST;
 						break;
+#if defined(CONFIG_USBIF_COMPLIANCE)
+					case 0x6:
+						musb->g.otg_srp_reqd = 1;
+						pr_debug("SET_FEATURE - TEST_MODE - OTG_SRP_REQD: 0x%x\n"
+							, musb->g.otg_srp_reqd);
+						break;
+
+					case 0x7:
+						musb->g.host_request = 1;
+						pr_debug("SET_FEATURE - TEST_MODE - OTG_HNP_REQD: 0x%x\n"
+							, musb->g.host_request);
+						break;
+#endif
 					default:
 						goto stall;
 					}
+
+					if (musb->usb_rev6_setting &&
+						(musb->test_mode_nr ==
+						MUSB_TEST_K ||
+						musb->test_mode_nr ==
+						MUSB_TEST_J))
+						musb->usb_rev6_setting(0x0);
+
 					/* enter test mode after irq */
+#if defined(CONFIG_USBIF_COMPLIANCE)
+					if (handled > 0 &&
+						((ctrlrequest->wIndex >> 8)
+						!= 6) &&
+						((ctrlrequest->wIndex >> 8)
+						!= 7))
+#else
 					if (handled > 0)
+#endif
 						musb->test_mode = true;
 					break;
 				case USB_DEVICE_B_HNP_ENABLE:
@@ -655,27 +703,25 @@ forward_to_driver(struct musb *musb, const struct usb_ctrlrequest *ctrlrequest)
 __releases(musb->lock)
 __acquires(musb->lock)
 {
-	int retval = -EINVAL;
+	int retval;
 	int usb_state = 0;
 	/* u16 w_value = le16_to_cpu(ctrlrequest->wValue); */
 
 	if (!musb->gadget_driver || !musb->softconnect)
 		return -EOPNOTSUPP;
+	spin_unlock(&musb->lock);
 
-	if (musb->async_callbacks) {
-		spin_unlock(&musb->lock);
-		retval = musb->gadget_driver->setup(&musb->g, ctrlrequest);
+	retval = musb->gadget_driver->setup(&musb->g, ctrlrequest);
 
-		if (ctrlrequest->bRequest == USB_REQ_SET_CONFIGURATION) {
-			if (ctrlrequest->wValue & 0xff)
-				usb_state = USB_CONFIGURED;
-			else
-				usb_state = USB_UNCONFIGURED;
-			musb_sync_with_bat(musb, usb_state);
-		}
-		spin_lock(&musb->lock);
+	if (ctrlrequest->bRequest == USB_REQ_SET_CONFIGURATION) {
+		if (ctrlrequest->wValue & 0xff)
+			usb_state = USB_CONFIGURED;
+		else
+			usb_state = USB_UNCONFIGURED;
+		musb_sync_with_bat(musb, usb_state);
 	}
 
+	spin_lock(&musb->lock);
 	return retval;
 }
 
@@ -786,7 +832,8 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 			musb_writeb(mbase, MUSB_TESTMODE,
 					musb->test_mode_nr);
 		}
-		fallthrough;
+		/* FALLTHROUGH */
+
 	case MUSB_EP0_STAGE_STATUSOUT:
 		/* end of sequence #1: write to host (TX state) */
 		{
@@ -826,7 +873,7 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 		 */
 		retval = IRQ_HANDLED;
 		musb->ep0_state = MUSB_EP0_STAGE_SETUP;
-		fallthrough;
+		/* FALLTHROUGH */
 
 	case MUSB_EP0_STAGE_SETUP:
 setup:
@@ -996,13 +1043,13 @@ musb_g_ep0_queue(struct usb_ep *e, struct usb_request *r, gfp_t gfp_flags)
 	req->tx = ep->is_in;
 
 	spin_lock_irqsave(&musb->lock, lockflags);
-	#if 0
+
 	if (!musb->is_active) {
 		DBG(0, "ep0 request queued when usb not active\n");
 		status = -EINVAL;
 		goto cleanup;
 	}
-	#endif
+
 	if (!list_empty(&ep->req_list)) {
 		status = -EBUSY;
 		goto cleanup;
@@ -1103,7 +1150,7 @@ static int musb_g_ep0_halt(struct usb_ep *e, int value)
 	case MUSB_EP0_STAGE_ACKWAIT:	/* STALL for zero-length data */
 	case MUSB_EP0_STAGE_RX:		/* control-OUT data */
 		csr = musb_readw(regs, MUSB_CSR0);
-		fallthrough;
+		/* FALLTHROUGH */
 
 	/* It's also OK to issue stalls during callbacks when a non-empty
 	 * DATA stage buffer has been read (or even written).

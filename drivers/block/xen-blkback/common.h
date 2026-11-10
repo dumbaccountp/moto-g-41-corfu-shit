@@ -36,6 +36,7 @@
 #include <linux/io.h>
 #include <linux/rbtree.h>
 #include <asm/setup.h>
+#include <asm/pgalloc.h>
 #include <asm/hypervisor.h>
 #include <xen/grant_table.h>
 #include <xen/page.h>
@@ -226,9 +227,6 @@ struct xen_vbd {
 	sector_t		size;
 	unsigned int		flush_support:1;
 	unsigned int		discard_secure:1;
-	/* Connect-time cached feature_persistent parameter value */
-	unsigned int		feature_gnt_persistent_parm:1;
-	/* Persistent grants feature negotiation result */
 	unsigned int		feature_gnt_persistent:1;
 	unsigned int		overflow_max_grants:1;
 };
@@ -291,7 +289,9 @@ struct xen_blkif_ring {
 	struct work_struct	persistent_purge_work;
 
 	/* Buffer of free pages to map grant refs. */
-	struct gnttab_page_cache free_pages;
+	spinlock_t		free_pages_lock;
+	int			free_pages_num;
+	struct list_head	free_pages;
 
 	struct work_struct	free_work;
 	/* Thread shutdown wait queue. */
@@ -316,11 +316,9 @@ struct xen_blkif {
 
 	struct work_struct	free_work;
 	unsigned int 		nr_ring_pages;
-	bool			multi_ref;
 	/* All rings for this device. */
 	struct xen_blkif_ring	*rings;
 	unsigned int		nr_rings;
-	unsigned long		buffer_squeeze_end;
 };
 
 struct seg_buf {
@@ -377,12 +375,9 @@ struct phys_req {
 	struct block_device	*bdev;
 	blkif_sector_t		sector_number;
 };
-
 int xen_blkif_interface_init(void);
-void xen_blkif_interface_fini(void);
 
 int xen_blkif_xenbus_init(void);
-void xen_blkif_xenbus_fini(void);
 
 irqreturn_t xen_blkif_be_int(int irq, void *dev_id);
 int xen_blkif_schedule(void *arg);

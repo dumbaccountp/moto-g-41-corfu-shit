@@ -87,13 +87,13 @@ extern unsigned long boot_soter_flag;
  * ***************************************************************/
 static inline void Flush_Dcache_By_Area(unsigned long start, unsigned long end)
 {
-//	if (boot_soter_flag == START_STATUS) {
-//#ifdef CONFIG_ARM64
-//		__flush_dcache_area((void *)start, (end - start));
-//#else
-//		__cpuc_flush_dcache_area((void *)start, (end - start));
-//#endif
-//	}
+	if (boot_soter_flag == START_STATUS) {
+#ifdef CONFIG_ARM64
+		__flush_dcache_area((void *)start, (end - start));
+#else
+		__cpuc_flush_dcache_area((void *)start, (end - start));
+#endif
+	}
 
 }
 /******************************************************************

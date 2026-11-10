@@ -11,7 +11,21 @@
 #define MTK_IDLE_SYS_FS_NAME	"lpm"
 #define MTK_IDLE_SYS_FS_MODE	0644
 
-static struct mtk_lp_sysfs_handle mtk_lpm_fs_root;
+static struct mtk_lp_sysfs_handle mtk_lpm_fs_root = {
+	NULL
+};
+
+int mtk_lpm_sysfs_entry_group_add(const char *name
+		, int mode, struct mtk_lp_sysfs_group *_group
+		, struct mtk_lp_sysfs_handle *handle)
+{
+	if (!IS_MTK_LP_SYS_HANDLE_VALID(&mtk_lpm_fs_root))
+		mtk_lpm_sysfs_root_entry_create();
+
+	return mtk_lp_sysfs_entry_func_group_create(name
+			, mode, _group, &mtk_lpm_fs_root, handle);
+}
+EXPORT_SYMBOL(mtk_lpm_sysfs_entry_group_add);
 
 int mtk_lpm_sysfs_entry_node_add(const char *name
 		, int mode, const struct mtk_lp_sysfs_op *op
@@ -89,8 +103,3 @@ int mtk_lpm_sysfs_sub_entry_node_add(const char *name
 }
 EXPORT_SYMBOL(mtk_lpm_sysfs_sub_entry_node_add);
 
-int mtk_lpm_sysfs_remove(void)
-{
-	return mtk_lp_sysfs_entry_func_node_remove(&mtk_lpm_fs_root);
-}
-EXPORT_SYMBOL(mtk_lpm_sysfs_remove);

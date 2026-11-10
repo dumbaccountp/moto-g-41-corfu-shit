@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
- *
- * Author: Gene Chen <gene_chen@richtek.com>
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #include <linux/i2c.h>
 #include <linux/init.h>
-#include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/mfd/core.h>
 #include <linux/module.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
+#include <linux/version.h>
 
 #include <linux/mfd/mt6360.h>
 #include <linux/mfd/mt6360-private.h>
@@ -120,104 +118,116 @@
 #define MT6360_LDO6_PGB_EVT		(126)
 #define MT6360_LDO7_PGB_EVT		(127)
 
+#define MT6360_REGMAP_IRQ_REG(_irq_evt)		\
+	REGMAP_IRQ_REG(_irq_evt, (_irq_evt) / 8, BIT((_irq_evt) % 8))
+
+#define MT6360_MFD_CELL(_name)					\
+	{							\
+		.name = #_name,					\
+		.of_compatible = "mediatek," #_name,		\
+		.num_resources = ARRAY_SIZE(_name##_resources),	\
+		.resources = _name##_resources,			\
+	}
+
 static const struct regmap_irq mt6360_pmu_irqs[] =  {
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_TREG_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_AICR_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_MIVR_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_PWR_RDY_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_BATSYSUV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED_CHG_VINOVP_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_VSYSUV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_VSYSOV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_VBATOV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_VBUSOV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_WD_PMU_DET, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_WD_PMU_DONE, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_TMRI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_ADPBADI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_RVPI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_OTPI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_AICCMEASL, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHGDET_DONEI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_WDTMRI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_SSFINISHI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_RECHGI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_TERMI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHG_IEOCI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_PUMPX_DONEI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BAT_OVP_ADC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_TYPEC_OTP_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_ADC_WAKEUP_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_ADC_DONEI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BST_BATUVI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BST_VBUSOVI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BST_OLPI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_ATTACH_I, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_DETACH_I, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_QC30_STPDONE, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_QC_VBUSDET_DONE, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_HVDCP_DET, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHGDETI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_DCDTI, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FOD_DONE_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FOD_OV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHRDET_UVP_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHRDET_OVP_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_CHRDET_EXT_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FOD_LR_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FOD_HR_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FOD_DISCHG_FAIL_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_USBID_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_APWDTRST_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_EN_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_QONB_RST_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_MRSTB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_OTP_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_VDDAOV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_SYSUV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED_STRBPIN_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED_TORPIN_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED_TX_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED_LVF_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED2_SHORT_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED1_SHORT_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED2_STRB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED1_STRB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED2_STRB_TO_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED1_STRB_TO_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED2_TOR_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_FLED1_TOR_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK1_PGB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK1_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK1_OV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK1_UV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK2_PGB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK2_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK2_OV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_BUCK2_UV_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO1_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO2_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO3_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO5_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO6_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO7_OC_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO1_PGB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO2_PGB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO3_PGB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO5_PGB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO6_PGB_EVT, 8),
-	REGMAP_IRQ_REG_LINE(MT6360_LDO7_PGB_EVT, 8),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_TREG_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_AICR_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_MIVR_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_PWR_RDY_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_BATSYSUV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED_CHG_VINOVP_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_VSYSUV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_VSYSOV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_VBATOV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_VBUSOV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_WD_PMU_DET),
+	MT6360_REGMAP_IRQ_REG(MT6360_WD_PMU_DONE),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_TMRI),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_ADPBADI),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_RVPI),
+	MT6360_REGMAP_IRQ_REG(MT6360_OTPI),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_AICCMEASL),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHGDET_DONEI),
+	MT6360_REGMAP_IRQ_REG(MT6360_WDTMRI),
+	MT6360_REGMAP_IRQ_REG(MT6360_SSFINISHI),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_RECHGI),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_TERMI),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_IEOCI),
+	MT6360_REGMAP_IRQ_REG(MT6360_PUMPX_DONEI),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHG_TREG_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BAT_OVP_ADC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_TYPEC_OTP_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_ADC_WAKEUP_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_ADC_DONEI),
+	MT6360_REGMAP_IRQ_REG(MT6360_BST_BATUVI),
+	MT6360_REGMAP_IRQ_REG(MT6360_BST_VBUSOVI),
+	MT6360_REGMAP_IRQ_REG(MT6360_BST_OLPI),
+	MT6360_REGMAP_IRQ_REG(MT6360_ATTACH_I),
+	MT6360_REGMAP_IRQ_REG(MT6360_DETACH_I),
+	MT6360_REGMAP_IRQ_REG(MT6360_QC30_STPDONE),
+	MT6360_REGMAP_IRQ_REG(MT6360_QC_VBUSDET_DONE),
+	MT6360_REGMAP_IRQ_REG(MT6360_HVDCP_DET),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHGDETI),
+	MT6360_REGMAP_IRQ_REG(MT6360_DCDTI),
+	MT6360_REGMAP_IRQ_REG(MT6360_FOD_DONE_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FOD_OV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHRDET_UVP_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHRDET_OVP_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_CHRDET_EXT_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FOD_LR_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FOD_HR_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FOD_DISCHG_FAIL_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_USBID_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_APWDTRST_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_EN_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_QONB_RST_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_MRSTB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_OTP_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_VDDAOV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_SYSUV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED_STRBPIN_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED_TORPIN_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED_TX_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED_LVF_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED2_SHORT_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED1_SHORT_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED2_STRB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED1_STRB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED2_STRB_TO_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED1_STRB_TO_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED2_TOR_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_FLED1_TOR_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK1_PGB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK1_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK1_OV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK1_UV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK2_PGB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK2_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK2_OV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_BUCK2_UV_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO1_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO2_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO3_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO5_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO6_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO7_OC_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO1_PGB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO2_PGB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO3_PGB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO5_PGB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO6_PGB_EVT),
+	MT6360_REGMAP_IRQ_REG(MT6360_LDO7_PGB_EVT),
 };
 
 static int mt6360_pmu_handle_post_irq(void *irq_drv_data)
 {
-	struct mt6360_pmu_data *mpd = irq_drv_data;
+	struct mt6360_pmu_info *mpi = irq_drv_data;
 
-	return regmap_update_bits(mpd->regmap,
+	return regmap_update_bits(mpi->regmap,
 		MT6360_PMU_IRQ_SET, MT6360_IRQ_RETRIG, MT6360_IRQ_RETRIG);
 }
 
-static struct regmap_irq_chip mt6360_pmu_irq_chip = {
+static const struct regmap_irq_chip mt6360_pmu_irq_chip = {
 	.irqs = mt6360_pmu_irqs,
 	.num_irqs = ARRAY_SIZE(mt6360_pmu_irqs),
 	.num_regs = MT6360_PMU_IRQ_REGNUM,
@@ -229,20 +239,10 @@ static struct regmap_irq_chip mt6360_pmu_irq_chip = {
 	.handle_post_irq = mt6360_pmu_handle_post_irq,
 };
 
-static bool mt6360_is_volatile_reg(struct device *dev, unsigned int reg)
-{
-	if (reg >= MT6360_PMU_CHG_MASK1 && reg <= MT6360_PMU_LDO_MASK2)
-		return false;
-	return true;
-}
-
-static struct regmap_config mt6360_pmu_regmap_config = {
+static const struct regmap_config mt6360_pmu_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 	.max_register = MT6360_PMU_MAXREG,
-
-	.cache_type = REGCACHE_FLAT,
-	.volatile_reg = mt6360_is_volatile_reg,
 };
 
 static const struct resource mt6360_adc_resources[] = {
@@ -251,16 +251,12 @@ static const struct resource mt6360_adc_resources[] = {
 
 static const struct resource mt6360_chg_resources[] = {
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_TREG_EVT, "chg_treg_evt"),
-	DEFINE_RES_IRQ_NAMED(MT6360_CHG_MIVR_EVT, "chg_mivr_evt"),
 	DEFINE_RES_IRQ_NAMED(MT6360_PWR_RDY_EVT, "pwr_rdy_evt"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_BATSYSUV_EVT, "chg_batsysuv_evt"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_VSYSUV_EVT, "chg_vsysuv_evt"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_VSYSOV_EVT, "chg_vsysov_evt"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_VBATOV_EVT, "chg_vbatov_evt"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_VBUSOV_EVT, "chg_vbusov_evt"),
-	DEFINE_RES_IRQ_NAMED(MT6360_WD_PMU_DET, "wd_pmu_det"),
-	DEFINE_RES_IRQ_NAMED(MT6360_WD_PMU_DONE, "wd_pmu_done"),
-	DEFINE_RES_IRQ_NAMED(MT6360_CHG_TMRI, "chg_tmri"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_AICCMEASL, "chg_aiccmeasl"),
 	DEFINE_RES_IRQ_NAMED(MT6360_WDTMRI, "wdtmri"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_RECHGI, "chg_rechgi"),
@@ -268,8 +264,6 @@ static const struct resource mt6360_chg_resources[] = {
 	DEFINE_RES_IRQ_NAMED(MT6360_CHG_IEOCI, "chg_ieoci"),
 	DEFINE_RES_IRQ_NAMED(MT6360_PUMPX_DONEI, "pumpx_donei"),
 	DEFINE_RES_IRQ_NAMED(MT6360_ATTACH_I, "attach_i"),
-	DEFINE_RES_IRQ_NAMED(MT6360_HVDCP_DET, "hvdcp_det"),
-	DEFINE_RES_IRQ_NAMED(MT6360_DCDTI, "dcdti"),
 	DEFINE_RES_IRQ_NAMED(MT6360_CHRDET_EXT_EVT, "chrdet_ext_evt"),
 };
 
@@ -309,18 +303,16 @@ static const struct resource mt6360_ldo_resources[] = {
 };
 
 static const struct mfd_cell mt6360_devs[] = {
-	OF_MFD_CELL("mt6360_adc", mt6360_adc_resources,
-		    NULL, 0, 0, "mediatek,mt6360_adc"),
-	OF_MFD_CELL("mt6360_chg", mt6360_chg_resources,
-		    NULL, 0, 0, "mediatek,mt6360_chg"),
-	OF_MFD_CELL("mt6360_led", mt6360_led_resources,
-		    NULL, 0, 0, "mediatek,mt6360_led"),
-	OF_MFD_CELL("mt6360_pmic", mt6360_pmic_resources,
-		    NULL, 0, 0, "mediatek,mt6360_pmic"),
-	OF_MFD_CELL("mt6360_ldo", mt6360_ldo_resources,
-		    NULL, 0, 0, "mediatek,mt6360_ldo"),
-	OF_MFD_CELL("mt6360_tcpc", NULL,
-		    NULL, 0, 0, "mediatek,mt6360_tcpc"),
+	MT6360_MFD_CELL(mt6360_adc),
+	MT6360_MFD_CELL(mt6360_chg),
+	MT6360_MFD_CELL(mt6360_led),
+	MT6360_MFD_CELL(mt6360_pmic),
+	MT6360_MFD_CELL(mt6360_ldo),
+	/* tcpc dev */
+	{
+		.name = "mt6360_tcpc",
+		.of_compatible = "mediatek,mt6360_tcpc",
+	},
 	/* debug dev */
 	{ .name = "mt6360_dbg", },
 };
@@ -329,74 +321,94 @@ static const unsigned short mt6360_slave_addr[MT6360_SLAVE_MAX] = {
 	MT6360_PMU_SLAVEID,
 	MT6360_PMIC_SLAVEID,
 	MT6360_LDO_SLAVEID,
+	MT6360_TCPC_SLAVEID,
 };
 
-static int mt6360_pmu_probe(struct i2c_client *client)
+static int mt6360_pmu_probe(struct i2c_client *client,
+			    const struct i2c_device_id *id)
 {
-	struct mt6360_pmu_data *mpd;
-	struct regmap_config *regmap_config = &mt6360_pmu_regmap_config;
-	unsigned int reg_data;
+	struct mt6360_pmu_info *mpi;
+	unsigned int reg_data = 0;
 	int i, ret;
 
-	mpd = devm_kzalloc(&client->dev, sizeof(*mpd), GFP_KERNEL);
-	if (!mpd)
+	mpi = devm_kzalloc(&client->dev, sizeof(*mpi), GFP_KERNEL);
+	if (!mpi)
 		return -ENOMEM;
+	mpi->dev = &client->dev;
+	i2c_set_clientdata(client, mpi);
 
-	mpd->dev = &client->dev;
-	mutex_init(&mpd->io_lock);
-	i2c_set_clientdata(client, mpd);
-
-	regmap_config->lock_arg = &mpd->io_lock;
-	mpd->regmap = devm_regmap_init_i2c(client, regmap_config);
-	if (IS_ERR(mpd->regmap)) {
-		dev_err(&client->dev, "Failed to register regmap\n");
-		return PTR_ERR(mpd->regmap);
+	/* regmap regiser */
+	mpi->regmap = devm_regmap_init_i2c(client, &mt6360_pmu_regmap_config);
+	if (IS_ERR(mpi->regmap)) {
+		dev_err(&client->dev, "regmap register fail\n");
+		return PTR_ERR(mpi->regmap);
 	}
-
-	ret = regmap_read(mpd->regmap, MT6360_PMU_DEV_INFO, &reg_data);
-	if (ret) {
-		dev_err(&client->dev, "Device not found\n");
+	/* chip id check */
+	ret = regmap_read(mpi->regmap, MT6360_PMU_DEV_INFO, &reg_data);
+	if (ret < 0) {
+		dev_err(&client->dev, "device not found\n");
 		return ret;
 	}
-
-	mpd->chip_rev = reg_data & CHIP_VEN_MASK;
-	if (mpd->chip_rev != CHIP_VEN_MT6360) {
-		dev_err(&client->dev, "Device not supported\n");
+	if ((reg_data & CHIP_VEN_MASK) != CHIP_VEN_MT6360) {
+		dev_err(&client->dev, "not mt6360 chip\n");
 		return -ENODEV;
 	}
-
-	mt6360_pmu_irq_chip.irq_drv_data = mpd;
-	ret = devm_regmap_add_irq_chip(&client->dev, mpd->regmap, client->irq,
-				       IRQF_TRIGGER_FALLING, 0,
-				       &mt6360_pmu_irq_chip, &mpd->irq_data);
-	if (ret) {
-		dev_err(&client->dev, "Failed to add Regmap IRQ Chip\n");
+	mpi->chip_rev = reg_data & CHIP_REV_MASK;
+	/* irq register */
+	memcpy(&mpi->irq_chip, &mt6360_pmu_irq_chip, sizeof(mpi->irq_chip));
+	mpi->irq_chip.name = dev_name(&client->dev);
+	mpi->irq_chip.irq_drv_data = mpi;
+	ret = devm_regmap_add_irq_chip(&client->dev, mpi->regmap, client->irq,
+				       IRQF_TRIGGER_FALLING, 0, &mpi->irq_chip,
+				       &mpi->irq_data);
+	if (ret < 0) {
+		dev_err(&client->dev, "regmap irq chip add fail\n");
 		return ret;
 	}
-
-	mpd->i2c[0] = client;
-	for (i = 1; i < MT6360_SLAVE_MAX; i++) {
-		mpd->i2c[i] = devm_i2c_new_dummy_device(&client->dev,
-							client->adapter,
-							mt6360_slave_addr[i]);
-		if (IS_ERR(mpd->i2c[i])) {
-			dev_err(&client->dev,
-				"Failed to get new dummy I2C device for address 0x%x",
-				mt6360_slave_addr[i]);
-			return PTR_ERR(mpd->i2c[i]);
+	/* new i2c slave device */
+	for (i = 0; i < MT6360_SLAVE_MAX; i++) {
+		if (mt6360_slave_addr[i] == client->addr) {
+			mpi->i2c[i] = client;
+			continue;
 		}
-		i2c_set_clientdata(mpd->i2c[i], mpd);
+		mpi->i2c[i] = i2c_new_dummy(client->adapter,
+					    mt6360_slave_addr[i]);
+		if (!mpi->i2c[i]) {
+			dev_err(&client->dev, "new i2c dev [%d] fail\n", i);
+			ret = -ENODEV;
+			goto out;
+		}
+		i2c_set_clientdata(mpi->i2c[i], mpi);
 	}
-
+	/* mfd cell register */
 	ret = devm_mfd_add_devices(&client->dev, PLATFORM_DEVID_AUTO,
 				   mt6360_devs, ARRAY_SIZE(mt6360_devs), NULL,
-				   0, regmap_irq_get_domain(mpd->irq_data));
-	if (ret) {
-		dev_err(&client->dev,
-			"Failed to register subordinate devices\n");
-		return ret;
+				   0, regmap_irq_get_domain(mpi->irq_data));
+	if (ret < 0) {
+		dev_err(&client->dev, "mfd add cells fail\n");
+		goto out;
 	}
+	dev_info(&client->dev, "Successfully probed\n");
+	return 0;
+out:
+	while (--i >= 0) {
+		if (mpi->i2c[i]->addr == client->addr)
+			continue;
+		i2c_unregister_device(mpi->i2c[i]);
+	}
+	return ret;
+}
 
+static int mt6360_pmu_remove(struct i2c_client *client)
+{
+	struct mt6360_pmu_info *mpi = i2c_get_clientdata(client);
+	int i;
+
+	for (i = 0; i < MT6360_SLAVE_MAX; i++) {
+		if (mpi->i2c[i]->addr == client->addr)
+			continue;
+		i2c_unregister_device(mpi->i2c[i]);
+	}
 	return 0;
 }
 
@@ -406,6 +418,7 @@ static int __maybe_unused mt6360_pmu_suspend(struct device *dev)
 
 	if (device_may_wakeup(dev))
 		enable_irq_wake(i2c->irq);
+	disable_irq(i2c->irq);
 	return 0;
 }
 
@@ -414,9 +427,9 @@ static int __maybe_unused mt6360_pmu_resume(struct device *dev)
 
 	struct i2c_client *i2c = to_i2c_client(dev);
 
+	enable_irq(i2c->irq);
 	if (device_may_wakeup(dev))
 		disable_irq_wake(i2c->irq);
-
 	return 0;
 }
 
@@ -429,16 +442,26 @@ static const struct of_device_id __maybe_unused mt6360_pmu_of_id[] = {
 };
 MODULE_DEVICE_TABLE(of, mt6360_pmu_of_id);
 
+static const struct i2c_device_id mt6360_pmu_id[] = {
+	{ "mt6360_pmu", 0 },
+	{},
+};
+MODULE_DEVICE_TABLE(i2c, mt6360_pmu_id);
+
 static struct i2c_driver mt6360_pmu_driver = {
 	.driver = {
 		.name = "mt6360_pmu",
+		.owner = THIS_MODULE,
 		.pm = &mt6360_pmu_pm_ops,
 		.of_match_table = of_match_ptr(mt6360_pmu_of_id),
 	},
-	.probe_new = mt6360_pmu_probe,
+	.probe = mt6360_pmu_probe,
+	.remove = mt6360_pmu_remove,
+	.id_table = mt6360_pmu_id,
 };
 module_i2c_driver(mt6360_pmu_driver);
 
-MODULE_AUTHOR("Gene Chen <gene_chen@richtek.com>");
+MODULE_AUTHOR("CY_Huang <cy_huang@richtek.com>");
 MODULE_DESCRIPTION("MT6360 PMU I2C Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0.0");

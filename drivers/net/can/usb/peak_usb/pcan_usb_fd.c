@@ -1,8 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CAN driver for PEAK System PCAN-USB FD / PCAN-USB Pro FD adapter
  *
  * Copyright (C) 2013-2014 Stephane Grosjean <s.grosjean@peak-system.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published
+ * by the Free Software Foundation; version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
  */
 #include <linux/netdevice.h>
 #include <linux/usb.h>
@@ -35,7 +43,7 @@ MODULE_SUPPORTED_DEVICE("PEAK-System PCAN-USB Pro FD adapter");
 #define PCAN_UFD_RX_BUFFER_SIZE		2048
 #define PCAN_UFD_TX_BUFFER_SIZE		512
 
-/* read some versions info from the hw device */
+/* read some versions info from the hw devcie */
 struct __packed pcan_ufd_fw_info {
 	__le16	size_of;	/* sizeof this */
 	__le16	type;		/* type of this structure */
@@ -551,10 +559,11 @@ static int pcan_usb_fd_decode_status(struct pcan_usb_fd_if *usb_if,
 	} else if (sm->channel_p_w_b & PUCAN_BUS_WARNING) {
 		new_state = CAN_STATE_ERROR_WARNING;
 	} else {
-		/* back to (or still in) ERROR_ACTIVE state */
-		new_state = CAN_STATE_ERROR_ACTIVE;
+		/* no error bit (so, no error skb, back to active state) */
+		dev->can.state = CAN_STATE_ERROR_ACTIVE;
 		pdev->bec.txerr = 0;
 		pdev->bec.rxerr = 0;
+		return 0;
 	}
 
 	/* state hasn't changed */
@@ -821,7 +830,7 @@ static int pcan_usb_fd_start(struct peak_usb_device *dev)
 	return err;
 }
 
-/* socket callback used to copy berr counters values received through USB */
+/* socket callback used to copy berr counters values receieved through USB */
 static int pcan_usb_fd_get_berr_counter(const struct net_device *netdev,
 					struct can_berr_counter *bec)
 {

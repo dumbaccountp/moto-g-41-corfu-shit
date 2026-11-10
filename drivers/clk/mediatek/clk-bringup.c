@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2020 MediaTek Inc.
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
@@ -10,14 +10,23 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 
-static int __bring_up_enable(struct platform_device *pdev)
+static const struct of_device_id bring_up_id_table[] = {
+	{ .compatible = "mediatek,clk-bring-up",},
+	{ .compatible = "mediatek,mt8163-bring-up",},
+	{ .compatible = "mediatek,mt8173-bring-up",},
+	{ },
+};
+MODULE_DEVICE_TABLE(of, bring_up_id_table);
+
+static int bring_up_probe(struct platform_device *pdev)
 {
 	struct clk *clk;
 	int clk_con, i;
+	int ret = 0;
 
 	clk_con = of_count_phandle_with_args(pdev->dev.of_node, "clocks",
 			"#clock-cells");
-
+	pr_notice("sum: %d\n", clk_con);
 	for (i = 0; i < clk_con; i++) {
 		clk = of_clk_get(pdev->dev.of_node, i);
 		if (IS_ERR(clk)) {
@@ -31,61 +40,14 @@ static int __bring_up_enable(struct platform_device *pdev)
 		} else {
 			pr_notice("get clk [%d]: %s ok\n", i,
 					__clk_get_name(clk));
-			clk_prepare_enable(clk);
+			ret = clk_prepare_enable(clk);
+			if (ret) {
+				pr_err("cannot force-on bringup clk node\n");
+			}
 		}
 	}
 
-	return 0;
-}
-
-static int clk_bring_up_probe(struct platform_device *pdev)
-{
-	return __bring_up_enable(pdev);
-}
-
-static int clk_post_ao_probe(struct platform_device *pdev)
-{
-	struct device_node *node = pdev->dev.of_node;
-	u32 enabled;
-
-	of_property_read_u32(node, "mediatek,post_ao", &enabled);
-
-	if (enabled != 1) {
-		pr_notice("btypass_clk_post_ao\n");
-		return 0;
-	}
-
-	return __bring_up_enable(pdev);
-}
-
-static const struct of_device_id bring_up_id_table[] = {
-	{
-		.compatible = "mediatek,clk-bring-up",
-		.data = clk_bring_up_probe,
-	}, {
-		.compatible = "mediatek,clk-post-ao",
-		.data = clk_post_ao_probe,
-	}, {
-		/* sentinel */
-	}
-};
-
-static int bring_up_probe(struct platform_device *pdev)
-{
-	int (*clk_probe)(struct platform_device *pd);
-	int r;
-
-	clk_probe = of_device_get_match_data(&pdev->dev);
-	if (!clk_probe)
-		return -EINVAL;
-
-	r = clk_probe(pdev);
-	if (r)
-		dev_err(&pdev->dev,
-			"could not register clock provider: %s: %d\n",
-			pdev->name, r);
-
-	return r;
+	return ret;
 }
 
 static int bring_up_remove(struct platform_device *pdev)
@@ -104,4 +66,3 @@ static struct platform_driver bring_up = {
 };
 
 module_platform_driver(bring_up);
-MODULE_LICENSE("GPL");

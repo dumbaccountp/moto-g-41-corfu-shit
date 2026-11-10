@@ -695,7 +695,6 @@ static int reiserfs_create(struct inode *dir, struct dentry *dentry, umode_t mod
 
 out_failed:
 	reiserfs_write_unlock(dir->i_sb);
-	reiserfs_security_free(&security);
 	return retval;
 }
 
@@ -779,7 +778,6 @@ static int reiserfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode
 
 out_failed:
 	reiserfs_write_unlock(dir->i_sb);
-	reiserfs_security_free(&security);
 	return retval;
 }
 
@@ -840,10 +838,10 @@ static int reiserfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 	 */
 	INC_DIR_INODE_NLINK(dir)
 
-	retval = reiserfs_new_inode(&th, dir, mode, NULL /*symlink */,
-				    old_format_only(dir->i_sb) ?
-				    EMPTY_DIR_SIZE_V1 : EMPTY_DIR_SIZE,
-				    dentry, inode, &security);
+	    retval = reiserfs_new_inode(&th, dir, mode, NULL /*symlink */ ,
+					old_format_only(dir->i_sb) ?
+					EMPTY_DIR_SIZE_V1 : EMPTY_DIR_SIZE,
+					dentry, inode, &security);
 	if (retval) {
 		DEC_DIR_INODE_NLINK(dir)
 		goto out_failed;
@@ -878,7 +876,6 @@ static int reiserfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 	retval = journal_end(&th);
 out_failed:
 	reiserfs_write_unlock(dir->i_sb);
-	reiserfs_security_free(&security);
 	return retval;
 }
 
@@ -970,7 +967,7 @@ static int reiserfs_rmdir(struct inode *dir, struct dentry *dentry)
 	reiserfs_update_sd(&th, inode);
 
 	DEC_DIR_INODE_NLINK(dir)
-	dir->i_size -= (DEH_SIZE + de.de_entrylen);
+	    dir->i_size -= (DEH_SIZE + de.de_entrylen);
 	reiserfs_update_sd(&th, dir);
 
 	/* prevent empty directory from getting lost */
@@ -1194,7 +1191,6 @@ static int reiserfs_symlink(struct inode *parent_dir,
 	retval = journal_end(&th);
 out_failed:
 	reiserfs_write_unlock(parent_dir->i_sb);
-	reiserfs_security_free(&security);
 	return retval;
 }
 

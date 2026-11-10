@@ -2,7 +2,6 @@
 /*
  * Copyright (c) 2015 MediaTek Inc.
  */
-
 #include <linux/dma-buf.h>
 #include <linux/module.h>
 #include <linux/refcount.h>
@@ -11,11 +10,13 @@
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
 
+
+
 #include <media/videobuf2-v4l2.h>
 #include <media/videobuf2-dma-contig.h>
 #include <media/videobuf2-memops.h>
 #include <linux/mm.h>
-
+//!#define vb2_mmap
 struct vb2_dc_buf {
 	struct device			*dev;
 	void				*vaddr;
@@ -116,6 +117,7 @@ static void vb2_dc_finish(void *buf_priv)
 void vb2_dc_put(void *buf_priv)
 {
 	struct vb2_dc_buf *buf = buf_priv;
+
 	pr_debug("kernel_dpebuf refcount before = %d\n", buf->refcount);
 	if (!refcount_dec_and_test(&buf->refcount))
 		return;
@@ -170,7 +172,7 @@ void *vb2_dc_alloc(struct device *dev, unsigned long attrs,
 	return buf;
 }
 
-#ifdef vb2_dc_mmap_en
+#ifdef vb2_mmap
 static int vb2_dc_mmap(void *buf_priv, struct vm_area_struct *vma)
 {
 	struct vb2_dc_buf *buf = buf_priv;
@@ -328,6 +330,12 @@ static void vb2_dc_dmabuf_ops_release(struct dma_buf *dbuf)
 	vb2_dc_put(dbuf->priv);
 }
 
+static void *vb2_dc_dmabuf_ops_kmap(struct dma_buf *dbuf, unsigned long pgnum)
+{
+	struct vb2_dc_buf *buf = dbuf->priv;
+
+	return buf->vaddr ? buf->vaddr + pgnum * PAGE_SIZE : NULL;
+}
 
 static void *vb2_dc_dmabuf_ops_vmap(struct dma_buf *dbuf)
 {
@@ -348,7 +356,7 @@ static const struct dma_buf_ops vb2_dc_dmabuf_ops = {
 	.detach = vb2_dc_dmabuf_ops_detach,
 	.map_dma_buf = vb2_dc_dmabuf_ops_map,
 	.unmap_dma_buf = vb2_dc_dmabuf_ops_unmap,
-	//!.map = vb2_dc_dmabuf_ops_kmap,
+	.map = vb2_dc_dmabuf_ops_kmap,
 //!.map_atomic = vb2_dc_dmabuf_ops_kmap,
 	.vmap = vb2_dc_dmabuf_ops_vmap,
 	.mmap = vb2_dc_dmabuf_ops_mmap,
@@ -407,7 +415,7 @@ struct dma_buf *vb2_dc_get_dmabuf(void *buf_priv, unsigned long flags)
 /*********************************************/
 /*       callbacks for USERPTR buffers       */
 /*********************************************/
-#ifdef vb2_dc_put_userptr_en
+#ifdef vb2_mmap
 static void vb2_dc_put_userptr(void *buf_priv)
 {
 	struct vb2_dc_buf *buf = buf_priv;
@@ -469,7 +477,7 @@ static inline dma_addr_t vb2_dc_pfn_to_dma(struct device *dev,
 	return (dma_addr_t)(pfn) << PAGE_SHIFT;
 }
 #endif
-#ifdef vb2_dc_get_userptr_en
+#ifdef vb2_mmap
 static void *vb2_dc_get_userptr(struct device *dev, unsigned long vaddr,
 	unsigned long size, enum dma_data_direction dma_dir)
 {
@@ -618,12 +626,12 @@ int vb2_dc_map_dmabuf(void *mem_priv)
 	/* checking if dmabuf is big enough to store contiguous chunk */
 	contig_size = vb2_dc_get_contiguous_size(sgt);
 	if (contig_size < buf->size) {
-#if IS_ENABLED(CONFIG_MTK_IOMMU_V2)
+#ifdef CONFIG_MTK_IOMMU_V2
 		pr_info("contiguous chunk is too small %lu/%lu b\n",
 			contig_size, buf->size);
 #endif
 		dma_buf_unmap_attachment(buf->db_attach, sgt, buf->dma_dir);
-#if IS_ENABLED(CONFIG_MTK_IOMMU_V2)
+#ifdef CONFIG_MTK_IOMMU_V2
 		return -EFAULT;
 #endif
 	}

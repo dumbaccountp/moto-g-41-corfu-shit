@@ -117,6 +117,50 @@ static int mtk_nanohub_server_dispatch_data(uint32_t *currWp);
 static int mtk_nanohub_report_to_manager(struct data_unit_t *data);
 static int mtk_nanohub_create_manager(void);
 
+enum scp_ipi_status __attribute__((weak)) scp_ipi_registration(enum ipi_id id,
+        void (*ipi_handler)(int id, void *data, unsigned int len),
+        const char *name)
+{
+        return SCP_IPI_ERROR;
+}
+
+enum scp_ipi_status __attribute__((weak)) scp_ipi_unregistration(enum ipi_id id)
+{
+        return SCP_IPI_ERROR;
+}
+
+void __attribute__((weak)) scp_A_register_notify(struct notifier_block *nb)
+{
+
+}
+
+void __attribute__((weak)) scp_A_unregister_notify(struct notifier_block *nb)
+{
+
+}
+
+phys_addr_t __attribute__((weak))
+        scp_get_reserve_mem_virt(enum scp_reserve_mem_id_t id)
+{
+        return 0;
+}
+
+phys_addr_t __attribute__((weak))
+        scp_get_reserve_mem_phys(enum scp_reserve_mem_id_t id)
+{
+        return 0;
+}
+
+phys_addr_t __attribute__((weak))
+        scp_get_reserve_mem_size(enum scp_reserve_mem_id_t id)
+{
+        return 0;
+}
+
+void __attribute__((weak)) scp_register_feature(enum feature_id id)
+{
+}
+
 /* arch counter is 13M, mult is 161319385, shift is 21 */
 static inline uint64_t arch_counter_to_ns(uint64_t cyc)
 {
@@ -296,8 +340,8 @@ static void mtk_nanohub_moving_average(union SCP_SENSOR_HUB_DATA *rsp)
 	 *		return;
 	 *}
 	 */
-	ap_now_time = ktime_get_boottime_ns();
-	arch_counter = __arch_counter_get_cntvct();
+	ap_now_time = ktime_get_boot_ns();
+	arch_counter = arch_counter_get_cntvct();
 	scp_raw_time = rsp->notify_rsp.scp_timestamp;
 	ipi_transfer_time = arch_counter_to_ns(arch_counter -
 		rsp->notify_rsp.arch_counter);
@@ -844,8 +888,8 @@ static int mtk_nanohub_send_timestamp_wake_locked(void)
 
 	/* send_timestamp_to_hub is process context, disable irq is safe */
 	local_irq_disable();
-	now_time = ktime_get_boottime_ns();
-	arch_counter = __arch_counter_get_cntvct();
+	now_time = ktime_get_boot_ns();
+	arch_counter = arch_counter_get_cntvct();
 	local_irq_enable();
 	req.set_config_req.sensorType = 0;
 	req.set_config_req.action = SENSOR_HUB_SET_TIMESTAMP;
@@ -1840,7 +1884,7 @@ static int mtk_nanohub_ready_event(struct notifier_block *this,
 {
 	unsigned long flags = 0;
 
-	pr_info("notify event:%d\n", event);
+	pr_info("notify event:%lu\n", event);
 	if (event == SCP_EVENT_STOP) {
 		spin_lock_irqsave(&scp_state_lock, flags);
 		WRITE_ONCE(scp_system_ready, false);
@@ -2434,12 +2478,12 @@ static int mtk_nanohub_pm_event(struct notifier_block *notifier,
 {
 	switch (pm_event) {
 	case PM_POST_SUSPEND:
-		pr_debug("resume ap boottime=%lld\n", ktime_get_boottime_ns());
+		pr_debug("resume ap boottime=%lld\n", ktime_get_boot_ns());
 		WRITE_ONCE(rtc_compensation_suspend, false);
 		mtk_nanohub_send_timestamp_to_hub();
 		return NOTIFY_DONE;
 	case PM_SUSPEND_PREPARE:
-		pr_debug("suspend ap boottime=%lld\n", ktime_get_boottime_ns());
+		pr_debug("suspend ap boottime=%lld\n", ktime_get_boot_ns());
 		WRITE_ONCE(rtc_compensation_suspend, true);
 		return NOTIFY_DONE;
 	default:

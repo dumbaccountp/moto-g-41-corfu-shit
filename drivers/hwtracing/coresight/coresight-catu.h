@@ -61,6 +61,7 @@
 #define CATU_IRQEN_OFF		0x0
 
 struct catu_drvdata {
+	struct device *dev;
 	void __iomem *base;
 	struct coresight_device *csdev;
 	int irq;
@@ -107,5 +108,7 @@ static inline bool coresight_is_catu_device(struct coresight_device *csdev)
 		return false;
 	return true;
 }
+
+extern const struct etr_buf_operations etr_catu_buf_ops;
 
 #endif

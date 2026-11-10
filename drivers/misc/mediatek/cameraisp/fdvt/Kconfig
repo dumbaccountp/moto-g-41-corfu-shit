@@ -1,6 +1,6 @@
-config MTK_CAMERA_FD_ISP6S
+config MTK_CAMERA_ISP_FD_SUPPORT
 	tristate "[FD] Face Detection"
-	depends on MTK_CAMERA_ISP_SUPPORT
+	depends on MTK_CAMERA_ISP
 	help
 	  Face Detection.
 	  Enable to detect faces on images.

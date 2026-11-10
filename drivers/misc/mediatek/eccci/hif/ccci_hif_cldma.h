@@ -6,7 +6,6 @@
 #ifndef __MODEM_CD_H__
 #define __MODEM_CD_H__
 
-#include <linux/atomic.h>
 #include <linux/pm_wakeup.h>
 #include <linux/dmapool.h>
 #include <linux/timer.h>
@@ -19,7 +18,7 @@
 #include "ccci_common_config.h"
 #include "ccci_bm.h"
 #include "ccci_hif_internal.h"
-//#include "modem_sys.h"
+#include "modem_sys.h"
 #include "ccci_cldma_plat.h"
 /*
  * hardcode, max queue number should be synced with port array in port_cfg.c
@@ -122,6 +121,13 @@ struct ccci_fast_header {
 	u32 reserved;
 };
 #endif
+
+struct cldma_hw_info {
+	unsigned long cldma_ap_ao_base;
+	unsigned long cldma_ap_pdn_base;
+	unsigned int cldma_irq_id;
+	unsigned long cldma_irq_flags;
+};
 
 static inline struct cldma_request *cldma_ring_step_forward(
 	struct cldma_ring *ring, struct cldma_request *req)
@@ -290,7 +296,6 @@ struct md_cd_ctrl {
 	int cldma_platform;
 
 	struct ccci_cldma_plat_ops cldma_plat_ops;
-	struct platform_device *plat_dev; /* maybe: no need. */
 };
 
 struct cldma_tgpd {
@@ -379,10 +384,6 @@ static inline void md_cd_queue_struct_init(struct md_cd_queue *queue,
 #endif
 }
 
-struct ccci_cldma_clk_node {
-	struct clk *clk_ref;
-	unsigned char *clk_name;
-};
 
 static inline int ccci_cldma_hif_send_skb(unsigned char hif_id, int tx_qno,
 	struct sk_buff *skb, int from_pool, int blocking)
@@ -441,13 +442,16 @@ static inline int ccci_cldma_hif_set_wakeup_src(unsigned char hif_id,
 	struct md_cd_ctrl *md_ctrl =
 		(struct md_cd_ctrl *)ccci_hif_get_by_id(hif_id);
 
-	if (md_ctrl) {
-		arch_atomic_set(&md_ctrl->wakeup_src, value);
-		return value;
-	} else
+	if (md_ctrl)
+		return atomic_set(&md_ctrl->wakeup_src, value);
+	else
 		return -1;
 
 }
+int md_cd_clear_all_queue(unsigned char hif_id, enum DIRECTION dir);
+int cldma_stop_for_ee(unsigned char hif_id);
+int md_cldma_allQreset_work(unsigned char hif_id);
+int md_cldma_clear(unsigned char hif_id);
 
 extern struct regmap *syscon_regmap_lookup_by_phandle(struct device_node *np,
 	const char *property);
@@ -460,7 +464,7 @@ extern unsigned long ccci_modem_boot_count[];
 /* used for throttling feature - end */
 
 extern struct md_cd_ctrl *cldma_ctrl;
-extern struct ccci_cldma_clk_node cldma_clk_table[];
+extern struct ccci_clk_node cldma_clk_table[];
 
 extern int regmap_write(struct regmap *map, unsigned int reg, unsigned int val);
 extern int regmap_read(struct regmap *map, unsigned int reg, unsigned int *val);

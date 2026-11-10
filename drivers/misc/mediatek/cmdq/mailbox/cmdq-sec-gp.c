@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
- */
+*/
 
-#include <linux/soc/mediatek/mtk-cmdq-ext.h>
+#include <linux/soc/mediatek/mtk-cmdq.h>
 #include <linux/math64.h>
 #include <linux/sched/clock.h>
 
@@ -191,4 +191,3 @@ s32 cmdq_sec_execute_session(struct cmdq_sec_tee_context *tee,
 	return status;
 }
 
-MODULE_LICENSE("GPL v2");

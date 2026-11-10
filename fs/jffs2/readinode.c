@@ -1289,7 +1289,7 @@ static int jffs2_do_read_inode_internal(struct jffs2_sb_info *c,
 			dbg_readinode("symlink's target '%s' cached\n", f->target);
 		}
 
-		fallthrough;
+		/* fall through... */
 
 	case S_IFBLK:
 	case S_IFCHR:

@@ -14,6 +14,10 @@
 # include "test-libpython.c"
 #undef main
 
+#define main main_test_libpython_version
+# include "test-libpython-version.c"
+#undef main
+
 #define main main_test_libperl
 # include "test-libperl.c"
 #undef main
@@ -24,6 +28,10 @@
 
 #define main main_test_libelf
 # include "test-libelf.c"
+#undef main
+
+#define main main_test_libelf_mmap
+# include "test-libelf-mmap.c"
 #undef main
 
 #define main main_test_get_current_dir_name
@@ -66,16 +74,24 @@
 # include "test-libunwind.c"
 #undef main
 
+#define main main_test_libaudit
+# include "test-libaudit.c"
+#undef main
+
 #define main main_test_libslang
 # include "test-libslang.c"
 #undef main
 
-#define main main_test_libbfd
-# include "test-libbfd.c"
+#define main main_test_gtk2
+# include "test-gtk2.c"
 #undef main
 
-#define main main_test_libbfd_buildid
-# include "test-libbfd-buildid.c"
+#define main main_test_gtk2_infobar
+# include "test-gtk2-infobar.c"
+#undef main
+
+#define main main_test_libbfd
+# include "test-libbfd.c"
 #undef main
 
 #define main main_test_backtrace
@@ -158,28 +174,18 @@
 # include "test-setns.c"
 #undef main
 
-#define main main_test_libaio
-# include "test-libaio.c"
-#undef main
-
-#define main main_test_reallocarray
-# include "test-reallocarray.c"
-#undef main
-
-#define main main_test_disassembler_four_args
-# include "test-disassembler-four-args.c"
-#undef main
-
-#define main main_test_libzstd
-# include "test-libzstd.c"
+#define main main_test_libopencsd
+# include "test-libopencsd.c"
 #undef main
 
 int main(int argc, char *argv[])
 {
 	main_test_libpython();
+	main_test_libpython_version();
 	main_test_libperl();
 	main_test_hello();
 	main_test_libelf();
+	main_test_libelf_mmap();
 	main_test_get_current_dir_name();
 	main_test_gettid();
 	main_test_glibc();
@@ -190,9 +196,11 @@ int main(int argc, char *argv[])
 	main_test_libelf_gelf_getnote();
 	main_test_libelf_getshdrstrndx();
 	main_test_libunwind();
+	main_test_libaudit();
 	main_test_libslang();
+	main_test_gtk2(argc, argv);
+	main_test_gtk2_infobar(argc, argv);
 	main_test_libbfd();
-	main_test_libbfd_buildid();
 	main_test_backtrace();
 	main_test_libnuma();
 	main_test_numa_num_possible_cpus();
@@ -210,10 +218,7 @@ int main(int argc, char *argv[])
 	main_test_sched_getcpu();
 	main_test_sdt();
 	main_test_setns();
-	main_test_libaio();
-	main_test_reallocarray();
-	main_test_disassembler_four_args();
-	main_test_libzstd();
+	main_test_libopencsd();
 
 	return 0;
 }

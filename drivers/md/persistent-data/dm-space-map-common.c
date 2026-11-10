@@ -190,8 +190,6 @@ static int sm_find_free(void *addr, unsigned begin, unsigned end,
 
 static int sm_ll_init(struct ll_disk *ll, struct dm_transaction_manager *tm)
 {
-	memset(ll, 0, sizeof(struct ll_disk));
-
 	ll->tm = tm;
 
 	ll->bitmap_info.tm = tm;
@@ -280,11 +278,6 @@ int sm_ll_lookup_bitmap(struct ll_disk *ll, dm_block_t b, uint32_t *result)
 	dm_block_t index = b;
 	struct disk_index_entry ie_disk;
 	struct dm_block *blk;
-
-	if (b >= ll->nr_blocks) {
-		DMERR_LIMIT("metadata block out of bounds");
-		return -EINVAL;
-	}
 
 	b = do_div(index, ll->entries_per_block);
 	r = ll->load_ie(ll, index, &ie_disk);
@@ -376,6 +369,10 @@ int sm_ll_find_free_block(struct ll_disk *ll, dm_block_t begin,
 			 */
 			dm_tm_unlock(ll->tm, blk);
 			continue;
+
+		} else if (r < 0) {
+			dm_tm_unlock(ll->tm, blk);
+			return r;
 		}
 
 		dm_tm_unlock(ll->tm, blk);

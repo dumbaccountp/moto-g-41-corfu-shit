@@ -11,6 +11,28 @@
 # See http://www.gnu.org/licenses/gpl-2.0.html for more details.
 #
 
+# mt6893&mt6885 co-platform config
+# mt6853&mt6877 co-platform config
+# mt6781&mt6785 co-platform config
+
+$(info CONFIG_MTK_PLATFORM_CCCI := $(subst ",,$(CONFIG_MTK_PLATFORM)))
+$(info CONFIG_MTK_PLATFORM_CCCI := $(CONFIG_MTK_PLATFORM))
+$(info MTK_PLATFORM_CCCI := $(MTK_PLATFORM))
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6877)))
+MTK_PLATFORM := mt6853
+subdir-ccflags-y += -DCCCI_PLATFORM_MT6877
+else ifeq (y, $(filter y, $(CONFIG_MACH_MT6781)))
+MTK_PLATFORM := mt6785
+subdir-ccflags-y += -DCCCI_PLATFORM_MT6781
+else ifeq (y, $(filter y, $(CONFIG_MACH_MT6893)))
+MTK_PLATFORM := mt6885
+else ifeq (y, $(filter y, $(CONFIG_MACH_MT6833)))
+MTK_PLATFORM := mt6833
+else
+MTK_PLATFORM := $(CONFIG_MTK_PLATFORM)
+endif
+
 ifeq ($(CONFIG_MTK_ECCCI_DRIVER), y)
 CCCI_OBJ=y
 else ifeq ($(CONFIG_MTK_ECCCI_DRIVER), m)
@@ -21,19 +43,20 @@ endif
 
 ifneq ($(CCCI_OBJ), n)
 
+$(info CONFIG_MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM)))
+$(info CONFIG_MTK_PLATFORM := $(CONFIG_MTK_PLATFORM))
+$(info MTK_PLATFORM := $(MTK_PLATFORM))
+
+
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/inc/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/platform
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccmni/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/conn_md/include/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6873
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/scp/include/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/scp/rv/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/memory-amms
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/hif/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mdpm/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/pbm/
 ifeq ($(CCCI_OBJ), m)
 ccflags-y += -DCCCI_KMODULE_ENABLE
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/hif
@@ -41,14 +64,17 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/udc/udc_lib_inc
 
 obj-$(CCCI_OBJ) += ccci_md_clk.o
 obj-$(CCCI_OBJ) += ccci_rtc.o
-ifneq ($(CONFIG_MEDIATEK_MT6577_AUXADC), n)
+ifeq  ($(CONFIG_MEDIATEK_MT6577_AUXADC), y)
 obj-$(CCCI_OBJ) += ccci_auxadc.o
 endif
+
+obj-$(CCCI_OBJ) += ccci_auxadc.o
+
 
 obj-$(CCCI_OBJ) += ccci_md_all.o
 ccci_md_all-$(CCCI_OBJ) := ccci_core.o ccci_bm.o ccci_modem.o modem_sys1.o \
 		udc/udc.o \
-		hif/ccci_hif.o
+		hif/ccci_hif.o hif/ccci_hif_cldma.o
 
 # port start
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/port/
@@ -64,6 +90,7 @@ ccci_md_all-$(CCCI_OBJ) += port/port_cfg.o \
 		port/port_ipc.o \
 		port/port_net.o \
 		port/port_poller.o \
+		port/port_misc.o \
 		port/port_proxy.o \
 		port/port_rpc.o \
 		port/port_smem.o \
@@ -72,24 +99,24 @@ ccci_md_all-$(CCCI_OBJ) += port/port_cfg.o \
 # port end
 # fsm start
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/fsm/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/scp/mt6873
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/scp/$(MTK_PLATFORM)
 ccci_md_all-$(CCCI_OBJ) += fsm/ccci_fsm.o \
 			fsm/ccci_fsm_ioctl.o \
 			fsm/ccci_fsm_monitor.o \
 			fsm/ccci_fsm_poller.o \
+			fsm/ccci_fsm_scp.o \
 			fsm/ccci_fsm_ee.o \
 			fsm/ccci_fsm_sys.o \
 			fsm/mdee_dumper_v1.o \
 			fsm/mdee_dumper_v2.o \
-			fsm/mdee_dumper_v3.o \
-			fsm/mdee_dumper_v5.o
+			fsm/mdee_dumper_v3.o
 # fsm end
 
 # plat start
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6873
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/pmic/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/emi_bwl/mt6873
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/emi_bwl/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/clk/mediatek
 # security objects
 MASP_CORE_DRIVER_DIR := $(srctree)/drivers/misc/mediatek/drivers/masp
@@ -120,34 +147,18 @@ endif
 ifeq ($(CONFIG_MTK_SEC_MODEM_NVRAM_ANTI_CLONE), y)
 ccflags-y  += -DMTK_SEC_MODEM_NVRAM_ANTI_CLONE
 endif
-ccci_md_all-$(CCCI_OBJ) += platform/ccci_platform.o $(core_obj) $(mach_obj) $(sec_obj) \
-		platform/ap_md_reg_dump.o \
-		platform/md_sys1_platform.o
+ccci_md_all-$(CCCI_OBJ) += $(MTK_PLATFORM)/ccci_platform.o $(core_obj) $(mach_obj) $(sec_obj) \
+		$(MTK_PLATFORM)/ap_md_reg_dump.o \
+		$(MTK_PLATFORM)/md_sys1_platform.o
 # plat end
-
-ifeq ($(CONFIG_MTK_ECCCI_C2K), y)
-ccci_md_all-$(CCCI_OBJ) += modem_sys3.o
-endif
-
-ccci_fsm_scp-y := fsm/ccci_fsm_scp.o
-obj-$(CCCI_OBJ) += ccci_fsm_scp.o
 
 # ccci_ccif.ko
 ccci_ccif-y := hif/ccci_ringbuf.o hif/ccci_hif_ccif.o
 obj-$(CCCI_OBJ) += ccci_ccif.o
 
 # ccci_dpmaif.ko
-ccci_dpmaif-y := hif/ccci_hif_dpmaif.o hif/dpmaif_drv.o \
-	hif/ccci_hif_dpmaif_comm.o hif/ccci_hif_dpmaif_v3.o hif/dpmaif_drv_v3.o \
-	hif/dpmaif_bat.o hif/dpmaif_bat_v3.o hif/dpmaif_debug.o hif/net_speed.o \
-	hif/ccci_hif_dpmaif_v1.o hif/dpmaif_drv_v1.o \
-	hif/net_pool.o hif/md_spd_dvfs_fn.o hif/md_spd_dvfs_method.o
-
+ccci_dpmaif-y := hif/ccci_hif_dpmaif.o hif/dpmaif_drv.o
 obj-$(CCCI_OBJ) += ccci_dpmaif.o
-
-# ccci_cldma.ko
-ccci_cldma-y := hif/ccci_cldma_plat.o hif/ccci_hif_cldma.o
-obj-$(CCCI_OBJ) += ccci_cldma.o
 
 else
 
@@ -155,13 +166,8 @@ obj-$(CCCI_OBJ) += ccci_all.o
 # common services
 ccci_all-$(CCCI_OBJ) := ccci_core.o ccci_bm.o ccci_modem.o ccci_rtc.o modem_sys1.o ccci_md_clk.o
 
-
-ifneq ($(CONFIG_MEDIATEK_MT6577_AUXADC), n)
+ifeq  ($(CONFIG_MEDIATEK_MT6577_AUXADC), y)
 ccci_all-$(CCCI_OBJ) += ccci_auxadc.o
-endif
-
-ifeq ($(CONFIG_MTK_ECCCI_C2K), y)
-ccci_all-$(CCCI_OBJ) += modem_sys3.o
 endif
 
 # sub modules
@@ -170,8 +176,13 @@ obj-$(CCCI_OBJ) += hif/
 obj-$(CCCI_OBJ) += port/
 obj-$(CCCI_OBJ) += udc/
 
+$(info CONFIG_MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM)))
+$(info CONFIG_MTK_PLATFORM := $(CONFIG_MTK_PLATFORM))
+$(info MTK_PLATFORM := $(MTK_PLATFORM))
+
 # platform code
-obj-$(CCCI_OBJ) += platform/
+#obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+obj-$(CCCI_OBJ) += $(MTK_PLATFORM)/
 
 endif
 

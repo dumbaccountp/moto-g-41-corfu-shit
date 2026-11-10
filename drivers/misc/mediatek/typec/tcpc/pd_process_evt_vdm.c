@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #include "inc/pd_core.h"
@@ -87,7 +87,7 @@ static const struct vdm_state_transition pe_vdm_state_reactions[] = {
 		PE_UFP_VDM_ATTENTION_REQUEST
 	),
 
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 	VDM_DFP_CMD_REACTION(CMD_DP_STATUS,
 		PE_UFP_VDM_DP_STATUS_UPDATE,
 		PE_DFP_VDM_DP_STATUS_UPDATE_REQUEST
@@ -99,7 +99,7 @@ static const struct vdm_state_transition pe_vdm_state_reactions[] = {
 	),
 #endif	/* CONFIG_USB_PD_ALT_MODE_DFP */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 	/* Only handle Timeout Case */
 	VDM_DFP_CMD_REACTION_PD30(0,
 		PE_UFP_UVDM_RECV,
@@ -107,14 +107,14 @@ static const struct vdm_state_transition pe_vdm_state_reactions[] = {
 	),
 #endif	/* CONFIG_USB_PD_CUSTOM_VDM */
 
-#if CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
+#ifdef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
 	VDM_CABLE_CMD_REACTION(CMD_DISCOVER_IDENT,
 		0,
 		PE_SRC_VDM_IDENTITY_REQUEST
 	),
 #endif /* CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID */
 
-#if CONFIG_USB_PD_DFP_READY_DISCOVER_ID
+#ifdef CONFIG_USB_PD_DFP_READY_DISCOVER_ID
 	VDM_CABLE_CMD_REACTION(CMD_DISCOVER_IDENT,
 		0,
 		PE_DFP_CBL_VDM_IDENTITY_REQUEST
@@ -325,19 +325,19 @@ static inline bool pd_make_vdm_state_transit_nak(struct pd_port *pd_port)
 
 /* Discover Cable ID */
 
-#if CONFIG_PD_DISCOVER_CABLE_ID
+#ifdef CONFIG_PD_DISCOVER_CABLE_ID
 DECL_PE_STATE_TRANSITION(PD_DPM_MSG_DISCOVER_CABLE) = {
-#if CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
+#ifdef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
 	{ PE_SRC_STARTUP, PE_SRC_VDM_IDENTITY_REQUEST},
 	{ PE_SRC_DISCOVERY, PE_SRC_VDM_IDENTITY_REQUEST},
 #endif
 
-#if CONFIG_USB_PD_DFP_READY_DISCOVER_ID
+#ifdef CONFIG_USB_PD_DFP_READY_DISCOVER_ID
 	{ PE_SRC_READY, PE_DFP_CBL_VDM_IDENTITY_REQUEST},
 	{ PE_SNK_READY, PE_DFP_CBL_VDM_IDENTITY_REQUEST},
 #endif	/* CONFIG_USB_PD_DFP_READY_DISCOVER_ID */
 
-#if CONFIG_PD_SRC_RESET_CABLE
+#ifdef CONFIG_PD_SRC_RESET_CABLE
 	{ PE_SRC_CBL_SEND_SOFT_RESET, PE_SRC_VDM_IDENTITY_REQUEST},
 #endif	/* CONFIG_PD_SRC_RESET_CABLE */
 };
@@ -348,8 +348,8 @@ DECL_PE_STATE_REACTION(PD_DPM_MSG_DISCOVER_CABLE);
  * [BLOCK] Porcess Ctrl MSG
  */
 
-#if CONFIG_USB_PD_ALT_MODE
-#if CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_ATTENTION
+#ifdef CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_ATTENTION
 static inline bool pd_ufp_u_auto_send_attention(struct pd_port *pd_port)
 {
 	struct dp_data *dp_data = pd_get_dp_data(pd_port);
@@ -380,8 +380,8 @@ static inline bool pd_process_ctrl_msg(
 		pd_enable_timer(pd_port, pe_data->vdm_state_timer);
 
 	switch (pd_port->pe_state_curr) {
-#if CONFIG_USB_PD_ALT_MODE
-#if CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_ATTENTION
+#ifdef CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_DBG_DP_UFP_U_AUTO_ATTENTION
 	case PE_UFP_VDM_DP_CONFIGURE:
 		if (pd_ufp_u_auto_send_attention(pd_port))
 			return true;
@@ -394,19 +394,19 @@ static inline bool pd_process_ctrl_msg(
 		break;
 #endif	/* CONFIG_USB_PD_ALT_MODE */
 
-#if CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
+#ifdef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
 	case PE_SRC_VDM_IDENTITY_REQUEST:
 		pe_data->power_cable_present = true;
 		return false;
 #endif	/* CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID */
 
-#if CONFIG_USB_PD_DFP_READY_DISCOVER_ID
+#ifdef CONFIG_USB_PD_DFP_READY_DISCOVER_ID
 	case PE_DFP_CBL_VDM_IDENTITY_REQUEST:
 		pe_data->power_cable_present = true;
 		return false;
 #endif	/* CONFIG_USB_PD_DFP_READY_DISCOVER_ID */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 	case PE_DFP_UVDM_SEND:
 		if (!pd_port->uvdm_wait_resp) {
 			PE_TRANSIT_STATE(pd_port, PE_DFP_UVDM_ACKED);
@@ -429,7 +429,7 @@ static inline bool pd_process_ctrl_msg(
  * [BLOCK] Porcess Custom MSG (SVDM/UVDM)
  */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 
 bool pd_process_custom_vdm(struct pd_port *pd_port, bool svdm)
 {
@@ -462,7 +462,7 @@ static inline bool pd_process_uvdm(
 {
 	struct tcpc_device __maybe_unused *tcpc = pd_port->tcpc;
 
-#if CONFIG_USB_PD_UVDM
+#ifdef CONFIG_USB_PD_UVDM
 	/* support sop only */
 	if (pd_event->pd_msg->frame_type != TCPC_TX_SOP)
 		return false;
@@ -511,7 +511,7 @@ static inline const char *assign_vdm_cmd_name(uint8_t cmd)
 	return NULL;
 }
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 static const char *const pe_vdm_dp_cmd_name[] = {
 	"DPStatus",
 	"DPConfig",
@@ -548,7 +548,7 @@ static inline void print_vdm_msg(
 
 	name = assign_vdm_cmd_name(cmd);
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 	if (name == NULL && svid == USB_SID_DISPLAYPORT)
 		name = assign_vdm_dp_cmd_name(cmd);
 #endif	/* CONFIG_USB_PD_ALT_MODE */
@@ -574,7 +574,7 @@ static inline bool pd_process_sop_vdm(
 	if (pd_make_vdm_state_transit_sop(pd_port))
 		return true;
 
-#if CONFIG_USB_PD_SVDM
+#ifdef CONFIG_USB_PD_SVDM
 	if (pd_process_custom_vdm(pd_port, true))
 		return true;
 #endif	/* CONFIG_USB_PD_SVDM */
@@ -620,7 +620,8 @@ static inline bool pd_process_data_msg(
 	print_vdm_msg(pd_port, pd_event);
 
 	if (pd_port->curr_vdm_svid != USB_SID_PD &&
-		!dpm_get_svdm_svid_data(pd_port, pd_port->curr_vdm_svid)) {
+		!dpm_get_svdm_svid_data(pd_port, pd_port->curr_vdm_svid) &&
+		pd_port->curr_vdm_svid != USB_VID_MQP) {
 		PE_TRANSIT_STATE(pd_port, PE_UFP_VDM_SEND_NAK);
 		ret = true;
 	} else if (pd_msg->frame_type == TCPC_TX_SOP_PRIME) {
@@ -736,15 +737,15 @@ const uint8_t tcp_vdm_evt_init_state[] = {
 	PE_DFP_VDM_MODE_EXIT_REQUEST, /* TCP_DPM_EVT_EXIT_MODE */
 	PE_UFP_VDM_ATTENTION_REQUEST, /* TCP_DPM_EVT_ATTENTION */
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 	PE_UFP_VDM_ATTENTION_REQUEST, /* TCP_DPM_EVT_DP_ATTENTION */
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 	PE_DFP_VDM_DP_STATUS_UPDATE_REQUEST, /* TCP_DPM_EVT_DP_STATUS_UPDATE */
 	PE_DFP_VDM_DP_CONFIGURATION_REQUEST, /* TCP_DPM_EVT_DP_CONFIG */
 #endif	/* CONFIG_USB_PD_ALT_MODE_DFP */
 #endif	/* CONFIG_USB_PD_ALT_MODE */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 	PE_DFP_UVDM_SEND, /* TCP_DPM_EVT_UVDM */
 #endif	/* CONFIG_USB_PD_CUSTOM_VDM */
 };
@@ -754,7 +755,7 @@ static inline bool pd_process_tcp_cable_event(
 {
 	bool ret;
 	int tcp_ret;
-#if CONFIG_PD_DISCOVER_CABLE_ID
+#ifdef CONFIG_PD_DISCOVER_CABLE_ID
 	bool role_check = true;
 
 	if (pd_check_rev30(pd_port))
@@ -776,7 +777,7 @@ static inline bool pd_process_tcp_cable_event(
 	return ret;
 }
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 
 static inline uint32_t tcpc_update_bits(
 	uint32_t var, uint32_t update, uint32_t mask)
@@ -806,7 +807,7 @@ static inline void pd_parse_tcp_dpm_evt_dp_status(struct pd_port *pd_port)
 		dp_data_tcp->val, dp_data_tcp->mask);
 }
 
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 
 static inline void pd_parse_tcp_dpm_evt_dp_config(struct pd_port *pd_port)
 {
@@ -822,7 +823,7 @@ static inline void pd_parse_tcp_dpm_evt_dp_config(struct pd_port *pd_port)
 #endif	/* CONFIG_USB_PD_ALT_MODE_DFP */
 #endif	/* CONFIG_USB_PD_ALT_MODE */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 static inline void pd_parse_tcp_dpm_evt_uvdm(struct pd_port *pd_port)
 {
 	struct tcp_dpm_custom_vdm_data *vdm_data =
@@ -833,7 +834,7 @@ static inline void pd_parse_tcp_dpm_evt_uvdm(struct pd_port *pd_port)
 	memcpy(pd_port->uvdm_data,
 		vdm_data->vdos, sizeof(uint32_t) * vdm_data->cnt);
 
-#if CONFIG_USB_PD_SVDM
+#ifdef CONFIG_USB_PD_SVDM
 	if (pd_check_rev30(pd_port) &&
 		(pd_port->uvdm_data[0] & VDO_SVDM_TYPE))
 		pd_port->uvdm_data[0] |= VDO_SVDM_VERS(SVDM_REV20);
@@ -845,13 +846,13 @@ static inline void pd_parse_tcp_dpm_evt_from_tcpm(
 	struct pd_port *pd_port, struct pd_event *pd_event)
 {
 	switch (pd_event->msg) {
-#if CONFIG_USB_PD_KEEP_SVIDS
+#ifdef CONFIG_USB_PD_KEEP_SVIDS
 	case TCP_DPM_EVT_DISCOVER_SVIDS:
 		pd_port->pe_data.remote_svid_list.cnt = 0;
 		break;
 #endif	/* CONFIG_USB_PD_KEEP_SVIDS */
 
-#if CONFIG_USB_PD_ALT_MODE
+#ifdef CONFIG_USB_PD_ALT_MODE
 	case TCP_DPM_EVT_DISCOVER_MODES:
 	case TCP_DPM_EVT_ENTER_MODE:
 	case TCP_DPM_EVT_EXIT_MODE:
@@ -863,7 +864,7 @@ static inline void pd_parse_tcp_dpm_evt_from_tcpm(
 		pd_parse_tcp_dpm_evt_dp_status(pd_port);
 		break;
 
-#if CONFIG_USB_PD_ALT_MODE_DFP
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
 	case TCP_DPM_EVT_DP_STATUS_UPDATE:
 		pd_parse_tcp_dpm_evt_dp_status(pd_port);
 		break;
@@ -873,7 +874,7 @@ static inline void pd_parse_tcp_dpm_evt_from_tcpm(
 #endif	/* CONFIG_USB_PD_ALT_MODE_DFP */
 #endif	/* CONFIG_USB_PD_ALT_MODE */
 
-#if CONFIG_USB_PD_CUSTOM_VDM
+#ifdef CONFIG_USB_PD_CUSTOM_VDM
 	case TCP_DPM_EVT_UVDM:
 		pd_parse_tcp_dpm_evt_uvdm(pd_port);
 		break;

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/ata/sata_fsl.c
  *
@@ -8,6 +7,12 @@
  * Li Yang <leoli@freescale.com>
  *
  * Copyright (c) 2006-2007, 2011-2012 Freescale Semiconductor, Inc.
+ *
+ * This program is free software; you can redistribute  it and/or modify it
+ * under  the terms of  the GNU General  Public License as published by the
+ * Free Software Foundation;  either version 2 of the  License, or (at your
+ * option) any later version.
+ *
  */
 
 #include <linux/kernel.h>
@@ -726,8 +731,8 @@ static int sata_fsl_port_start(struct ata_port *ap)
 	if (!pp)
 		return -ENOMEM;
 
-	mem = dma_alloc_coherent(dev, SATA_FSL_PORT_PRIV_DMA_SZ, &mem_dma,
-				 GFP_KERNEL);
+	mem = dma_zalloc_coherent(dev, SATA_FSL_PORT_PRIV_DMA_SZ, &mem_dma,
+				  GFP_KERNEL);
 	if (!mem) {
 		kfree(pp);
 		return -ENOMEM;
@@ -1394,14 +1399,6 @@ static int sata_fsl_init_controller(struct ata_host *host)
 	return 0;
 }
 
-static void sata_fsl_host_stop(struct ata_host *host)
-{
-        struct sata_fsl_host_priv *host_priv = host->private_data;
-
-        iounmap(host_priv->hcr_base);
-        kfree(host_priv);
-}
-
 /*
  * scsi mid-layer and libata interface structures
  */
@@ -1433,8 +1430,6 @@ static struct ata_port_operations sata_fsl_ops = {
 
 	.port_start = sata_fsl_port_start,
 	.port_stop = sata_fsl_port_stop,
-
-	.host_stop      = sata_fsl_host_stop,
 
 	.pmp_attach = sata_fsl_pmp_attach,
 	.pmp_detach = sata_fsl_pmp_detach,
@@ -1490,9 +1485,9 @@ static int sata_fsl_probe(struct platform_device *ofdev)
 	host_priv->ssr_base = ssr_base;
 	host_priv->csr_base = csr_base;
 
-	irq = platform_get_irq(ofdev, 0);
-	if (irq < 0) {
-		retval = irq;
+	irq = irq_of_parse_and_map(ofdev->dev.of_node, 0);
+	if (!irq) {
+		dev_err(&ofdev->dev, "invalid irq from platform\n");
 		goto error_exit_with_cleanup;
 	}
 	host_priv->irq = irq;
@@ -1566,6 +1561,10 @@ static int sata_fsl_remove(struct platform_device *ofdev)
 	device_remove_file(&ofdev->dev, &host_priv->rx_watermark);
 
 	ata_host_detach(host);
+
+	irq_dispose_mapping(host_priv->irq);
+	iounmap(host_priv->hcr_base);
+	kfree(host_priv);
 
 	return 0;
 }

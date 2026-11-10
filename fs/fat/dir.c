@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/fs/fat/dir.c
  *
@@ -58,7 +57,7 @@ static inline void fat_dir_readahead(struct inode *dir, sector_t iblock,
 	if ((iblock & (sbi->sec_per_clus - 1)) || sbi->sec_per_clus == 1)
 		return;
 	/* root dir of FAT12/FAT16 */
-	if (!is_fat32(sbi) && (dir->i_ino == MSDOS_ROOT_INO))
+	if ((sbi->fat_bits != 32) && (dir->i_ino == MSDOS_ROOT_INO))
 		return;
 
 	bh = sb_find_get_block(sb, phys);
@@ -88,7 +87,9 @@ static int fat__get_entry(struct inode *dir, loff_t *pos,
 	int err, offset;
 
 next:
-	brelse(*bh);
+	if (*bh)
+		brelse(*bh);
+
 	*bh = NULL;
 	iblock = *pos >> sb->s_blocksize_bits;
 	err = fat_bmap(dir, iblock, &phys, &mapped_blocks, 0, false);
@@ -368,9 +369,7 @@ static int fat_parse_short(struct super_block *sb,
 	}
 
 	memcpy(work, de->name, sizeof(work));
-	/* For an explanation of the special treatment of 0x05 in
-	 * filenames, see msdos_format_name in namei_msdos.c
-	 */
+	/* see namei.c, msdos_format_name */
 	if (work[0] == 0x05)
 		work[0] = 0xE5;
 
@@ -804,6 +803,8 @@ static long fat_dir_ioctl(struct file *filp, unsigned int cmd,
 		return fat_generic_ioctl(filp, cmd, arg);
 	}
 
+	if (!access_ok(VERIFY_WRITE, d1, sizeof(struct __fat_dirent[2])))
+		return -EFAULT;
 	/*
 	 * Yes, we don't need this put_user() absolutely. However old
 	 * code didn't return the right value. So, app use this value,
@@ -842,6 +843,8 @@ static long fat_compat_dir_ioctl(struct file *filp, unsigned cmd,
 		return fat_generic_ioctl(filp, cmd, (unsigned long)arg);
 	}
 
+	if (!access_ok(VERIFY_WRITE, d1, sizeof(struct compat_dirent[2])))
+		return -EFAULT;
 	/*
 	 * Yes, we don't need this put_user() absolutely. However old
 	 * code didn't return the right value. So, app use this value,
@@ -1068,7 +1071,7 @@ int fat_remove_entries(struct inode *dir, struct fat_slot_info *sinfo)
 		}
 	}
 
-	fat_truncate_time(dir, NULL, S_ATIME|S_MTIME);
+	dir->i_mtime = dir->i_atime = current_time(dir);
 	if (IS_DIRSYNC(dir))
 		(void)fat_sync_inode(dir);
 	else
@@ -1284,7 +1287,7 @@ int fat_add_entries(struct inode *dir, void *slots, int nr_slots,
 	struct super_block *sb = dir->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	struct buffer_head *bh, *prev, *bhs[3]; /* 32*slots (672bytes) */
-	struct msdos_dir_entry *de;
+	struct msdos_dir_entry *uninitialized_var(de);
 	int err, free_slots, i, nr_bhs;
 	loff_t pos, i_pos;
 
@@ -1317,7 +1320,7 @@ int fat_add_entries(struct inode *dir, void *slots, int nr_slots,
 		}
 	}
 	if (dir->i_ino == MSDOS_ROOT_INO) {
-		if (!is_fat32(sbi))
+		if (sbi->fat_bits != 32)
 			goto error;
 	} else if (MSDOS_I(dir)->i_start == 0) {
 		fat_msg(sb, KERN_ERR, "Corrupted directory (i_pos %lld)",

@@ -1,4 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0-only
+/*
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
 
 #include <linux/slab.h>
 #include <linux/bitops.h>
@@ -59,7 +69,7 @@ struct clk *rockchip_clk_register_muxgrf(const char *name,
 				int shift, int width, int mux_flags)
 {
 	struct rockchip_muxgrf_clock *muxgrf_clock;
-	struct clk_init_data init;
+	struct clk_init_data init = {};
 	struct clk *clk;
 
 	if (IS_ERR(regmap)) {

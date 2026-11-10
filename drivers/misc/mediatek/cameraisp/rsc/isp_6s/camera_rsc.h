@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (c) 2015 MediaTek Inc.
- */
+//
+// Copyright (c) 2015 MediaTek Inc.
 
 #ifndef _MT_RSC_H
 #define _MT_RSC_H
@@ -13,7 +12,7 @@
 #include <linux/fs.h>
 #include <linux/compat.h>
 #endif
-extern void mt_irq_dump_status(unsigned int irq);
+
 /*
  *   enforce kernel log enable
  */
@@ -33,7 +32,11 @@ extern void mt_irq_dump_status(unsigned int irq);
 
 #define RSC_REG_RANGE           (0x1000)
 
-#define RSC_BASE_HW   0x1b003000
+#ifdef CONFIG_MACH_MT6781
+#define RSC_BASE_HW   0x1C003000
+#else
+#define RSC_BASE_HW   0x1B003000
+#endif
 
 /*This macro is for setting irq status represnted
  * by a local variable,RSCInfo.IrqInfo.Status[RSC_IRQ_TYPE_INT_RSC_ST]
@@ -90,9 +93,6 @@ struct RSC_CLEAR_IRQ_STRUCT {
 	int UserKey;		/* user key for doing interrupt operation */
 	unsigned int Status;	/* Input */
 };
-
-
-
 
 struct RSC_Config {
 	unsigned int RSC_CTRL;

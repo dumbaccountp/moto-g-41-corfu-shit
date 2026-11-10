@@ -6,7 +6,6 @@ enum MOTO_CHG_TCMD_CLIENT_ID {
 	MOTO_CHG_TCMD_CLIENT_BAT,
 	MOTO_CHG_TCMD_CLIENT_AP_ADC,
 	MOTO_CHG_TCMD_CLIENT_PM_ADC,
-	MOTO_CHG_TCMD_CLIENT_WLS,
 	MOTO_CHG_TCMD_ClIENT_MAX
 };
 
@@ -39,16 +38,9 @@ struct moto_chg_tcmd_client {
 	int (*get_bat_ocv)(void *input, int* val);//unit mV
 	int (*get_bat_id)(void *input, int* val);
 
-	int (*get_bat_cycle)(void *input, int* val);
-	int (*set_bat_cycle)(void *input, int val);
-
-	int (*get_adc_value)(void *input, int channel, int* val);
-
-	/*wireless*/
-	int (*get_chip_id)(void *input);
-	int (*wls_en)(void *input, bool val);
+        int (*get_adc_value)(void *input, int channel, int* val);
 };
 
-extern int moto_chg_tcmd_register(struct moto_chg_tcmd_client *client);
+int moto_chg_tcmd_register(struct moto_chg_tcmd_client *client);
 
 #endif

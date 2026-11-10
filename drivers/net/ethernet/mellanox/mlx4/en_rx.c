@@ -31,6 +31,7 @@
  *
  */
 
+#include <net/busy_poll.h>
 #include <linux/bpf.h>
 #include <linux/bpf_trace.h>
 #include <linux/mlx4/cq.h>
@@ -43,7 +44,6 @@
 #include <linux/vmalloc.h>
 #include <linux/irq.h>
 
-#include <net/ip.h>
 #if IS_ENABLED(CONFIG_IPV6)
 #include <net/ip6_checksum.h>
 #endif
@@ -271,8 +271,11 @@ int mlx4_en_create_rx_ring(struct mlx4_en_priv *priv,
 
 	ring = kzalloc_node(sizeof(*ring), GFP_KERNEL, node);
 	if (!ring) {
-		en_err(priv, "Failed to allocate RX ring structure\n");
-		return -ENOMEM;
+		ring = kzalloc(sizeof(*ring), GFP_KERNEL);
+		if (!ring) {
+			en_err(priv, "Failed to allocate RX ring structure\n");
+			return -ENOMEM;
+		}
 	}
 
 	ring->prod = 0;
@@ -683,7 +686,6 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 	rcu_read_lock();
 	xdp_prog = rcu_dereference(ring->xdp_prog);
 	xdp.rxq = &ring->xdp_rxq;
-	xdp.frame_sz = priv->frag_info[0].frag_stride;
 	doorbell_pending = 0;
 
 	/* We assume a 1:1 mapping between CQEs and Rx descriptors, so Rx
@@ -705,7 +707,7 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 
 		frags = ring->rx_info + (index << priv->log_rx_info);
 		va = page_address(frags[0].page) + frags[0].page_offset;
-		net_prefetchw(va);
+		prefetchw(va);
 		/*
 		 * make sure we read the CQE after we read the ownership bit
 		 */
@@ -806,10 +808,10 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 				goto xdp_drop_no_cnt; /* Drop on xmit failure */
 			default:
 				bpf_warn_invalid_xdp_action(act);
-				fallthrough;
+				/* fall through */
 			case XDP_ABORTED:
 				trace_xdp_exception(dev, xdp_prog, act);
-				fallthrough;
+				/* fall through */
 			case XDP_DROP:
 				ring->xdp_drop++;
 xdp_drop_no_cnt:
@@ -891,7 +893,7 @@ csum_none:
 			skb->data_len = length;
 			napi_gro_frags(&cq->napi);
 		} else {
-			__vlan_hwaccel_clear_tag(skb);
+			skb->vlan_tci = 0;
 			skb_clear_hash(skb);
 		}
 next:
@@ -950,7 +952,7 @@ int mlx4_en_poll_rx_cq(struct napi_struct *napi, int budget)
 		xdp_tx_cq = priv->tx_cq[TX_XDP][cq->ring];
 		if (xdp_tx_cq->xdp_busy) {
 			clean_complete = mlx4_en_process_tx_cq(dev, xdp_tx_cq,
-							       budget) < budget;
+							       budget);
 			xdp_tx_cq->xdp_busy = !clean_complete;
 		}
 	}

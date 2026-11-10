@@ -201,6 +201,12 @@ void *ged_hashtable_find(GED_HASHTABLE_HANDLE hHashTable, unsigned long ulID)
 
 		if (psHN)
 			return psHN->pvoid;
+#ifdef GED_DEBUG
+		if (ulID != 0)
+			GED_LOGD(
+			"@%s: ulID=%lu ulHash=%lu fail\n", __func__,
+			ulID, ulHash);
+#endif
 	}
 	return NULL;
 }

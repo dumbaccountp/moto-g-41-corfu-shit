@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NetLabel Domain Hash Table
  *
@@ -8,10 +7,25 @@
  * as CIPSO and RIPSO.
  *
  * Author: Paul Moore <paul@paul-moore.com>
+ *
  */
 
 /*
  * (c) Copyright Hewlett-Packard Development Company, L.P., 2006, 2008
+ *
+ * This program is free software;  you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY;  without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
+ * the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program;  if not, see <http://www.gnu.org/licenses/>.
+ *
  */
 
 #include <linux/types.h>
@@ -93,7 +107,7 @@ static void netlbl_domhsh_free_entry(struct rcu_head *entry)
 
 /**
  * netlbl_domhsh_hash - Hashing function for the domain hash table
- * @key: the domain name to hash
+ * @domain: the domain name to hash
  *
  * Description:
  * This is the hashing function for the domain hash table, it returns the
@@ -144,8 +158,7 @@ static struct netlbl_dom_map *netlbl_domhsh_search(const char *domain,
 	if (domain != NULL) {
 		bkt = netlbl_domhsh_hash(domain);
 		bkt_list = &netlbl_domhsh_rcu_deref(netlbl_domhsh)->tbl[bkt];
-		list_for_each_entry_rcu(iter, bkt_list, list,
-					lockdep_is_held(&netlbl_domhsh_lock))
+		list_for_each_entry_rcu(iter, bkt_list, list)
 			if (iter->valid &&
 			    netlbl_family_match(iter->family, family) &&
 			    strcmp(iter->domain, domain) == 0)
@@ -612,8 +625,9 @@ int netlbl_domhsh_remove_entry(struct netlbl_dom_map *entry,
 	audit_buf = netlbl_audit_start_common(AUDIT_MAC_MAP_DEL, audit_info);
 	if (audit_buf != NULL) {
 		audit_log_format(audit_buf,
-				 " nlbl_domain=%s res=1",
-				 entry->domain ? entry->domain : "(default)");
+				 " nlbl_domain=%s res=%u",
+				 entry->domain ? entry->domain : "(default)",
+				 ret_val == 0 ? 1 : 0);
 		audit_log_end(audit_buf);
 	}
 

@@ -8,26 +8,6 @@
 
 #include "mt-plat/mtk_ccci_common.h"
 
-#define NORMAL_BOOT_ID 0
-#define META_BOOT_ID 1
-#define FACTORY_BOOT_ID	2
-
-/* boot type definitions */
-enum boot_mode_t {
-	NORMAL_BOOT = 0,
-	META_BOOT = 1,
-	RECOVERY_BOOT = 2,
-	SW_REBOOT = 3,
-	FACTORY_BOOT = 4,
-	ADVMETA_BOOT = 5,
-	ATE_FACTORY_BOOT = 6,
-	ALARM_BOOT = 7,
-	KERNEL_POWER_OFF_CHARGING_BOOT = 8,
-	LOW_POWER_OFF_CHARGING_BOOT = 9,
-	DONGLE_BOOT = 10,
-	UNKNOWN_BOOT
-};
-
 enum MD_FORCE_ASSERT_TYPE {
 	MD_FORCE_ASSERT_RESERVE = 0x000,
 	MD_FORCE_ASSERT_BY_MD_NO_RESPONSE	= 0x100,
@@ -44,6 +24,7 @@ enum MODEM_DUMP_FLAG {
 	DUMP_FLAG_CLDMA = (1 << 1),
 	DUMP_FLAG_REG = (1 << 2), /* dump modem reg. */
 	DUMP_FLAG_SMEM_EXP = (1 << 3),
+	DUMP_FLAG_IMAGE = (1 << 4),
 	DUMP_FLAG_LAYOUT = (1 << 5),
 	DUMP_FLAG_QUEUE_0 = (1 << 6),
 	DUMP_FLAG_QUEUE_0_1 = (1 << 7),
@@ -56,8 +37,6 @@ enum MODEM_DUMP_FLAG {
 	DUMP_FLAG_SMEM_CCB_CTRL = (1<<14),
 	DUMP_FLAG_SMEM_CCB_DATA = (1<<15),
 	DUMP_FLAG_PCCIF_REG = (1 << 16),
-	DUMP_FLAG_TOGGLE_NET_SPD = (1 << 17),
-	DUMP_FLAG_GET_TRAFFIC = (1 << 18),
 };
 
 enum {
@@ -118,7 +97,6 @@ enum {
 	SMF_CLR_RESET = (1 << 0), /* clear when reset modem */
 	SMF_NCLR_FIRST = (1 << 1), /* do not clear even in MD first boot up */
 	SMF_MD3_RELATED = (1 << 2), /* MD3 related share memory */
-	SMF_NO_REMAP = (1 << 3), /* no need mapping region */
 };
 
 struct ccci_mem_region {
@@ -201,8 +179,6 @@ enum{
 	NVRAM_CACHE_SHARE_MEMORY = 36,
 	SECURITY_SHARE_MEMORY = 37,
 	MD_MEM_AP_VIEW_INF = 38,
-	AMMS_DRDI_COPY = 45,
-	MD_DATA_SMEM_INF = 49,
 	MD_RUNTIME_FEATURE_ID_MAX,
 }; /* MD_CCCI_RUNTIME_FEATURE_ID; */
 
@@ -245,7 +221,9 @@ struct md_query_ap_feature {
 	u32 head_pattern;
 	struct ccci_feature_support feature_set[FEATURE_COUNT];
 	u32 tail_pattern;
+#if (MD_GENERATION >= 6293)
 	u8  reserved[CCCI_MD_RUNTIME_RESERVED_SIZE];
+#endif
 };
 
 struct ap_query_md_feature {
@@ -259,7 +237,9 @@ struct ap_query_md_feature {
 	u32 set_md_mpu_start_addr;
 	u32 set_md_mpu_total_size;
 	u32 tail_pattern;
+#if (MD_GENERATION >= 6293)
 	u8  reserved[CCCI_AP_RUNTIME_RESERVED_SIZE];
+#endif
 };
 
 struct ap_query_md_feature_v2_1 {
@@ -389,8 +369,6 @@ enum {
 	MD_FLIGHT_MODE_LEAVE = 2
 };/* FLIGHT_STAGE */
 
-extern unsigned int is_cdma2000_enable(int md_id);
-
 struct ccci_mem_layout *ccci_md_get_mem(int md_id);
 struct ccci_smem_region *ccci_md_get_smem_by_user_id(int md_id,
 	enum SMEM_USER_ID user_id);
@@ -413,7 +391,6 @@ int ccci_md_send_ccb_tx_notify(unsigned char md_id, int core_id);
 int ccci_md_set_boot_data(unsigned char md_id, unsigned int data[], int len);
 int ccci_md_pre_start(unsigned char md_id);
 int ccci_md_post_start(unsigned char md_id);
-unsigned int get_boot_mode_from_dts(void);
 
 struct ccci_modem_cfg {
 	unsigned int load_type;
@@ -444,6 +421,9 @@ struct ccci_per_md {
 	int dtr_state; /* only for usb bypass */
 	unsigned int is_in_ee_dump;
 
+	unsigned long long latest_isr_time;
+	unsigned long long latest_q0_isr_time;
+	unsigned long long latest_q0_rx_time;
 #ifdef CCCI_SKB_TRACE
 	unsigned long long netif_rx_profile[8];
 #endif

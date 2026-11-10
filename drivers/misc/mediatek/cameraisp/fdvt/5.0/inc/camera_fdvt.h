@@ -8,7 +8,7 @@
 
 #include <linux/ioctl.h>
 
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 /* 64 bit */
 #include <linux/fs.h>
 #include <linux/compat.h>
@@ -33,7 +33,7 @@
 
 #define FDVT_REG_RANGE           (0x1000)
 
-#define FDVT_BASE_HW   0x1502B000
+#define FDVT_BASE_HW   0x1B001000
 
 
 /*This macro is for setting irq status represnted
@@ -41,7 +41,6 @@
  */
 #define FDVT_INT_ST                 (1<<0)
 
-extern void mt_irq_dump_status(int irq);
 
 struct FDVT_REG_STRUCT {
 	unsigned int module;
@@ -198,7 +197,7 @@ struct FDVT_Request {
 };
 #define FDVT_Request struct FDVT_Request
 
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 struct compat_FDVT_REG_IO_STRUCT {
 	compat_uptr_t pData;
 	unsigned int Count;	/* count */
@@ -236,7 +235,7 @@ struct compat_FDVT_Request {
 #define FDVT_DEQUE_REQ  _IOWR(FDVT_MAGIC, FDVT_CMD_DEQUE_REQ,  FDVT_Request)
 
 
-#if IS_ENABLED(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 #define COMPAT_FDVT_WRITE_REGISTER \
 	_IOWR(FDVT_MAGIC, FDVT_CMD_WRITE_REG,     compat_FDVT_REG_IO_STRUCT)
 #define COMPAT_FDVT_READ_REGISTER \

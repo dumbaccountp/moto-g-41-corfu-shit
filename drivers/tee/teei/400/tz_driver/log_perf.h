@@ -2,7 +2,6 @@
 /*
  * Copyright (c) 2015-2019, MICROTRUST Incorporated
  *
- *
  */
 
 

@@ -182,12 +182,10 @@ static void channel_detector_exit(struct dfs_pattern_detector *dpd,
 	if (cd == NULL)
 		return;
 	list_del(&cd->head);
-	if (cd->detectors) {
-		for (i = 0; i < dpd->num_radar_types; i++) {
-			struct pri_detector *de = cd->detectors[i];
-			if (de != NULL)
-				de->exit(de);
-		}
+	for (i = 0; i < dpd->num_radar_types; i++) {
+		struct pri_detector *de = cd->detectors[i];
+		if (de != NULL)
+			de->exit(de);
 	}
 	kfree(cd->detectors);
 	kfree(cd);
@@ -255,15 +253,17 @@ channel_detector_get(struct dfs_pattern_detector *dpd, u16 freq)
 static void dpd_reset(struct dfs_pattern_detector *dpd)
 {
 	struct channel_detector *cd;
-	list_for_each_entry(cd, &dpd->channel_detectors, head)
-		channel_detector_reset(dpd, cd);
+	if (!list_empty(&dpd->channel_detectors))
+		list_for_each_entry(cd, &dpd->channel_detectors, head)
+			channel_detector_reset(dpd, cd);
 
 }
 static void dpd_exit(struct dfs_pattern_detector *dpd)
 {
 	struct channel_detector *cd, *cd0;
-	list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
-		channel_detector_exit(dpd, cd);
+	if (!list_empty(&dpd->channel_detectors))
+		list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
+			channel_detector_exit(dpd, cd);
 	kfree(dpd);
 }
 
@@ -331,8 +331,9 @@ static bool dpd_set_domain(struct dfs_pattern_detector *dpd,
 		return false;
 
 	/* delete all channel detectors for previous DFS domain */
-	list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
-		channel_detector_exit(dpd, cd);
+	if (!list_empty(&dpd->channel_detectors))
+		list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
+			channel_detector_exit(dpd, cd);
 	dpd->radar_spec = rt->radar_types;
 	dpd->num_radar_types = rt->num_radar_types;
 

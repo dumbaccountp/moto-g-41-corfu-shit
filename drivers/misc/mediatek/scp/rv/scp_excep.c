@@ -29,6 +29,7 @@
 
 #define SCP_SECURE_DUMP_MEASURE 0
 #define POLLING_RETRY 200
+#define SCP_SECURE_DUMP_DEBUG 1
 #if SCP_RESERVED_MEM && IS_ENABLED(CONFIG_OF_RESERVED_MEM) && SCP_SECURE_DUMP_MEASURE
 	struct cal {
 		uint64_t start, end;
@@ -226,7 +227,7 @@ void scp_show_bus_tracker_status(void)
 	pr_notice("BUS DBG CON: %x\n", bus_tracker->dbg_con);
 	for (i = 3; i >= 0; --i) {
 		offset = i << 3;
-		if (!bus_tracker->dbg_r[offset + 7] && !bus_tracker->dbg_w[offset + 7])
+		if (!bus_tracker->dbg_r[offset + 7])
 			continue;
 		pr_notice("R[%u-%u] %08x %08x %08x %08x %08x %08x %08x %08x\n",
 				offset, offset + 7,
@@ -440,23 +441,23 @@ static unsigned int scp_crash_dump(enum scp_core_id id)
 		memset(scpdump_cal, 0x0, sizeof(scpdump_cal));
 		idx = 0;
 		scpdump_cal[0].type = 1;
-		scpdump_cal[0].start = ktime_get_boottime_ns();
+		scpdump_cal[0].start = ktime_get_boot_ns();
 #endif
 
-		dump_start = ktime_get_boottime_ns();
+		dump_start = ktime_get_boot_ns();
 		{
 			int polling = 1;
 			int retry = POLLING_RETRY;
 #if SCP_SECURE_DUMP_MEASURE
 			idx++;
 			scpdump_cal[idx].type = 2;
-			scpdump_cal[idx].start = ktime_get_boottime_ns();
+			scpdump_cal[idx].start = ktime_get_boot_ns();
 #endif
 
 			scp_do_dump();
 
 #if SCP_SECURE_DUMP_MEASURE
-			scpdump_cal[idx].end = ktime_get_boottime_ns();
+			scpdump_cal[idx].end = ktime_get_boot_ns();
 #endif
 
 			while (polling != 0 && retry > 0) {
@@ -465,13 +466,13 @@ static unsigned int scp_crash_dump(enum scp_core_id id)
 					break;
 				idx++;
 				scpdump_cal[idx].type = 3;
-				scpdump_cal[idx].start = ktime_get_boottime_ns();
+				scpdump_cal[idx].start = ktime_get_boot_ns();
 #endif
 
 				polling = scp_do_polling();
 
 #if SCP_SECURE_DUMP_MEASURE
-				scpdump_cal[idx].end = ktime_get_boottime_ns();
+				scpdump_cal[idx].end = ktime_get_boot_ns();
 #endif
 
 				if (!polling)
@@ -479,14 +480,19 @@ static unsigned int scp_crash_dump(enum scp_core_id id)
 				mdelay(polling);
 				retry--;
 			}
-			if (retry == 0)
+			if (retry == 0)	{
 				pr_notice("[SCP] Dump timed out:%d\n", POLLING_RETRY);
+#if SCP_SECURE_DUMP_DEBUG
+				pr_notice("[SCP] Dump timeout dump once again.\n");
+				print_clk_registers();
+#endif
+			}
 		}
-		dump_end = ktime_get_boottime_ns();
+		dump_end = ktime_get_boot_ns();
 		pr_notice("[SCP] Dump: %lld ns\n", (dump_end - dump_start));
 
 #if SCP_SECURE_DUMP_MEASURE
-		scpdump_cal[0].end = ktime_get_boottime_ns();
+		scpdump_cal[0].end = ktime_get_boot_ns();
 		for (idx = 0; idx < POLLING_RETRY; idx++) {
 			if (scpdump_cal[idx].type == 0)
 				break;
@@ -514,13 +520,11 @@ static unsigned int scp_crash_dump(enum scp_core_id id)
 			if (scpreg.core_nums > 1) {
 				for (i = 0; i < 32; i++) {
 					pr_notice("[SCP] C1:H0:%02d:0x%08x::0x%08x\n",
-						i, *(out + 128 + i * 2),
-						*(out + 128 + i * 2 + 1));
+						i, *(out + 128 + i * 2), *(out + 128 + i * 2 + 1));
 				}
 				for (i = 0; i < 32; i++) {
 					pr_notice("[SCP] C1:H1:%02d:0x%08x::0x%08x\n",
-						i, *(out + 192 + i * 2),
-						*(out + 192 + i * 2 + 1));
+						i, *(out + 192 + i * 2), *(out + 192 + i * 2 + 1));
 				}
 			}
 		} else {
@@ -733,7 +737,7 @@ void scp_aed(enum SCP_RESET_TYPE type, enum scp_core_id id)
 
 	scp_prepare_aed_dump(scp_aed_title, id);
 
-#if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
+#if IS_ENABLED(CONFIG_MTK_AEE_AED)
 	/* scp aed api, only detail information available*/
 	aed_common_exception_api("scp", NULL, 0, NULL, 0,
 			scp_dump.detail_buff, DB_OPT_DEFAULT);
@@ -742,6 +746,7 @@ void scp_aed(enum SCP_RESET_TYPE type, enum scp_core_id id)
 	pr_debug("[SCP] scp exception dump is done\n");
 
 }
+
 
 
 static ssize_t scp_A_dump_show(struct file *filep,
@@ -789,6 +794,7 @@ struct bin_attribute bin_attr_scp_dump = {
 	.size = 0,
 	.read = scp_A_dump_show,
 };
+
 
 
 /*

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/etherdevice.h>
 #include "ipvlan.h"
 #include <linux/if_vlan.h>
@@ -194,7 +193,7 @@ static struct notifier_block ipvtap_notifier_block __read_mostly = {
 	.notifier_call	= ipvtap_device_event,
 };
 
-static int __init ipvtap_init(void)
+static int ipvtap_init(void)
 {
 	int err;
 
@@ -228,7 +227,7 @@ out1:
 }
 module_init(ipvtap_init);
 
-static void __exit ipvtap_exit(void)
+static void ipvtap_exit(void)
 {
 	rtnl_link_unregister(&ipvtap_link_ops);
 	unregister_netdevice_notifier(&ipvtap_notifier_block);

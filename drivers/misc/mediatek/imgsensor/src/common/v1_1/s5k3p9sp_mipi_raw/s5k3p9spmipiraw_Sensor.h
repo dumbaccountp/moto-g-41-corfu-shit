@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
+
 /*****************************************************************************
  *
  * Filename:
@@ -74,7 +75,7 @@ struct imgsensor_struct {
 
 	kal_uint16 current_fps;			//current max fps
 	kal_bool   autoflicker_en;//record autoflicker enable or disable
-	kal_uint32 test_pattern;//record test pattern mode or not
+	kal_bool test_pattern;//record test pattern mode or not
 	kal_bool enable_secure; /* run as secure driver or not */
 	enum MSDK_SCENARIO_ID_ENUM current_scenario_id;//current scenario id
 	kal_uint8  ihdr_mode;//ihdr mode 0: disable, 1: ihdr, 2:mVHDR, 9:zigzag
@@ -85,6 +86,10 @@ struct imgsensor_struct {
 /* SENSOR PRIVATE STRUCT FOR CONSTANT*/
 struct imgsensor_info_struct {
 	kal_uint16 sensor_id;//record sensor id defined in Kd_imgsensor.h
+	#ifdef VENDOR_EDIT
+	/*Caohua.Lin@Camera.Driver add for 18011/18311	board 20180723*/
+	kal_uint16 module_id;
+	#endif
 	kal_uint32 checksum_value;
 	//checksum value for Camera Auto Test
 	struct imgsensor_mode_struct pre;
@@ -145,6 +150,12 @@ struct imgsensor_info_struct {
 	kal_uint32 gain_type;
 };
 
+/* SENSOR READ/WRITE ID */
+//#define IMGSENSOR_WRITE_ID_1 (0x6c)
+//#define IMGSENSOR_READ_ID_1  (0x6d)
+//#define IMGSENSOR_WRITE_ID_2 (0x20)
+//#define IMGSENSOR_READ_ID_2  (0x21)
+
 extern int iBurstWriteReg_multi(
 	u8 *pData, u32 bytes, u16 i2cId, u16 transfer_length, u16 timing);
 extern int iReadRegI2C(u8 *a_pSendData, u16 a_sizeSendData,
@@ -157,4 +168,9 @@ extern int iReadReg(
 	u16 a_u2Addr, u8 *a_puBuff, u16 i2cId);
 extern int iWriteReg(
 	u16 a_u2Addr, u32 a_u4Data, u32 a_u4Bytes, u16 i2cId);
+#ifndef VENDOR_EDIT
+/*Caohua.Lin@Camera.Driver 20180707 add for s5k3p9sp crosstalk*/
+extern unsigned int brcb032gwz_read_4cell_from_eeprom_s5k3p9sp(char *data);
+#endif
+
 #endif

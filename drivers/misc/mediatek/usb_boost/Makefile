@@ -1,14 +1,11 @@
-# SPDX-License-Identifier: GPL-2.0
-
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
-ccflags-y += -I$(srctree)/drivers/usb/host
-ccflags-y += -I$(srctree)/drivers/usb/mtu3
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/usb20
-
-obj-$(CONFIG_MTK_USB_BOOST) += usb_boost.o
-
-usb_boost-y := usb_boost_common.o usb_boost_plat.o
-
-obj-$(CONFIG_MTK_USB_BOOST) += musb_boost.o
-
-musb_boost-y := musb_boost_common.o usb_boost_plat.o
+obj-y := usb_boost.o
+obj-$(CONFIG_MACH_MT6739) += v1/
+obj-$(CONFIG_MACH_MT6761) += v1/
+obj-$(CONFIG_MACH_MT6779) += v1/
+obj-$(CONFIG_MACH_MT6768) += v1/
+obj-$(CONFIG_MACH_MT6765) += v1/
+obj-$(CONFIG_MACH_MT6763) += v1/
+obj-$(CONFIG_MACH_MT6781) += v1/
+obj-$(CONFIG_MACH_MT6833) += v1/
+obj-$(CONFIG_MACH_MT6877) += v1/
+obj-$(CONFIG_MACH_MT6893) += v1/

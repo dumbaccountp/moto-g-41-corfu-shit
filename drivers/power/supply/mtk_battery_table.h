@@ -13,12 +13,14 @@
  * ============================================================
  */
 
+/* Default use moto serial number feature */
+#define MTK_GET_BATTERY_ID_BY_SERIALNUMBER
+
 /* customize */
 #define DIFFERENCE_FULLOCV_ITH	200	/* mA */
 #define MTK_CHR_EXIST			1
 #define KEEP_100_PERCENT		1
 #define R_FG_VALUE				5	/* mOhm */
-#define UNIT_MULTIPLE			1
 #define EMBEDDED_SEL			0
 #define PMIC_SHUTDOWN_CURRENT	20	/* 0.01 mA */
 #define FG_METER_RESISTANCE		100
@@ -74,9 +76,9 @@
 #define DIFFERENCE_FULL_CV		1000 /*0.01%*/
 #define PSEUDO1_EN				1
 #define PSEUDO100_EN			1
-#define PSEUDO100_EN_DIS		0
+#define PSEUDO100_EN_DIS		1
 
-#define DIFF_SOC_SETTING				50	/* 0.01% */
+#define DIFF_SOC_SETTING				100	/* 0.01% */
 #define DIFF_BAT_TEMP_SETTING			1
 #define DIFF_BAT_TEMP_SETTING_C			10
 #define DISCHARGE_TRACKING_TIME			10
@@ -94,11 +96,8 @@
 #define VBAT2_DET_VOLTAGE3	35000
 
 /* PCB setting */
+#define CALIBRATE_CAR_TUNE_VALUE_BY_META_TOOL
 #define CALI_CAR_TUNE_AVG_NUM	60
-
-/* Dynamic CV */
-#define DYNAMIC_CV_FACTOR      100     /* mV */
-#define CHARGER_IEOC           150     /* mA */
 
 /* Aging Compensation 1*/
 #define AGING_FACTOR_MIN			90
@@ -132,7 +131,7 @@
 #define HWOCV_SWOCV_DIFF			300
 #define HWOCV_SWOCV_DIFF_LT			1500
 #define HWOCV_SWOCV_DIFF_LT_TEMP	5
-#define HWOCV_OLDOCV_DIFF			400
+#define HWOCV_OLDOCV_DIFF			300
 #define HWOCV_OLDOCV_DIFF_CHR		800
 #define SWOCV_OLDOCV_DIFF			300
 #define SWOCV_OLDOCV_DIFF_CHR		800
@@ -172,9 +171,8 @@
 #define DIFF_IAVG_TH				3000
 
 /* ZCV INTR */
-#define ZCV_SUSPEND_TIME			7
+#define ZCV_SUSPEND_TIME			3
 #define SLEEP_CURRENT_AVG			200 /*0.1mA*/
-#define ZCV_COM_VOL_LIMIT 50	/* 50mv */
 #define ZCV_CAR_GAP_PERCENTAGE		5
 
 /* Additional battery table */
@@ -187,7 +185,7 @@
 #define BAT_PAR_I					4000
 #define PSEUDO1_SEL					2
 
-#define FG_TRACKING_CURRENT				40000
+#define FG_TRACKING_CURRENT				30000
 #define FG_TRACKING_CURRENT_IBOOT_EN	0
 #define UI_FAST_TRACKING_EN				0
 #define UI_FAST_TRACKING_GAP			300
@@ -243,21 +241,6 @@
 
 #define UI_FULL_LIMIT_TIME	99999
 
-
-#define UI_FULL_LIMIT_FC_SOC0	9900
-#define UI_FULL_LIMIT_FC_ITH0	3000
-
-#define UI_FULL_LIMIT_FC_SOC1	9900
-#define UI_FULL_LIMIT_FC_ITH1	3100
-
-#define UI_FULL_LIMIT_FC_SOC2	9900
-#define UI_FULL_LIMIT_FC_ITH2	3200
-
-#define UI_FULL_LIMIT_FC_SOC3	9900
-#define UI_FULL_LIMIT_FC_ITH3	3300
-
-#define UI_FULL_LIMIT_FC_SOC4	9900
-#define UI_FULL_LIMIT_FC_ITH4	3400
 
 /* using voltage to limit uisoc in 1% case */
 /* UI_LOW_LIMIT_VTH0=36000 means 3.6v */
@@ -446,53 +429,54 @@ int g_temperature[MAX_TABLE] = {
 	-45/*TEMPERATURE_T9*/
 };
 
-
 #define BAT_NTC_10 1
 #define BAT_NTC_47 0
 
 #if (BAT_NTC_10 == 1)
+#ifdef CONFIG_MTK_BQ2560x_SUPPORT
+#define RBAT_PULL_UP_R             16900
+#else
 #define RBAT_PULL_UP_R             24000
+#endif
 #endif
 
 #if (BAT_NTC_47 == 1)
 #define RBAT_PULL_UP_R             61900
 #endif
 
-#ifdef CONFIG_CANCUNF_BATTERY_NTC
-#define RBAT_PULL_UP_VOLT          1840
-#else
 #define RBAT_PULL_UP_VOLT          2800
-#endif
 
 #define BIF_NTC_R 16000
 
 #if (BAT_NTC_10 == 1)
-struct fg_temp fg_temp_table[23] = {
-#ifdef CONFIG_CANCUNF_BATTERY_NTC
+#ifdef CONFIG_MTK_BQ2560x_SUPPORT
+struct fuelgauge_temperature Fg_Temperature_Table[23] = {
 		{-40, 202700},
-		{-35, 153000},
-		{-30, 116670},
-		{-25, 89849},
-		{-20, 69814},
-		{-15, 54733},
-		{-10, 43245},
-		{-5, 34388},
-		{0,  27545},
-		{5,  22229},
-		{10, 18050},
-		{15, 14741},
-		{20, 12108},
+		{-35, 153500},
+		{-30, 117200},
+		{-25, 89270},
+		{-20, 69590},
+		{-15, 54620},
+		{-10, 43210},
+		{-5, 34430},
+		{0, 27570},
+		{5, 22240},
+		{10, 18060},
+		{15, 14740},
+		{20, 12110},
 		{25, 10000},
-		{30, 8307},
-		{35, 6942},
-		{40, 5828},
-		{45, 4912},
-		{50, 4159},
-		{55, 3531},
-		{60, 3010},
-		{65, 2582},
-		{70, 2223}
+		{30, 8313},
+		{35, 6943},
+		{40, 5820},
+		{45, 4910},
+		{50, 4160},
+		{55, 3540},
+		{60, 3019},
+		{65, 2580},
+		{70, 2221}
+};
 #else
+struct FUELGAUGE_TEMPERATURE Fg_Temperature_Table[23] = {
 		{-40, 195652},
 		{-35, 148171},
 		{-30, 113347},
@@ -513,15 +497,15 @@ struct fg_temp fg_temp_table[23] = {
 		{45, 4917},
 		{50, 4161},
 		{55, 3535},
-		{60, 3014},
-		{65, 2588},
-		{70, 2227}
-#endif
+ 		{60, 3014},
+ 		{65, 2588},
+   		{70, 2227}
 };
+#endif
 #endif
 
 #if (BAT_NTC_47 == 1)
-struct fg_temp fg_temp_table[21] = {
+struct fuelgauge_temperature Fg_Temperature_Table[21] = {
 		{-40, 1747920},
 		{-35, 1245428},
 		{-30, 898485},
@@ -544,38 +528,6 @@ struct fg_temp fg_temp_table[21] = {
 		{55, 13539},
 		{60, 11210}
 };
-#endif
-
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-struct typec_vol_temp {
-	int vol;
-	int temp;
-};
-
-struct typec_vol_temp typec_table[17] = {
-		{1743121, 700},
-		{1706500, 800},
-		{1652861, 900},
-		{1578549, 1000},
-		{1481344, 1100},
-		{1361798, 1200},
-		{1224590, 1300},
-		{1076289, 1400},
-		{925778, 1500},
-		{782609, 1600},
-		{651064, 1700},
-		{537410, 1800},
-		{439535, 1900},
-		{358522, 2000},
-		{293562, 2100},
-		{240000, 2200},
-		{215350, 2250}
-
-};
-#define typec_tab_len 17
-#define otp_threshold 750
-#define recover_threshold 650
-#define otpv_threshold 4000
 #endif
 
 /* ============================================================

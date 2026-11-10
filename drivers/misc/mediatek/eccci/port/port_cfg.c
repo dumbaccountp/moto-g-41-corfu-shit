@@ -7,8 +7,23 @@
 #include "ccci_common_config.h"
 #include "ccci_hif.h"
 #include "port_cfg.h"
+#include "ccci_port.h"
+#include <mt-plat/mtk_ccci_common.h>
 
-extern int port_md_gen;
+#if (MD_GENERATION <= 6292)
+#define EXP_CTRL_Q		3
+#define DATA_TX_Q		3
+#define DATA_RX_Q		3
+#define DATA_TX_ACK_Q		4
+#define DATA1_TX_Q		3
+#define DATA1_RX_Q		4
+#define DATA2_Q			5
+#define DATA2_RX_Q		5
+#define DATA_MDT_Q		7
+#define DATA_C2K_PPP_Q	1
+#define DATA_FSD_Q		1
+#define DATA_AT_CMD_Q	1
+#else
 #define EXP_CTRL_Q		6
 #define DATA_TX_Q		0
 #define DATA_RX_Q		0
@@ -21,10 +36,13 @@ extern int port_md_gen;
 #define DATA_C2K_PPP_Q	3
 #define DATA_FSD_Q		4
 #define DATA_AT_CMD_Q	5
+#endif
 
-
+#if (MD_GENERATION >= 6295)
 #define DATA_TCHE	8
-
+#else
+#define DATA_TCHE	2
+#endif
 
 #define SMEM_Q			AP_MD_CCB_WAKEUP
 
@@ -193,25 +211,26 @@ static struct port_t md1_ccci_ports[] = {
 	{CCCI_UDC_TX, CCCI_UDC_RX, 1, 1, 0xFF, 0xFF,
 		MD1_NORMAL_HIF, 0,
 		&ccci_udc_port_ops, 30, "ccci_udc",},
+#if (MD_GENERATION >= 6297)
 	{CCCI_WIFI_TX, CCCI_WIFI_RX, 1, 1, 0xFF, 0xFF,
-		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE|PORT_F_GEN95_NOT_SUPPORT,
+		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
 		&char_port_ops, 31, "ccci_wifi_proxy",},
 	{CCCI_VTS_TX, CCCI_VTS_RX, 3, 3, 0xFF, 0xFF,
-		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE|PORT_F_GEN95_NOT_SUPPORT,
+		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE | PORT_F_CH_TRAFFIC,
 		&char_port_ops, 32, "ccci_vts",},
 	{CCCI_MD_DIRC_TX, CCCI_MD_DIRC_RX, 1, 1, 0xFF, 0xFF,
-		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE|PORT_F_GEN95_NOT_SUPPORT,
+		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
 		&char_port_ops, 33, "ccci_0_200",},
 	{CCCI_TIME_TX, CCCI_TIME_RX, 1, 1, 0xFF, 0xFF,
-		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE|PORT_F_GEN95_NOT_SUPPORT,
+		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
 		&char_port_ops, 34, "ccci_0_202",},
 	{CCCI_GARB_TX, CCCI_GARB_RX, 1, 1, 0xFF, 0xFF,
-		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE|PORT_F_GEN95_NOT_SUPPORT,
+		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
 		&char_port_ops, 35, "ccci_0_204",},
+#endif
 	{CCCI_IKERAW_TX, CCCI_IKERAW_RX, 1, 1, 0xFF, 0xFF,
 		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
 		&char_port_ops, 36, "ccci_ikeraw",},
-/* for EPDG use */
 	{CCCI_EPDG1_TX, CCCI_EPDG1_RX, 1, 1, 0xFF, 0xFF,
 		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
 		&char_port_ops, 37, "ccci_epdg1",},
@@ -224,50 +243,13 @@ static struct port_t md1_ccci_ports[] = {
 	{CCCI_EPDG4_TX, CCCI_EPDG4_RX, 1, 1, 0xFF, 0xFF,
 		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
 		&char_port_ops, 40, "ccci_epdg4",},
-	/* for muxd/rild mipc, ttyCMIPC0 ~ 9 */
-	{CCCI_MIPC0_CHANNEL_TX, CCCI_MIPC0_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 41, "ttyCMIPC0",},
-	{CCCI_MIPC1_CHANNEL_TX, CCCI_MIPC1_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 42, "ttyCMIPC1",},
-	{CCCI_MIPC2_CHANNEL_TX, CCCI_MIPC2_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 43, "ttyCMIPC2",},
-	{CCCI_MIPC3_CHANNEL_TX, CCCI_MIPC3_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 44, "ttyCMIPC3",},
-	{CCCI_MIPC4_CHANNEL_TX, CCCI_MIPC4_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 45, "ttyCMIPC4",},
-	{CCCI_MIPC5_CHANNEL_TX, CCCI_MIPC5_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 46, "ttyCMIPC5",},
-	{CCCI_MIPC6_CHANNEL_TX, CCCI_MIPC6_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 47, "ttyCMIPC6",},
-	{CCCI_MIPC7_CHANNEL_TX, CCCI_MIPC7_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 48, "ttyCMIPC7",},
-	{CCCI_MIPC8_CHANNEL_TX, CCCI_MIPC8_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 49, "ttyCMIPC8",},
-	{CCCI_MIPC9_CHANNEL_TX, CCCI_MIPC9_CHANNEL_RX,
-		DATA_AT_CMD_Q, DATA_AT_CMD_Q, 0xFF, 0xFF, MD1_NORMAL_HIF,
-		(PORT_F_WITH_CHAR_NODE|PORT_F_CH_TRAFFIC|PORT_F_DUMP_RAW_DATA),
-		&char_port_ops, 50, "ttyCMIPC9",},
         {CCCI_CIQ_TX, CCCI_CIQ_RX, 2, 2, 0xFF, 0xFF,
                 MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
-                &char_port_ops, 51, "ccci_ciq",},
+                &char_port_ops, 41, "ccci_ciq",},
+	/* misc kernel port */
+	{CCCI_MIPI_CHANNEL_TX, CCCI_MIPI_CHANNEL_RX, 1, 1, 0xFF, 0xFF,
+		MD1_NORMAL_HIF, 0,
+		&ccci_misc_port_ops, 0xFF, "ccci_misc",},
 /* IPC char port minor= minor idx + CCCI_IPC_MINOR_BASE(100) */
 	{CCCI_IPC_TX, CCCI_IPC_RX, 1, 1, 0xFF, 0xFF,
 		MD1_NORMAL_HIF, PORT_F_WITH_CHAR_NODE,
@@ -310,10 +292,11 @@ static struct port_t md1_ccci_ports[] = {
 	{CCCI_CCB_CTRL, CCCI_CCB_CTRL, 0xFF, 0xFF, 0xFF, 0xFF,
 		CCIF_HIF_ID, PORT_F_WITH_CHAR_NODE, &smem_port_ops,
 		SMEM_USER_RAW_CCB_CTRL, "ccci_ccb_ctrl",},
+#if (MD_GENERATION >= 6292)
 	{CCCI_SMEM_CH, CCCI_SMEM_CH, SMEM_Q, SMEM_Q, SMEM_Q, SMEM_Q,
 		CCIF_HIF_ID, PORT_F_WITH_CHAR_NODE,
 		&smem_port_ops, SMEM_USER_CCB_DHL, "ccci_ccb_dhl",},
-
+#endif
 	{CCCI_SMEM_CH, CCCI_SMEM_CH, 0xFF, 0xFF, 0xFF, 0xFF,
 		CCIF_HIF_ID, PORT_F_WITH_CHAR_NODE, &smem_port_ops,
 		SMEM_USER_RAW_DHL, "ccci_raw_dhl",},
@@ -339,7 +322,6 @@ static struct port_t md1_ccci_ports[] = {
 	{CCCI_SMEM_CH, CCCI_SMEM_CH, SMEM_Q, SMEM_Q, SMEM_Q, SMEM_Q,
 		CCIF_HIF_ID, PORT_F_WITH_CHAR_NODE,
 		&smem_port_ops, SMEM_USER_CCB_META, "ccci_ccb_meta",},
-
 };
 
 #ifdef CONFIG_MTK_ECCCI_C2K
@@ -497,35 +479,25 @@ int port_get_cfg(int md_id, struct port_t **ports)
 int mtk_ccci_request_port(char *name)
 {
 	int i;
+
 	for (i = 0; i < ARRAY_SIZE(md1_ccci_ports); i++) {
 		if (!strcmp(md1_ccci_ports[i].name, name))
-			break;
-	}
-	if (i == ARRAY_SIZE(md1_ccci_ports)) {
-		CCCI_ERROR_LOG(-1, PORT, "can not find port %s", name);
-		return -1;
-	}
+			return i;
 
-	if ((port_md_gen < 6297) && (md1_ccci_ports[i].flags & PORT_F_GEN95_NOT_SUPPORT)) {
-		CCCI_ERROR_LOG(-1, PORT, "%s:not support %s  md_gen = %d\n",
-				__func__, md1_ccci_ports[i].name, port_md_gen);
-		return -1;
 	}
-
-	return i;
-
+	CCCI_ERROR_LOG(-1, PORT, "can not find port %s", name);
+	return -1;
 }
 EXPORT_SYMBOL(mtk_ccci_request_port);
 
 int find_port_by_channel(int index, struct port_t **port)
 {
-	if (index < 0 || index >= ARRAY_SIZE(md1_ccci_ports)) {
-		CCCI_ERROR_LOG(-1, PORT, "%s: invalid index = %d\n",
-				__func__, index);
-		return -EINVAL;
+	if (index < ARRAY_SIZE(md1_ccci_ports)) {
+		*port = &md1_ccci_ports[index];
+		return 0;
 	}
-	*port = &md1_ccci_ports[index];
-	return 0;
+	CCCI_ERROR_LOG(-1, PORT, "cannot find port by index %d\n", index);
+	return -1;
 }
 
 int mtk_ccci_open_port(int index)

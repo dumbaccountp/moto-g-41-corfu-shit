@@ -5,18 +5,21 @@
 #include <linux/android_kabi.h>
 
 #define MAX_NR_RATES	1024
-#define MAX_PACKS	6		/* per URB */
+#define MAX_PACKS	10		/* per URB */
 #define MAX_PACKS_HS	(MAX_PACKS * 8)	/* in high speed mode */
 #define MAX_URBS	12
 #define SYNC_URBS	4	/* always four urbs for sync */
-#define MAX_QUEUE	18	/* try not to exceed this queue length, in ms */
+#define MAX_QUEUE	32	/* try not to exceed this queue length, in ms */
+#define MAX_QUEUE_HS	30	/* try not to exceed this queue length, in ms */
+#define LOW_LATENCY_MAX_QUEUE   6 /* for low latency case queue length */
+#define US_PER_FRAME	125	/* high speed has 125 us per (micro) frame */
+#define PM_QOS_COUNT	8	/* pm qos requested count */
 
 struct audioformat {
 	struct list_head list;
 	u64 formats;			/* ALSA format bits */
 	unsigned int channels;		/* # channels */
 	unsigned int fmt_type;		/* USB audio format type (1-3) */
-	unsigned int fmt_bits;		/* number of significant bits */
 	unsigned int frame_size;	/* samples per frame for non-audio */
 	int iface;			/* interface number */
 	unsigned char altsetting;	/* corresponding alternate setting */
@@ -86,10 +89,6 @@ struct snd_usb_endpoint {
 	dma_addr_t sync_dma;		/* DMA address of syncbuf */
 
 	unsigned int pipe;		/* the data i/o pipe */
-	unsigned int packsize[2];	/* small/large packet sizes in samples */
-	unsigned int sample_rem;	/* remainder from division fs/pps */
-	unsigned int sample_accum;	/* sample accumulator */
-	unsigned int pps;		/* packets per second */
 	unsigned int freqn;		/* nominal sampling rate in fs/fps in Q16.16 format */
 	unsigned int freqm;		/* momentary sampling rate in fs/fps in Q16.16 format */
 	int	   freqshift;		/* how much to shift the feedback value to get Q16.16 */
@@ -110,7 +109,6 @@ struct snd_usb_endpoint {
 	int iface, altsetting;
 	int skip_packets;		/* quirks for devices to ignore the first n packets
 					   in a stream */
-	bool is_implicit_feedback;      /* This endpoint is used as implicit feedback */
 
 	spinlock_t lock;
 	struct list_head list;
@@ -120,8 +118,6 @@ struct snd_usb_endpoint {
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 };
-
-struct media_ctl;
 
 struct snd_usb_substream {
 	struct snd_usb_stream *stream;
@@ -144,7 +140,6 @@ struct snd_usb_substream {
 	unsigned int tx_length_quirk:1;	/* add length specifier to transfers */
 	unsigned int fmt_type;		/* USB audio format type (1-3) */
 	unsigned int pkt_offset_adj;	/* Bytes to drop from beginning of packets (for non-compliant devices) */
-	unsigned int stream_offset_adj;	/* Bytes to drop from beginning of stream (for non-compliant devices) */
 
 	unsigned int running: 1;	/* running status */
 
@@ -177,9 +172,7 @@ struct snd_usb_substream {
 	} dsd_dop;
 
 	bool trigger_tstamp_pending_update; /* trigger timestamp being updated from initial estimate */
-	struct media_ctl *media_ctl;
-
-	ANDROID_KABI_RESERVE(1);
+	struct pm_qos_request pm_qos; /* for qos requests */
 };
 
 struct snd_usb_stream {
@@ -194,22 +187,5 @@ struct snd_usb_stream {
 struct snd_usb_substream *find_snd_usb_substream(unsigned int card_num,
 	unsigned int pcm_idx, unsigned int direction, struct snd_usb_audio
 	**uchip, void (*disconnect_cb)(struct snd_usb_audio *chip));
-
-int snd_vendor_set_ops(struct snd_usb_audio_vendor_ops *vendor_ops);
-struct snd_usb_audio_vendor_ops *snd_vendor_get_ops(void);
-int snd_vendor_set_interface(struct usb_device *udev,
-			     struct usb_host_interface *alts,
-			     int iface, int alt);
-int snd_vendor_set_rate(struct usb_interface *intf, int iface, int rate,
-			int alt);
-int snd_vendor_set_pcm_buf(struct usb_device *udev, int iface);
-int snd_vendor_set_pcm_intf(struct usb_interface *intf, int iface, int alt,
-			    int direction);
-int snd_vendor_set_pcm_connection(struct usb_device *udev,
-				  enum snd_vendor_pcm_open_close onoff,
-				  int direction);
-int snd_vendor_set_pcm_binterval(struct audioformat *fp,
-				 struct audioformat *found,
-				 int *cur_attr, int *attr);
 
 #endif /* __USBAUDIO_CARD_H */

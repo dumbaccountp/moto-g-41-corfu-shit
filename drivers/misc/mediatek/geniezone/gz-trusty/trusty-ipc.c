@@ -443,7 +443,7 @@ static int vds_select_cpu(struct tipc_virtio_dev *vds, int32_t cpu_affinity)
 		if (!cpu_online(cpu))
 			cpu = fls(online_cpus) - 1;
 	}
-	preempt_enable();
+	preempt_enable_no_resched();
 
 	dev_dbg(&vds->vdev->dev,
 		"%s: select cpu %d, o:0x%x, u:0x%x, a:0x%x, d:0x%x\n",
@@ -1435,15 +1435,7 @@ EXPORT_SYMBOL(tipc_k_connect);
 
 int tipc_k_disconnect(struct tipc_k_handle *h)
 {
-	struct tipc_dn_chan *dn = NULL;
-
-	if (!h || !h->dn) {
-		pr_info("[%s] ERROR: try to free a non-existent handle\n",
-			__func__);
-		return -EINVAL;
-	}
-
-	dn = h->dn;
+	struct tipc_dn_chan *dn = h->dn;
 
 	dn_shutdown(dn);
 

@@ -1,11 +1,36 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Universal Flash Storage Host controller Platform bus based glue driver
+ *
+ * This code is based on drivers/scsi/ufs/ufshcd-pltfrm.c
  * Copyright (C) 2011-2013 Samsung India Software Operations
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
  *	Vinayak Holikatti <h.vinayak@samsung.com>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ * See the COPYING file in the top-level directory or visit
+ * <http://www.gnu.org/licenses/gpl-2.0.html>
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * This program is provided "AS IS" and "WITH ALL FAULTS" and
+ * without warranty of any kind. You are solely responsible for
+ * determining the appropriateness of using and distributing
+ * the program and assume all risks associated with your exercise
+ * of rights with respect to the program, including but not limited
+ * to infringement of third party rights, the risks and costs of
+ * program errors, damage to or loss of data, programs or equipment,
+ * and unavailability or interruption of operations. Under no
+ * circumstances will the contributor of this Program be liable for
+ * any damages of any kind arising from your use or distribution of
+ * this program.
  */
 
 #include <linux/platform_device.h>
@@ -89,16 +114,16 @@ static int ufshcd_parse_clock_info(struct ufs_hba *hba)
 			goto out;
 		}
 
-		clki->min_freq = clkfreq[i];
-		clki->max_freq = clkfreq[i+1];
-		clki->name = devm_kstrdup(dev, name, GFP_KERNEL);
-		if (!clki->name) {
-			ret = -ENOMEM;
-			goto out;
+		/* skip vendor clk, vendor clk shall be handled by vops */
+		if (strstr(name, "vendor")) {
+			dev_info(dev, "%s: vendor clk %s is found and skipped\n",
+				 __func__, name);
+			continue;
 		}
 
-		if (!strcmp(name, "ref_clk"))
-			clki->keep_link_active = true;
+		clki->min_freq = clkfreq[i];
+		clki->max_freq = clkfreq[i+1];
+		clki->name = kstrdup(name, GFP_KERNEL);
 		dev_dbg(dev, "%s: min %u max %u name %s\n", "freq-table-hz",
 				clki->min_freq, clki->max_freq, clki->name);
 		list_add_tail(&clki->list, &hba->clk_list_head);
@@ -107,20 +132,9 @@ out:
 	return ret;
 }
 
-static bool phandle_exists(const struct device_node *np,
-			   const char *phandle_name, int index)
-{
-	struct device_node *parse_np = of_parse_phandle(np, phandle_name, index);
-
-	if (parse_np)
-		of_node_put(parse_np);
-
-	return parse_np != NULL;
-}
-
 #define MAX_PROP_SIZE 32
 static int ufshcd_populate_vreg(struct device *dev, const char *name,
-				struct ufs_vreg **out_vreg)
+		struct ufs_vreg **out_vreg)
 {
 	int ret = 0;
 	char prop_name[MAX_PROP_SIZE];
@@ -133,7 +147,7 @@ static int ufshcd_populate_vreg(struct device *dev, const char *name,
 	}
 
 	snprintf(prop_name, MAX_PROP_SIZE, "%s-supply", name);
-	if (!phandle_exists(np, prop_name, 0)) {
+	if (!of_parse_phandle(np, prop_name, 0)) {
 		dev_info(dev, "%s: Unable to find %s regulator, assuming enabled\n",
 				__func__, prop_name);
 		goto out;
@@ -143,15 +157,32 @@ static int ufshcd_populate_vreg(struct device *dev, const char *name,
 	if (!vreg)
 		return -ENOMEM;
 
-	vreg->name = devm_kstrdup(dev, name, GFP_KERNEL);
-	if (!vreg->name)
-		return -ENOMEM;
+	vreg->name = kstrdup(name, GFP_KERNEL);
 
 	snprintf(prop_name, MAX_PROP_SIZE, "%s-max-microamp", name);
 	if (of_property_read_u32(np, prop_name, &vreg->max_uA)) {
 		dev_info(dev, "%s: unable to find %s\n", __func__, prop_name);
 		vreg->max_uA = 0;
 	}
+
+	if (!strcmp(name, "vcc")) {
+		if (of_property_read_bool(np, "vcc-supply-1p8")) {
+			vreg->min_uV = UFS_VREG_VCC_1P8_MIN_UV;
+			vreg->max_uV = UFS_VREG_VCC_1P8_MAX_UV;
+		} else {
+			vreg->min_uV = UFS_VREG_VCC_MIN_UV;
+			vreg->max_uV = UFS_VREG_VCC_MAX_UV;
+		}
+	} else if (!strcmp(name, "vccq")) {
+		vreg->min_uV = UFS_VREG_VCCQ_MIN_UV;
+		vreg->max_uV = UFS_VREG_VCCQ_MAX_UV;
+	} else if (!strcmp(name, "vccq2")) {
+		vreg->min_uV = UFS_VREG_VCCQ2_MIN_UV;
+		vreg->max_uV = UFS_VREG_VCCQ2_MAX_UV;
+	}
+
+	goto out;
+
 out:
 	if (!ret)
 		*out_vreg = vreg;
@@ -367,10 +398,12 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
 {
 	struct ufs_hba *hba;
 	void __iomem *mmio_base;
+	struct resource *mem_res;
 	int irq, err;
 	struct device *dev = &pdev->dev;
 
-	mmio_base = devm_platform_ioremap_resource(pdev, 0);
+	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	mmio_base = devm_ioremap_resource(dev, mem_res);
 	if (IS_ERR(mmio_base)) {
 		err = PTR_ERR(mmio_base);
 		goto out;
@@ -378,7 +411,7 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		err = irq;
+		err = -ENODEV;
 		goto out;
 	}
 
@@ -410,6 +443,8 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
 		dev_err(dev, "Initialization failed\n");
 		goto dealloc_host;
 	}
+
+	platform_set_drvdata(pdev, hba);
 
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2015 MediaTek Inc.
  * Author:
@@ -9,12 +9,7 @@
 #ifndef _XHCI_MTK_H_
 #define _XHCI_MTK_H_
 
-#include <linux/hashtable.h>
-
 #include "xhci.h"
-
-/* support at most 64 ep, use 32 size hash table */
-#define SCH_EP_HASH_BITS	5
 
 /**
  * To simplify scheduler algorithm, set a upper limit for ESIT,
@@ -22,47 +17,31 @@
  * round down to the limit value, that means allocating more
  * bandwidth to it.
  */
-#define XHCI_MTK_MAX_ESIT	(1 << 6)
-#define XHCI_MTK_BW_INDEX(x)	((x) & (XHCI_MTK_MAX_ESIT - 1))
-
-/**
- * @fs_bus_bw: array to keep track of bandwidth already used for FS
- * @ep_list: Endpoints using this TT
- */
-struct mu3h_sch_tt {
-	u32 fs_bus_bw[XHCI_MTK_MAX_ESIT];
-	struct list_head ep_list;
-};
+#define XHCI_MTK_MAX_ESIT	64
 
 /**
  * struct mu3h_sch_bw_info: schedule information for bandwidth domain
  *
  * @bus_bw: array to keep track of bandwidth already used at each uframes
+ * @bw_ep_list: eps in the bandwidth domain
  *
  * treat a HS root port as a bandwidth domain, but treat a SS root port as
  * two bandwidth domains, one for IN eps and another for OUT eps.
  */
 struct mu3h_sch_bw_info {
 	u32 bus_bw[XHCI_MTK_MAX_ESIT];
+	struct list_head bw_ep_list;
 };
 
 /**
  * struct mu3h_sch_ep_info: schedule information for endpoint
  *
  * @esit: unit is 125us, equal to 2 << Interval field in ep-context
- * @num_esit: number of @esit in a period
  * @num_budget_microframes: number of continuous uframes
  *		(@repeat==1) scheduled within the interval
  * @bw_cost_per_microframe: bandwidth cost per microframe
- * @hentry: hash table entry
  * @endpoint: linked into bandwidth domain which it belongs to
- * @tt_endpoint: linked into mu3h_sch_tt's list which it belongs to
- * @bw_info: bandwidth domain which this endpoint belongs
- * @sch_tt: mu3h_sch_tt linked into
- * @ep_type: endpoint type
- * @maxpkt: max packet size of endpoint
  * @ep: address of usb_host_endpoint struct
- * @allocated: the bandwidth is aready allocated from bus_bw
  * @offset: which uframe of the interval that transfer should be
  *		scheduled first time within the interval
  * @repeat: the time gap between two uframes that transfers are
@@ -78,23 +57,13 @@ struct mu3h_sch_bw_info {
  *		times; 1: distribute the (bMaxBurst+1)*(Mult+1) packets
  *		according to @pkts and @repeat. normal mode is used by
  *		default
- * @bw_budget_table: table to record bandwidth budget per microframe
  */
 struct mu3h_sch_ep_info {
 	u32 esit;
-	u32 num_esit;
 	u32 num_budget_microframes;
 	u32 bw_cost_per_microframe;
 	struct list_head endpoint;
-	struct hlist_node hentry;
-	struct list_head tt_endpoint;
-	struct mu3h_sch_bw_info *bw_info;
-	struct mu3h_sch_tt *sch_tt;
-	u32 ep_type;
-	u32 maxpkt;
-	struct usb_host_endpoint *ep;
-	enum usb_device_speed speed;
-	bool allocated;
+	void *ep;
 	/*
 	 * mtk xHCI scheduling information put into reserved DWs
 	 * in ep context
@@ -104,7 +73,6 @@ struct mu3h_sch_ep_info {
 	u32 pkts;
 	u32 cs_count;
 	u32 burst_mode;
-	u32 bw_budget_table[];
 };
 
 #define MU3C_U3_PORT_MAX 4
@@ -140,8 +108,6 @@ struct xhci_hcd_mtk {
 	struct device *dev;
 	struct usb_hcd *hcd;
 	struct mu3h_sch_bw_info *sch_array;
-	struct list_head bw_ep_chk_list;
-	DECLARE_HASHTABLE(sch_ep_hash, SCH_EP_HASH_BITS);
 	struct mu3c_ippc_regs __iomem *ippc_regs;
 	bool has_ippc;
 	int num_u2_ports;
@@ -150,7 +116,6 @@ struct xhci_hcd_mtk {
 	struct regulator *vusb33;
 	struct regulator *vbus;
 	struct clk *sys_clk;	/* sys and mac clock */
-	struct clk *xhci_clk;
 	struct clk *ref_clk;
 	struct clk *mcu_clk;
 	struct clk *dma_clk;
@@ -164,9 +129,6 @@ struct xhci_hcd_mtk {
 	struct regmap *uwk;
 	u32 uwk_reg_base;
 	u32 uwk_vers;
-	bool keep_clk_on;
-	struct proc_dir_entry *root;
-	struct proc_dir_entry *testmode_file;
 };
 
 static inline struct xhci_hcd_mtk *hcd_to_mtk(struct usb_hcd *hcd)
@@ -174,13 +136,26 @@ static inline struct xhci_hcd_mtk *hcd_to_mtk(struct usb_hcd *hcd)
 	return dev_get_drvdata(hcd->self.controller);
 }
 
+#if IS_ENABLED(CONFIG_USB_XHCI_MTK)
 int xhci_mtk_sch_init(struct xhci_hcd_mtk *mtk);
 void xhci_mtk_sch_exit(struct xhci_hcd_mtk *mtk);
-int xhci_mtk_add_ep(struct usb_hcd *hcd, struct usb_device *udev,
-		    struct usb_host_endpoint *ep);
-int xhci_mtk_drop_ep(struct usb_hcd *hcd, struct usb_device *udev,
-		     struct usb_host_endpoint *ep);
-int xhci_mtk_check_bandwidth(struct usb_hcd *hcd, struct usb_device *udev);
-void xhci_mtk_reset_bandwidth(struct usb_hcd *hcd, struct usb_device *udev);
+int xhci_mtk_add_ep_quirk(struct usb_hcd *hcd, struct usb_device *udev,
+		struct usb_host_endpoint *ep);
+void xhci_mtk_drop_ep_quirk(struct usb_hcd *hcd, struct usb_device *udev,
+		struct usb_host_endpoint *ep);
+
+#else
+static inline int xhci_mtk_add_ep_quirk(struct usb_hcd *hcd,
+	struct usb_device *udev, struct usb_host_endpoint *ep)
+{
+	return 0;
+}
+
+static inline void xhci_mtk_drop_ep_quirk(struct usb_hcd *hcd,
+	struct usb_device *udev, struct usb_host_endpoint *ep)
+{
+}
+
+#endif
 
 #endif		/* _XHCI_MTK_H_ */

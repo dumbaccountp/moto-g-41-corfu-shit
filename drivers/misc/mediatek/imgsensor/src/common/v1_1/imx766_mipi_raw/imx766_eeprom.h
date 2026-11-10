@@ -25,3 +25,4 @@ unsigned int read_imx766_LRC(BYTE *data);
 unsigned int read_imx766_DCC(BYTE *data);
 
 #endif
+

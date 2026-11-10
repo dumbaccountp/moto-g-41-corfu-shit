@@ -138,8 +138,7 @@ static inline bool page_range_in_range(struct ashmem_range *range,
 		page_range_subsumes_range(range, start, end);
 }
 
-static inline bool range_before_page(struct ashmem_range *range,
-				     size_t page)
+static inline bool range_before_page(struct ashmem_range *range, size_t page)
 {
 	return range->pgend < page;
 }
@@ -202,7 +201,7 @@ static void range_alloc(struct ashmem_area *asma,
 }
 
 /**
- * range_del() - Deletes and deallocates an ashmem_range structure
+ * range_del() - Deletes and dealloctes an ashmem_range structure
  * @range:	 The associated ashmem_range that has previously been allocated
  */
 static void range_del(struct ashmem_range *range)
@@ -499,9 +498,15 @@ ashmem_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 
 		freed += range_size(range);
 		mutex_unlock(&ashmem_mutex);
-		f->f_op->fallocate(f,
+
+		lockdep_off();
+		/* test if corresponding inode is locked */
+		if (!inode_is_locked(file_inode(f)))
+			f->f_op->fallocate(f,
 				   FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
 				   start, end - start);
+		lockdep_on();
+
 		fput(f);
 		if (atomic_dec_and_test(&ashmem_shrink_inflight))
 			wake_up_all(&ashmem_shrink_wait);
@@ -567,24 +572,24 @@ static int set_name(struct ashmem_area *asma, void __user *name)
 
 	/*
 	 * Holding the ashmem_mutex while doing a copy_from_user might cause
-	 * an data abort which would try to access mmap_lock. If another
+	 * an data abort which would try to access mmap_sem. If another
 	 * thread has invoked ashmem_mmap then it will be holding the
 	 * semaphore and will be waiting for ashmem_mutex, there by leading to
-	 * deadlock. We'll release the mutex and take the name to a local
+	 * deadlock. We'll release the mutex  and take the name to a local
 	 * variable that does not need protection and later copy the local
 	 * variable to the structure member with lock held.
 	 */
 	len = strncpy_from_user(local_name, name, ASHMEM_NAME_LEN);
 	if (len < 0)
 		return len;
-
+	if (len == ASHMEM_NAME_LEN)
+		local_name[ASHMEM_NAME_LEN - 1] = '\0';
 	mutex_lock(&ashmem_mutex);
 	/* cannot change an existing mapping's name */
 	if (asma->file)
 		ret = -EINVAL;
 	else
-		strscpy(asma->name + ASHMEM_NAME_PREFIX_LEN, local_name,
-			ASHMEM_NAME_LEN);
+		strcpy(asma->name + ASHMEM_NAME_PREFIX_LEN, local_name);
 
 	mutex_unlock(&ashmem_mutex);
 	return ret;
@@ -598,7 +603,7 @@ static int get_name(struct ashmem_area *asma, void __user *name)
 	 * Have a local variable to which we'll copy the content
 	 * from asma with the lock held. Later we can copy this to the user
 	 * space safely without holding any locks. So even if we proceed to
-	 * wait for mmap_lock, it won't lead to deadlock.
+	 * wait for mmap_sem, it won't lead to deadlock.
 	 */
 	char local_name[ASHMEM_NAME_LEN];
 
@@ -894,8 +899,6 @@ static void ashmem_show_fdinfo(struct seq_file *m, struct file *file)
 		seq_printf(m, "name:\t%s\n",
 			   asma->name + ASHMEM_NAME_PREFIX_LEN);
 
-	seq_printf(m, "size:\t%zu\n", asma->size);
-
 	mutex_unlock(&ashmem_mutex);
 }
 #endif
@@ -914,15 +917,6 @@ static const struct file_operations ashmem_fops = {
 	.show_fdinfo = ashmem_show_fdinfo,
 #endif
 };
-
-/*
- * is_ashmem_file - Check if struct file* is associated with ashmem
- */
-int is_ashmem_file(struct file *file)
-{
-	return file->f_op == &ashmem_fops;
-}
-EXPORT_SYMBOL_GPL(is_ashmem_file);
 
 static struct miscdevice ashmem_misc = {
 	.minor = MISC_DYNAMIC_MINOR,

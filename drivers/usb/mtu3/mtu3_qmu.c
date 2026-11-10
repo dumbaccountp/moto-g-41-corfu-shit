@@ -273,8 +273,8 @@ static int mtu3_prepare_tx_gpd(struct mtu3_ep *mep, struct mtu3_request *mreq)
 			gpd->dw3_info |= cpu_to_le32(GPD_EXT_FLAG_ZLP);
 	}
 
-	/* prevent reorder, make sure GPD's HWO is set last */
-	mb();
+	/* requires a memory barrier */
+	smp_mb();
 	gpd->dw0_info |= cpu_to_le32(GPD_FLAGS_IOC | GPD_FLAGS_HWO);
 
 	mreq->gpd = gpd;
@@ -308,8 +308,8 @@ static int mtu3_prepare_rx_gpd(struct mtu3_ep *mep, struct mtu3_request *mreq)
 	gpd->next_gpd = cpu_to_le32(lower_32_bits(enq_dma));
 	ext_addr |= GPD_EXT_NGP(mtu, upper_32_bits(enq_dma));
 	gpd->dw3_info = cpu_to_le32(ext_addr);
-	/* prevent reorder, make sure GPD's HWO is set last */
-	mb();
+	/* requires a memory barrier */
+	smp_mb();
 	gpd->dw0_info |= cpu_to_le32(GPD_FLAGS_IOC | GPD_FLAGS_HWO);
 
 	mreq->gpd = gpd;
@@ -325,17 +325,6 @@ void mtu3_insert_gpd(struct mtu3_ep *mep, struct mtu3_request *mreq)
 		mtu3_prepare_tx_gpd(mep, mreq);
 	else
 		mtu3_prepare_rx_gpd(mep, mreq);
-}
-
-void mtu3_clean_gpd(struct mtu3_ep *mep, struct mtu3_request *mreq)
-{
-	struct qmu_gpd *gpd = mreq->gpd;
-
-	if (!gpd)
-		return;
-
-	/* set all fields to zero */
-	memset(gpd, 0, sizeof(*gpd));
 }
 
 int mtu3_qmu_start(struct mtu3_ep *mep)
@@ -442,8 +431,6 @@ static void qmu_tx_zlp_error_handler(struct mtu3 *mtu, u8 epnum)
 
 	cur_gpd_dma = read_txq_cur_addr(mbase, epnum);
 	gpd_current = gpd_dma_to_virt(ring, cur_gpd_dma);
-	if (!gpd_current)
-		return;
 
 	if (GPD_DATA_LEN(mtu, le32_to_cpu(gpd_current->dw3_info)) != 0) {
 		dev_err(mtu->dev, "TX EP%d buffer length error(!=0)\n", epnum);
@@ -462,8 +449,10 @@ static void qmu_tx_zlp_error_handler(struct mtu3 *mtu, u8 epnum)
 		return;
 	}
 	mtu3_setbits(mbase, MU3D_EP_TXCR0(mep->epnum), TX_TXPKTRDY);
-	/* prevent reorder, make sure GPD's HWO is set last */
-	mb();
+
+	/* requires a memory barrier */
+	smp_mb();
+
 	/* by pass the current GDP */
 	gpd_current->dw0_info |= cpu_to_le32(GPD_FLAGS_BPS | GPD_FLAGS_HWO);
 

@@ -12,9 +12,8 @@
 #include <linux/sched/clock.h>
 #include <linux/sched/task.h>
 #include <linux/sched/cputime.h>
-#include <linux/kernel.h>
-#include <linux/tracepoint.h>
 
+#include <trace/events/fpsgo.h>
 #include <mt-plat/fpsgo_common.h>
 
 #include "fpsgo_base.h"
@@ -36,7 +35,6 @@ static int __minitop_n;
 static int __warmup_order;
 static int __cooldn_order;
 static int __thrs_heavy;
-static int __minitop_trace_enable;
 
 static DEFINE_MUTEX(minitop_mlock);
 static DEFINE_MUTEX(minitop_qlock);
@@ -66,15 +64,12 @@ static void minitop_trace(const char *fmt, ...)
 	va_list args;
 	int len;
 
-	if (!__minitop_trace_enable)
-		return;
-
 	va_start(args, fmt);
 	len = vsnprintf(log, sizeof(log), fmt, args);
 	if (unlikely(len == 256))
 		log[255] = '\0';
 	va_end(args);
-	trace_printk(log);
+	trace_minitop_log(log);
 }
 
 static int __util_cmp(const void *a, const void *b)
@@ -314,7 +309,7 @@ static int __get_runtime(pid_t tid, u64 *runtime)
 	get_task_struct(p);
 	rcu_read_unlock();
 
-	*runtime = (u64)fpsgo_task_sched_runtime(p);
+	*runtime = (u64)task_sched_runtime(p);
 	put_task_struct(p);
 
 	return 0;
@@ -530,10 +525,10 @@ static int minitop_has_heavy(void)
 	}
 
 	if (heavy)
-		fpsgo_systrace_c_fbt(curr_tid, 0, 1,
+		fpsgo_systrace_c(FPSGO_DEBUG_MANDATORY, curr_tid, 0, 1,
 				 "minitop_free_ceiling");
 	else if (last_tid) {
-		fpsgo_systrace_c_fbt(last_tid, 0, 0,
+		fpsgo_systrace_c(FPSGO_DEBUG_MANDATORY, last_tid, 0, 0,
 				 "minitop_free_ceiling");
 		last_tid = 0;
 	}
@@ -835,7 +830,7 @@ static ssize_t name##_store(struct kobject *kobj, \
 		struct kobj_attribute *attr, \
 		const char *buf, size_t count) \
 { \
-	int val = -1; \
+	int val; \
 	char acBuffer[FPSGO_SYSFS_MAX_BUFF_SIZE]; \
 	int arg; \
 \
@@ -974,30 +969,10 @@ static ssize_t thrs_heavy_show(struct kobject *kobj,
 	return scnprintf(buf, PAGE_SIZE, "%s", temp);
 }
 
-MINITOP_SYSFS_WRITE(thrs_heavy, 0, 101)
+MINITOP_SYSFS_WRITE(thrs_heavy, 0, 100)
 
 static KOBJ_ATTR_RW(thrs_heavy);
 
-static ssize_t minitop_trace_enable_show(struct kobject *kobj,
-		struct kobj_attribute *attr,
-		char *buf)
-{
-	char temp[FPSGO_SYSFS_MAX_BUFF_SIZE];
-	int pos = 0;
-	int length;
-
-	minitop_lock(__func__);
-	length = scnprintf(temp + pos, FPSGO_SYSFS_MAX_BUFF_SIZE - pos,
-			"%d\n", __minitop_trace_enable);
-	pos += length;
-	minitop_unlock(__func__);
-
-	return scnprintf(buf, PAGE_SIZE, "%s", temp);
-}
-
-MINITOP_SYSFS_WRITE(minitop_trace_enable, 0, 1)
-
-static KOBJ_ATTR_RW(minitop_trace_enable);
 
 static ssize_t enable_show(struct kobject *kobj,
 		struct kobj_attribute *attr,
@@ -1021,7 +996,7 @@ static ssize_t enable_store(struct kobject *kobj,
 		struct kobj_attribute *attr,
 		const char *buf, size_t count)
 {
-	int val = -1;
+	int val;
 	char acBuffer[FPSGO_SYSFS_MAX_BUFF_SIZE];
 	int arg;
 
@@ -1059,8 +1034,6 @@ void __exit minitop_exit(void)
 	fpsgo_sysfs_remove_file(minitop_kobj, &kobj_attr_cooldn_order);
 	fpsgo_sysfs_remove_file(minitop_kobj, &kobj_attr_thrs_heavy);
 	fpsgo_sysfs_remove_file(minitop_kobj, &kobj_attr_enable);
-	fpsgo_sysfs_remove_file(minitop_kobj,
-		&kobj_attr_minitop_trace_enable);
 
 	fpsgo_sysfs_remove_dir(&minitop_kobj);
 }
@@ -1092,8 +1065,6 @@ int __init minitop_init(void)
 		fpsgo_sysfs_create_file(minitop_kobj, &kobj_attr_cooldn_order);
 		fpsgo_sysfs_create_file(minitop_kobj, &kobj_attr_thrs_heavy);
 		fpsgo_sysfs_create_file(minitop_kobj, &kobj_attr_enable);
-		fpsgo_sysfs_create_file(minitop_kobj,
-			&kobj_attr_minitop_trace_enable);
 	}
 
 

@@ -2,8 +2,8 @@
 /*
  *  MediaTek ALSA SoC Audio DAI I2S Control
  *
- *  Copyright (c) 2021 MediaTek Inc.
- *  Author: Yujie Xiao <yujie.xiao@mediatek.com>
+ *  Copyright (c) 2020 MediaTek Inc.
+ *  Author: Eason Yen <eason.yen@mediatek.com>
  */
 
 #include <linux/bitops.h>
@@ -594,7 +594,6 @@ static const struct snd_soc_dapm_widget mtk_dai_i2s_widgets[] = {
 			 SND_SOC_NOPM, 0, 0, &i2s3_out_mux_control),
 	SND_SOC_DAPM_MUX("I2S5_Out_Mux",
 			 SND_SOC_NOPM, 0, 0, &i2s5_out_mux_control),
-
 	SND_SOC_DAPM_INPUT("I2S_DUMMY_IN"),
 	SND_SOC_DAPM_MUX("I2S0_In_Mux",
 			 SND_SOC_NOPM, 0, 0, &i2s0_in_mux_control),
@@ -786,7 +785,6 @@ static const struct snd_soc_dapm_route mtk_dai_i2s_routes[] = {
 
 	{"I2S1", NULL, "I2S1_CH1"},
 	{"I2S1", NULL, "I2S1_CH2"},
-
 
 	{"I2S1", NULL, "I2S0_EN", mtk_afe_i2s_share_connect},
 	{"I2S1", NULL, "I2S1_EN"},

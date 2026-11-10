@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  * Author: Owen Chen <owen.chen@mediatek.com>
  */
 
 #include <linux/clk-provider.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 
 #include "clk-mtk.h"
 #include "clk-gate.h"
 
 #include <dt-bindings/clock/mt6765-clk.h>
+
+/* Regular Number Definition */
+#define INV_OFS			-1
+#define INV_BIT			-1
+
+/* get spm power status struct to register inside clk_data */
+static struct pwr_status pwr_stat = GATE_PWR_STAT(0x180, 0x184, INV_OFS, BIT(5), BIT(5));
 
 static const struct mtk_gate_regs img_cg_regs = {
 	.set_ofs = 0x4,
@@ -25,10 +34,11 @@ static const struct mtk_gate_regs img_cg_regs = {
 		.regs = &img_cg_regs,			\
 		.shift = _shift,			\
 		.ops = &mtk_clk_gate_ops_setclr,	\
+		.pwr_stat = &pwr_stat,			\
 	}
 
-static const struct mtk_gate img_clks[] = {
-	GATE_IMG(CLK_IMG_LARB2, "img_larb2", "mm_ck", 0),
+static const struct mtk_gate img_clks[] __initconst = {
+	GATE_IMG(CLK_IMG_LARB2, "img_larb2", "mm_ck", 0),/*use dummy*/
 	GATE_IMG(CLK_IMG_DIP, "img_dip", "mm_ck", 2),
 	GATE_IMG(CLK_IMG_FDVT, "img_fdvt", "mm_ck", 3),
 	GATE_IMG(CLK_IMG_DPE, "img_dpe", "mm_ck", 4),
@@ -47,9 +57,11 @@ static int clk_mt6765_img_probe(struct platform_device *pdev)
 
 	r = of_clk_add_provider(node, of_clk_src_onecell_get, clk_data);
 
-	if (r)
+	if (r) {
+		kfree(clk_data);
 		pr_err("%s(): could not register clock provider: %d\n",
-		       __func__, r);
+				__func__, r);
+	}
 
 	return r;
 }
@@ -67,4 +79,15 @@ static struct platform_driver clk_mt6765_img_drv = {
 	},
 };
 
-builtin_platform_driver(clk_mt6765_img_drv);
+static int __init clk_mt6765_img_init(void)
+{
+	return platform_driver_register(&clk_mt6765_img_drv);
+}
+
+static void __exit clk_mt6765_img_exit(void)
+{
+}
+
+postcore_initcall(clk_mt6765_img_init);
+module_exit(clk_mt6765_img_exit);
+MODULE_LICENSE("GPL");

@@ -22,7 +22,7 @@
 #include <linux/cache.h>
 #include <linux/jiffies.h>
 #include <linux/profile.h>
-#include <linux/memblock.h>
+#include <linux/bootmem.h>
 #include <linux/vmalloc.h>
 #include <linux/ftrace.h>
 #include <linux/cpu.h>
@@ -43,11 +43,11 @@
 #include <asm/irq.h>
 #include <asm/irq_regs.h>
 #include <asm/page.h>
+#include <asm/pgtable.h>
 #include <asm/oplib.h>
 #include <linux/uaccess.h>
 #include <asm/starfire.h>
 #include <asm/tlb.h>
-#include <asm/pgalloc.h>
 #include <asm/sections.h>
 #include <asm/prom.h>
 #include <asm/mdesc.h>
@@ -137,6 +137,9 @@ void smp_callin(void)
 		rmb();
 
 	set_cpu_online(cpuid, true);
+
+	/* idle thread is expected to have preempt disabled */
+	preempt_disable();
 
 	local_irq_enable();
 
@@ -1011,7 +1014,7 @@ void flush_dcache_page_all(struct mm_struct *mm, struct page *page)
 }
 
 #ifdef CONFIG_KGDB
-void kgdb_roundup_cpus(void)
+void kgdb_roundup_cpus(unsigned long flags)
 {
 	smp_cross_call(&xcall_kgdb_capture, 0, 0, 0);
 }
@@ -1548,26 +1551,26 @@ static void * __init pcpu_alloc_bootmem(unsigned int cpu, size_t size,
 	void *ptr;
 
 	if (!node_online(node) || !NODE_DATA(node)) {
-		ptr = memblock_alloc_from(size, align, goal);
+		ptr = __alloc_bootmem(size, align, goal);
 		pr_info("cpu %d has no node %d or node-local memory\n",
 			cpu, node);
 		pr_debug("per cpu data for cpu%d %lu bytes at %016lx\n",
 			 cpu, size, __pa(ptr));
 	} else {
-		ptr = memblock_alloc_try_nid(size, align, goal,
-					     MEMBLOCK_ALLOC_ACCESSIBLE, node);
+		ptr = __alloc_bootmem_node(NODE_DATA(node),
+					   size, align, goal);
 		pr_debug("per cpu data for cpu%d %lu bytes on node%d at "
 			 "%016lx\n", cpu, size, node, __pa(ptr));
 	}
 	return ptr;
 #else
-	return memblock_alloc_from(size, align, goal);
+	return __alloc_bootmem(size, align, goal);
 #endif
 }
 
 static void __init pcpu_free_bootmem(void *ptr, size_t size)
 {
-	memblock_free(__pa(ptr), size);
+	free_bootmem(__pa(ptr), size);
 }
 
 static int __init pcpu_cpu_distance(unsigned int from, unsigned int to)
@@ -1581,36 +1584,21 @@ static int __init pcpu_cpu_distance(unsigned int from, unsigned int to)
 static void __init pcpu_populate_pte(unsigned long addr)
 {
 	pgd_t *pgd = pgd_offset_k(addr);
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 
 	if (pgd_none(*pgd)) {
 		pud_t *new;
 
-		new = memblock_alloc_from(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
-		if (!new)
-			goto err_alloc;
+		new = __alloc_bootmem(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
 		pgd_populate(&init_mm, pgd, new);
 	}
 
-	p4d = p4d_offset(pgd, addr);
-	if (p4d_none(*p4d)) {
-		pud_t *new;
-
-		new = memblock_alloc_from(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
-		if (!new)
-			goto err_alloc;
-		p4d_populate(&init_mm, p4d, new);
-	}
-
-	pud = pud_offset(p4d, addr);
+	pud = pud_offset(pgd, addr);
 	if (pud_none(*pud)) {
 		pmd_t *new;
 
-		new = memblock_alloc_from(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
-		if (!new)
-			goto err_alloc;
+		new = __alloc_bootmem(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
 		pud_populate(&init_mm, pud, new);
 	}
 
@@ -1618,17 +1606,9 @@ static void __init pcpu_populate_pte(unsigned long addr)
 	if (!pmd_present(*pmd)) {
 		pte_t *new;
 
-		new = memblock_alloc_from(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
-		if (!new)
-			goto err_alloc;
+		new = __alloc_bootmem(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
 		pmd_populate_kernel(&init_mm, pmd, new);
 	}
-
-	return;
-
-err_alloc:
-	panic("%s: Failed to allocate %lu bytes align=%lx from=%lx\n",
-	      __func__, PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
 }
 
 void __init setup_per_cpu_areas(void)
@@ -1644,9 +1624,9 @@ void __init setup_per_cpu_areas(void)
 					    pcpu_alloc_bootmem,
 					    pcpu_free_bootmem);
 		if (rc)
-			pr_warn("PERCPU: %s allocator failed (%d), "
-				"falling back to page size\n",
-				pcpu_fc_names[pcpu_chosen_fc], rc);
+			pr_warning("PERCPU: %s allocator failed (%d), "
+				   "falling back to page size\n",
+				   pcpu_fc_names[pcpu_chosen_fc], rc);
 	}
 	if (rc < 0)
 		rc = pcpu_page_first_chunk(PERCPU_MODULE_RESERVE,

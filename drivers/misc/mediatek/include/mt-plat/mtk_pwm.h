@@ -7,11 +7,7 @@
 #define __MT_PWM_H__
 
 #include <linux/types.h>
-#if defined(CONFIG_MOT_DEVONF_CAMERA_PROJECT) || defined(CONFIG_MOT_CANCUNF_CAMERA_PROJECT)
-#include "mtk_pwm_hal.h"
-#else
-#include <mt-plat/mtk_pwm_hal.h>
-#endif
+#include <mach/mtk_pwm_hal.h>
 
 struct pwm_easy_config {
 	u32 pwm_no;

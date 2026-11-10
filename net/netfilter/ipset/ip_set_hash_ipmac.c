@@ -1,5 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (C) 2016 Tomasz Chilinski <tomasz.chilinski@chilan.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 /* Kernel module implementing an IP set type: the hash:ip,mac type */
@@ -47,7 +50,7 @@ struct hash_ipmac4_elem {
 
 /* Common functions */
 
-static bool
+static inline bool
 hash_ipmac4_data_equal(const struct hash_ipmac4_elem *e1,
 		       const struct hash_ipmac4_elem *e2,
 		       u32 *multi)
@@ -67,7 +70,7 @@ nla_put_failure:
 	return true;
 }
 
-static void
+static inline void
 hash_ipmac4_data_next(struct hash_ipmac4_elem *next,
 		      const struct hash_ipmac4_elem *e)
 {
@@ -154,7 +157,7 @@ struct hash_ipmac6_elem {
 
 /* Common functions */
 
-static bool
+static inline bool
 hash_ipmac6_data_equal(const struct hash_ipmac6_elem *e1,
 		       const struct hash_ipmac6_elem *e2,
 		       u32 *multi)
@@ -175,7 +178,7 @@ nla_put_failure:
 	return true;
 }
 
-static void
+static inline void
 hash_ipmac6_data_next(struct hash_ipmac6_elem *next,
 		      const struct hash_ipmac6_elem *e)
 {

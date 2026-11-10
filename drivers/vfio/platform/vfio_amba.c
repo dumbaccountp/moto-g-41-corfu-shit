@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2013 - Virtual Open Systems
  * Author: Antonios Motakis <a.motakis@virtualopensystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2, as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -71,13 +79,18 @@ static int vfio_amba_probe(struct amba_device *adev, const struct amba_id *id)
 	return ret;
 }
 
-static void vfio_amba_remove(struct amba_device *adev)
+static int vfio_amba_remove(struct amba_device *adev)
 {
-	struct vfio_platform_device *vdev =
-		vfio_platform_remove_common(&adev->dev);
+	struct vfio_platform_device *vdev;
 
-	kfree(vdev->name);
-	kfree(vdev);
+	vdev = vfio_platform_remove_common(&adev->dev);
+	if (vdev) {
+		kfree(vdev->name);
+		kfree(vdev);
+		return 0;
+	}
+
+	return -EINVAL;
 }
 
 static const struct amba_id pl330_ids[] = {

@@ -13,9 +13,8 @@
 #include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <linux/perf_event.h>
 
-#include <bpf/libbpf.h>
+#include "libbpf.h"
 #include "bpf_load.h"
 #include "bpf_util.h"
 #include "perf-sys.h"
@@ -290,7 +289,7 @@ static int test_debug_fs_uprobe(char *binary_path, long offset, bool is_return)
 
 int main(int argc, char **argv)
 {
-	struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
+	struct rlimit r = {1024*1024, RLIM_INFINITY};
 	extern char __executable_start;
 	char filename[256], buf[256];
 	__u64 uprobe_file_offset;
@@ -312,9 +311,9 @@ int main(int argc, char **argv)
 	}
 
 	/* test two functions in the corresponding *_kern.c file */
-	CHECK_AND_RET(test_debug_fs_kprobe(0, "blk_mq_start_request",
+	CHECK_AND_RET(test_debug_fs_kprobe(0, "blk_start_request",
 					   BPF_FD_TYPE_KPROBE));
-	CHECK_AND_RET(test_debug_fs_kprobe(1, "blk_account_io_done",
+	CHECK_AND_RET(test_debug_fs_kprobe(1, "blk_account_io_completion",
 					   BPF_FD_TYPE_KRETPROBE));
 
 	/* test nondebug fs kprobe */

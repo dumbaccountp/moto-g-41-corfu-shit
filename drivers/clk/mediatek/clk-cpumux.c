@@ -1,12 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 Linaro Ltd.
  * Author: Pi-Cheng Chen <pi-cheng.chen@linaro.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/clk-provider.h>
 #include <linux/mfd/syscon.h>
-#include <linux/module.h>
 #include <linux/slab.h>
 
 #include "clk-mtk.h"
@@ -52,7 +59,7 @@ mtk_clk_register_cpumux(const struct mtk_composite *mux,
 {
 	struct mtk_clk_cpumux *cpumux;
 	struct clk *clk;
-	struct clk_init_data init;
+	struct clk_init_data init = {};
 
 	cpumux = kzalloc(sizeof(*cpumux), GFP_KERNEL);
 	if (!cpumux)
@@ -107,7 +114,3 @@ int mtk_clk_register_cpumuxes(struct device_node *node,
 
 	return 0;
 }
-
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("MediaTek MTK");
-MODULE_AUTHOR("MediaTek Inc.");

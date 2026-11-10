@@ -3,8 +3,8 @@
  * Copyright (c) 2019 MediaTek Inc.
  */
 
-#ifndef __MT6853_PWR_CTRL_H__
-#define __MT6853_PWR_CTRL_H__
+#ifndef __PWR_CTRL_H__
+#define __PWR_CTRL_H__
 
 /* SPM_WAKEUP_MISC */
 #define WAKE_MISC_GIC_WAKEUP              0x3FF  /* bit0 ~ bit9 */
@@ -70,17 +70,15 @@ struct pwr_ctrl {
 	uint8_t reg_conn_apsrc_sel;
 
 	/* SPM_SRC6_MASK */
-	uint8_t reg_dpmaif_srcclkena_mask_b;
-	uint8_t reg_dpmaif_infra_req_mask_b;
-	uint8_t reg_dpmaif_apsrc_req_mask_b;
-	uint8_t reg_dpmaif_vrf18_req_mask_b;
-	uint8_t reg_dpmaif_ddr_en_mask_b;
+	uint32_t reg_ccif_event_infra_req_mask_b;
+	uint32_t reg_ccif_event_apsrc_req_mask_b;
+
 	/* SPM_SRC_REQ */
 	uint8_t reg_spm_apsrc_req;
 	uint8_t reg_spm_f26m_req;
 	uint8_t reg_spm_infra_req;
 	uint8_t reg_spm_vrf18_req;
-	uint8_t reg_spm_ddr_en_req;
+	uint8_t reg_spm_ddren_req;
 	uint8_t reg_spm_dvfs_req;
 	uint8_t reg_spm_sw_mailbox_req;
 	uint8_t reg_spm_sspm_mailbox_req;
@@ -88,132 +86,132 @@ struct pwr_ctrl {
 	uint8_t reg_spm_scp_mailbox_req;
 
 	/* SPM_SRC_MASK */
-	uint8_t reg_md_srcclkena_0_mask_b;
-	uint8_t reg_md_srcclkena2infra_req_0_mask_b;
-	uint8_t reg_md_apsrc2infra_req_0_mask_b;
-	uint8_t reg_md_apsrc_req_0_mask_b;
-	uint8_t reg_md_vrf18_req_0_mask_b;
-	uint8_t reg_md_ddr_en_0_mask_b;
-	uint8_t reg_md_srcclkena_1_mask_b;
-	uint8_t reg_md_srcclkena2infra_req_1_mask_b;
-	uint8_t reg_md_apsrc2infra_req_1_mask_b;
-	uint8_t reg_md_apsrc_req_1_mask_b;
-	uint8_t reg_md_vrf18_req_1_mask_b;
-	uint8_t reg_md_ddr_en_1_mask_b;
+	uint8_t reg_md_0_srcclkena_mask_b;
+	uint8_t reg_md_0_infra_req_mask_b;
+	uint8_t reg_md_0_apsrc_req_mask_b;
+	uint8_t reg_md_0_vrf18_req_mask_b;
+	uint8_t reg_md_0_ddren_req_mask_b;
+	uint8_t reg_md_1_srcclkena_mask_b;
+	uint8_t reg_md_1_infra_req_mask_b;
+	uint8_t reg_md_1_apsrc_req_mask_b;
+	uint8_t reg_md_1_vrf18_req_mask_b;
+	uint8_t reg_md_1_ddren_req_mask_b;
 	uint8_t reg_conn_srcclkena_mask_b;
 	uint8_t reg_conn_srcclkenb_mask_b;
 	uint8_t reg_conn_infra_req_mask_b;
 	uint8_t reg_conn_apsrc_req_mask_b;
 	uint8_t reg_conn_vrf18_req_mask_b;
-	uint8_t reg_conn_ddr_en_mask_b;
+	uint8_t reg_conn_ddren_req_mask_b;
 	uint8_t reg_conn_vfe28_mask_b;
-	uint8_t reg_srcclkeni0_srcclkena_mask_b;
-	uint8_t reg_srcclkeni0_infra_req_mask_b;
-	uint8_t reg_srcclkeni1_srcclkena_mask_b;
-	uint8_t reg_srcclkeni1_infra_req_mask_b;
-	uint8_t reg_srcclkeni2_srcclkena_mask_b;
-	uint8_t reg_srcclkeni2_infra_req_mask_b;
+	uint8_t reg_srcclkeni_srcclkena_mask_b;
+	uint8_t reg_srcclkeni_infra_req_mask_b;
 	uint8_t reg_infrasys_apsrc_req_mask_b;
-	uint8_t reg_infrasys_ddr_en_mask_b;
-	uint8_t reg_md32_srcclkena_mask_b;
-	uint8_t reg_md32_infra_req_mask_b;
-	uint8_t reg_md32_apsrc_req_mask_b;
-	uint8_t reg_md32_vrf18_req_mask_b;
-	uint8_t reg_md32_ddr_en_mask_b;
+	uint8_t reg_infrasys_ddren_req_mask_b;
+	uint8_t reg_sspm_srcclkena_mask_b;
+	uint8_t reg_sspm_infra_req_mask_b;
+	uint8_t reg_sspm_apsrc_req_mask_b;
+	uint8_t reg_sspm_vrf18_req_mask_b;
+	uint8_t reg_sspm_ddren_req_mask_b;
 
 	/* SPM_SRC2_MASK */
 	uint8_t reg_scp_srcclkena_mask_b;
 	uint8_t reg_scp_infra_req_mask_b;
 	uint8_t reg_scp_apsrc_req_mask_b;
 	uint8_t reg_scp_vrf18_req_mask_b;
-	uint8_t reg_scp_ddr_en_mask_b;
+	uint8_t reg_scp_ddren_req_mask_b;
 	uint8_t reg_audio_dsp_srcclkena_mask_b;
 	uint8_t reg_audio_dsp_infra_req_mask_b;
 	uint8_t reg_audio_dsp_apsrc_req_mask_b;
 	uint8_t reg_audio_dsp_vrf18_req_mask_b;
-	uint8_t reg_audio_dsp_ddr_en_mask_b;
+	uint8_t reg_audio_dsp_ddren_req_mask_b;
 	uint8_t reg_ufs_srcclkena_mask_b;
 	uint8_t reg_ufs_infra_req_mask_b;
 	uint8_t reg_ufs_apsrc_req_mask_b;
 	uint8_t reg_ufs_vrf18_req_mask_b;
-	uint8_t reg_ufs_ddr_en_mask_b;
+	uint8_t reg_ufs_ddren_req_mask_b;
 	uint8_t reg_disp0_apsrc_req_mask_b;
-	uint8_t reg_disp0_ddr_en_mask_b;
+	uint8_t reg_disp0_ddren_req_mask_b;
 	uint8_t reg_disp1_apsrc_req_mask_b;
-	uint8_t reg_disp1_ddr_en_mask_b;
+	uint8_t reg_disp1_ddren_req_mask_b;
 	uint8_t reg_gce_infra_req_mask_b;
 	uint8_t reg_gce_apsrc_req_mask_b;
 	uint8_t reg_gce_vrf18_req_mask_b;
-	uint8_t reg_gce_ddr_en_mask_b;
+	uint8_t reg_gce_ddren_req_mask_b;
 	uint8_t reg_apu_srcclkena_mask_b;
 	uint8_t reg_apu_infra_req_mask_b;
 	uint8_t reg_apu_apsrc_req_mask_b;
 	uint8_t reg_apu_vrf18_req_mask_b;
-	uint8_t reg_apu_ddr_en_mask_b;
+	uint8_t reg_apu_ddren_req_mask_b;
 	uint8_t reg_cg_check_srcclkena_mask_b;
 	uint8_t reg_cg_check_apsrc_req_mask_b;
 	uint8_t reg_cg_check_vrf18_req_mask_b;
-	uint8_t reg_cg_check_ddr_en_mask_b;
+	uint8_t reg_cg_check_ddren_req_mask_b;
 
 	/* SPM_SRC3_MASK */
 	uint8_t reg_dvfsrc_event_trigger_mask_b;
-	uint8_t reg_sw2spm_int0_mask_b;
-	uint8_t reg_sw2spm_int1_mask_b;
-	uint8_t reg_sw2spm_int2_mask_b;
-	uint8_t reg_sw2spm_int3_mask_b;
-	uint8_t reg_sc_adsp2spm_wakeup_mask_b;
-	uint8_t reg_sc_sspm2spm_wakeup_mask_b;
-	uint8_t reg_sc_scp2spm_wakeup_mask_b;
-	uint8_t reg_csyspwrreq_mask;
-	uint8_t reg_spm_srcclkena_reserved_mask_b;
-	uint8_t reg_spm_infra_req_reserved_mask_b;
-	uint8_t reg_spm_apsrc_req_reserved_mask_b;
-	uint8_t reg_spm_vrf18_req_reserved_mask_b;
-	uint8_t reg_spm_ddr_en_reserved_mask_b;
+	uint8_t reg_sw2spm_wakeup_mask_b;
+	uint8_t reg_adsp2spm_wakeup_mask_b;
+	uint8_t reg_sspm2spm_wakeup_mask_b;
+	uint8_t reg_scp2spm_wakeup_mask_b;
+	uint8_t reg_csyspwrup_ack_mask;
+	uint8_t reg_spm_reserved_srcclkena_mask_b;
+	uint8_t reg_spm_reserved_infra_req_mask_b;
+	uint8_t reg_spm_reserved_apsrc_req_mask_b;
+	uint8_t reg_spm_reserved_vrf18_req_mask_b;
+	uint8_t reg_spm_reserved_ddren_req_mask_b;
 	uint8_t reg_mcupm_srcclkena_mask_b;
 	uint8_t reg_mcupm_infra_req_mask_b;
 	uint8_t reg_mcupm_apsrc_req_mask_b;
 	uint8_t reg_mcupm_vrf18_req_mask_b;
-	uint8_t reg_mcupm_ddr_en_mask_b;
+	uint8_t reg_mcupm_ddren_req_mask_b;
 	uint8_t reg_msdc0_srcclkena_mask_b;
 	uint8_t reg_msdc0_infra_req_mask_b;
 	uint8_t reg_msdc0_apsrc_req_mask_b;
 	uint8_t reg_msdc0_vrf18_req_mask_b;
-	uint8_t reg_msdc0_ddr_en_mask_b;
+	uint8_t reg_msdc0_ddren_req_mask_b;
 	uint8_t reg_msdc1_srcclkena_mask_b;
 	uint8_t reg_msdc1_infra_req_mask_b;
 	uint8_t reg_msdc1_apsrc_req_mask_b;
 	uint8_t reg_msdc1_vrf18_req_mask_b;
-	uint8_t reg_msdc1_ddr_en_mask_b;
+	uint8_t reg_msdc1_ddren_req_mask_b;
 
 	/* SPM_SRC4_MASK */
-	uint32_t ccif_event_mask_b;
+	uint32_t reg_ccif_event_srcclkena_mask_b;
 	uint8_t reg_bak_psri_srcclkena_mask_b;
 	uint8_t reg_bak_psri_infra_req_mask_b;
 	uint8_t reg_bak_psri_apsrc_req_mask_b;
 	uint8_t reg_bak_psri_vrf18_req_mask_b;
-	uint8_t reg_bak_psri_ddr_en_mask_b;
-	uint8_t reg_dramc0_md32_infra_req_mask_b;
-	uint8_t reg_dramc0_md32_vrf18_req_mask_b;
-	uint8_t reg_dramc1_md32_infra_req_mask_b;
-	uint8_t reg_dramc1_md32_vrf18_req_mask_b;
+	uint8_t reg_bak_psri_ddren_req_mask_b;
+	uint8_t reg_dramc_md32_infra_req_mask_b;
+	uint8_t reg_dramc_md32_vrf18_req_mask_b;
 	uint8_t reg_conn_srcclkenb2pwrap_mask_b;
-	uint8_t reg_dramc0_md32_wakeup_mask;
-	uint8_t reg_dramc1_md32_wakeup_mask;
+	uint8_t reg_dramc_md32_apsrc_req_mask_b;
 
 	/* SPM_SRC5_MASK */
 	uint32_t reg_mcusys_merge_apsrc_req_mask_b;
-	uint32_t reg_mcusys_merge_ddr_en_mask_b;
+	uint32_t reg_mcusys_merge_ddren_req_mask_b;
+	uint8_t reg_afe_srcclkena_mask_b;
+	uint8_t reg_afe_infra_req_mask_b;
+	uint8_t reg_afe_apsrc_req_mask_b;
+	uint8_t reg_afe_vrf18_req_mask_b;
+	uint8_t reg_afe_ddren_req_mask_b;
 	uint8_t reg_msdc2_srcclkena_mask_b;
 	uint8_t reg_msdc2_infra_req_mask_b;
 	uint8_t reg_msdc2_apsrc_req_mask_b;
 	uint8_t reg_msdc2_vrf18_req_mask_b;
-	uint8_t reg_msdc2_ddr_en_mask_b;
+	uint8_t reg_msdc2_ddren_req_mask_b;
+
+	/* SPM_SRC7_MASK */
 	uint8_t reg_pcie_srcclkena_mask_b;
 	uint8_t reg_pcie_infra_req_mask_b;
 	uint8_t reg_pcie_apsrc_req_mask_b;
 	uint8_t reg_pcie_vrf18_req_mask_b;
-	uint8_t reg_pcie_ddr_en_mask_b;
+	uint8_t reg_pcie_ddren_req_mask_b;
+	uint8_t reg_dpmaif_srcclkena_mask_b;
+	uint8_t reg_dpmaif_infra_req_mask_b;
+	uint8_t reg_dpmaif_apsrc_req_mask_b;
+	uint8_t reg_dpmaif_vrf18_req_mask_b;
+	uint8_t reg_dpmaif_ddren_req_mask_b;
 
 	/* SPM_WAKEUP_EVENT_MASK */
 	uint32_t reg_wakeup_event_mask;
@@ -223,6 +221,7 @@ struct pwr_ctrl {
 
 	/* Auto-gen End */
 };
+
 
 /* code gen by spm_pwr_ctrl_atf.pl, need struct pwr_ctrl */
 enum pwr_ctrl_enum {
@@ -268,18 +267,15 @@ enum pwr_ctrl_enum {
 	PW_REG_CONN_APSRC_SEL,
 
 	/* SPM_SRC6_MASK */
-	PW_REG_DPMAIF_SRCCLKENA_MASK_B,
-	PW_REG_DPMAIF_INFRA_REQ_MASK_B,
-	PW_REG_DPMAIF_APSRC_REQ_MASK_B,
-	PW_REG_DPMAIF_VRF18_REQ_MASK_B,
-	PW_REG_DPMAIF_DDR_EN_MASK_B,
+	PW_REG_CCIF_EVENT_INFRA_REQ_MASK_B,
+	PW_REG_CCIF_EVENT_APSRC_REQ_MASK_B,
 
 	/* SPM_SRC_REQ */
 	PW_REG_SPM_APSRC_REQ,
 	PW_REG_SPM_F26M_REQ,
 	PW_REG_SPM_INFRA_REQ,
 	PW_REG_SPM_VRF18_REQ,
-	PW_REG_SPM_DDR_EN_REQ,
+	PW_REG_SPM_DDREN_REQ,
 	PW_REG_SPM_DVFS_REQ,
 	PW_REG_SPM_SW_MAILBOX_REQ,
 	PW_REG_SPM_SSPM_MAILBOX_REQ,
@@ -287,132 +283,132 @@ enum pwr_ctrl_enum {
 	PW_REG_SPM_SCP_MAILBOX_REQ,
 
 	/* SPM_SRC_MASK */
-	PW_REG_MD_SRCCLKENA_0_MASK_B,
-	PW_REG_MD_SRCCLKENA2INFRA_REQ_0_MASK_B,
-	PW_REG_MD_APSRC2INFRA_REQ_0_MASK_B,
-	PW_REG_MD_APSRC_REQ_0_MASK_B,
-	PW_REG_MD_VRF18_REQ_0_MASK_B,
-	PW_REG_MD_DDR_EN_0_MASK_B,
-	PW_REG_MD_SRCCLKENA_1_MASK_B,
-	PW_REG_MD_SRCCLKENA2INFRA_REQ_1_MASK_B,
-	PW_REG_MD_APSRC2INFRA_REQ_1_MASK_B,
-	PW_REG_MD_APSRC_REQ_1_MASK_B,
-	PW_REG_MD_VRF18_REQ_1_MASK_B,
-	PW_REG_MD_DDR_EN_1_MASK_B,
+	PW_REG_MD_0_SRCCLKENA_MASK_B,
+	PW_REG_MD_0_INFRA_REQ_MASK_B,
+	PW_REG_MD_0_APSRC_REQ_MASK_B,
+	PW_REG_MD_0_VRF18_REQ_MASK_B,
+	PW_REG_MD_0_DDREN_REQ_MASK_B,
+	PW_REG_MD_1_SRCCLKENA_MASK_B,
+	PW_REG_MD_1_INFRA_REQ_MASK_B,
+	PW_REG_MD_1_APSRC_REQ_MASK_B,
+	PW_REG_MD_1_VRF18_REQ_MASK_B,
+	PW_REG_MD_1_DDREN_REQ_MASK_B,
 	PW_REG_CONN_SRCCLKENA_MASK_B,
 	PW_REG_CONN_SRCCLKENB_MASK_B,
 	PW_REG_CONN_INFRA_REQ_MASK_B,
 	PW_REG_CONN_APSRC_REQ_MASK_B,
 	PW_REG_CONN_VRF18_REQ_MASK_B,
-	PW_REG_CONN_DDR_EN_MASK_B,
+	PW_REG_CONN_DDREN_REQ_MASK_B,
 	PW_REG_CONN_VFE28_MASK_B,
-	PW_REG_SRCCLKENI0_SRCCLKENA_MASK_B,
-	PW_REG_SRCCLKENI0_INFRA_REQ_MASK_B,
-	PW_REG_SRCCLKENI1_SRCCLKENA_MASK_B,
-	PW_REG_SRCCLKENI1_INFRA_REQ_MASK_B,
-	PW_REG_SRCCLKENI2_SRCCLKENA_MASK_B,
-	PW_REG_SRCCLKENI2_INFRA_REQ_MASK_B,
+	PW_REG_SRCCLKENI_SRCCLKENA_MASK_B,
+	PW_REG_SRCCLKENI_INFRA_REQ_MASK_B,
 	PW_REG_INFRASYS_APSRC_REQ_MASK_B,
-	PW_REG_INFRASYS_DDR_EN_MASK_B,
-	PW_REG_MD32_SRCCLKENA_MASK_B,
-	PW_REG_MD32_INFRA_REQ_MASK_B,
-	PW_REG_MD32_APSRC_REQ_MASK_B,
-	PW_REG_MD32_VRF18_REQ_MASK_B,
-	PW_REG_MD32_DDR_EN_MASK_B,
+	PW_REG_INFRASYS_DDREN_REQ_MASK_B,
+	PW_REG_SSPM_SRCCLKENA_MASK_B,
+	PW_REG_SSPM_INFRA_REQ_MASK_B,
+	PW_REG_SSPM_APSRC_REQ_MASK_B,
+	PW_REG_SSPM_VRF18_REQ_MASK_B,
+	PW_REG_SSPM_DDREN_REQ_MASK_B,
 
 	/* SPM_SRC2_MASK */
 	PW_REG_SCP_SRCCLKENA_MASK_B,
 	PW_REG_SCP_INFRA_REQ_MASK_B,
 	PW_REG_SCP_APSRC_REQ_MASK_B,
 	PW_REG_SCP_VRF18_REQ_MASK_B,
-	PW_REG_SCP_DDR_EN_MASK_B,
+	PW_REG_SCP_DDREN_REQ_MASK_B,
 	PW_REG_AUDIO_DSP_SRCCLKENA_MASK_B,
 	PW_REG_AUDIO_DSP_INFRA_REQ_MASK_B,
 	PW_REG_AUDIO_DSP_APSRC_REQ_MASK_B,
 	PW_REG_AUDIO_DSP_VRF18_REQ_MASK_B,
-	PW_REG_AUDIO_DSP_DDR_EN_MASK_B,
+	PW_REG_AUDIO_DSP_DDREN_REQ_MASK_B,
 	PW_REG_UFS_SRCCLKENA_MASK_B,
 	PW_REG_UFS_INFRA_REQ_MASK_B,
 	PW_REG_UFS_APSRC_REQ_MASK_B,
 	PW_REG_UFS_VRF18_REQ_MASK_B,
-	PW_REG_UFS_DDR_EN_MASK_B,
+	PW_REG_UFS_DDREN_REQ_MASK_B,
 	PW_REG_DISP0_APSRC_REQ_MASK_B,
-	PW_REG_DISP0_DDR_EN_MASK_B,
+	PW_REG_DISP0_DDREN_REQ_MASK_B,
 	PW_REG_DISP1_APSRC_REQ_MASK_B,
-	PW_REG_DISP1_DDR_EN_MASK_B,
+	PW_REG_DISP1_DDREN_REQ_MASK_B,
 	PW_REG_GCE_INFRA_REQ_MASK_B,
 	PW_REG_GCE_APSRC_REQ_MASK_B,
 	PW_REG_GCE_VRF18_REQ_MASK_B,
-	PW_REG_GCE_DDR_EN_MASK_B,
+	PW_REG_GCE_DDREN_REQ_MASK_B,
 	PW_REG_APU_SRCCLKENA_MASK_B,
 	PW_REG_APU_INFRA_REQ_MASK_B,
 	PW_REG_APU_APSRC_REQ_MASK_B,
 	PW_REG_APU_VRF18_REQ_MASK_B,
-	PW_REG_APU_DDR_EN_MASK_B,
+	PW_REG_APU_DDREN_REQ_MASK_B,
 	PW_REG_CG_CHECK_SRCCLKENA_MASK_B,
 	PW_REG_CG_CHECK_APSRC_REQ_MASK_B,
 	PW_REG_CG_CHECK_VRF18_REQ_MASK_B,
-	PW_REG_CG_CHECK_DDR_EN_MASK_B,
+	PW_REG_CG_CHECK_DDREN_REQ_MASK_B,
 
 	/* SPM_SRC3_MASK */
 	PW_REG_DVFSRC_EVENT_TRIGGER_MASK_B,
-	PW_REG_SW2SPM_INT0_MASK_B,
-	PW_REG_SW2SPM_INT1_MASK_B,
-	PW_REG_SW2SPM_INT2_MASK_B,
-	PW_REG_SW2SPM_INT3_MASK_B,
-	PW_REG_SC_ADSP2SPM_WAKEUP_MASK_B,
-	PW_REG_SC_SSPM2SPM_WAKEUP_MASK_B,
-	PW_REG_SC_SCP2SPM_WAKEUP_MASK_B,
-	PW_REG_CSYSPWRREQ_MASK,
-	PW_REG_SPM_SRCCLKENA_RESERVED_MASK_B,
-	PW_REG_SPM_INFRA_REQ_RESERVED_MASK_B,
-	PW_REG_SPM_APSRC_REQ_RESERVED_MASK_B,
-	PW_REG_SPM_VRF18_REQ_RESERVED_MASK_B,
-	PW_REG_SPM_DDR_EN_RESERVED_MASK_B,
+	PW_REG_SW2SPM_WAKEUP_MASK_B,
+	PW_REG_ADSP2SPM_WAKEUP_MASK_B,
+	PW_REG_SSPM2SPM_WAKEUP_MASK_B,
+	PW_REG_SCP2SPM_WAKEUP_MASK_B,
+	PW_REG_CSYSPWRUP_ACK_MASK,
+	PW_REG_SPM_RESERVED_SRCCLKENA_MASK_B,
+	PW_REG_SPM_RESERVED_INFRA_REQ_MASK_B,
+	PW_REG_SPM_RESERVED_APSRC_REQ_MASK_B,
+	PW_REG_SPM_RESERVED_VRF18_REQ_MASK_B,
+	PW_REG_SPM_RESERVED_DDREN_REQ_MASK_B,
 	PW_REG_MCUPM_SRCCLKENA_MASK_B,
 	PW_REG_MCUPM_INFRA_REQ_MASK_B,
 	PW_REG_MCUPM_APSRC_REQ_MASK_B,
 	PW_REG_MCUPM_VRF18_REQ_MASK_B,
-	PW_REG_MCUPM_DDR_EN_MASK_B,
+	PW_REG_MCUPM_DDREN_REQ_MASK_B,
 	PW_REG_MSDC0_SRCCLKENA_MASK_B,
 	PW_REG_MSDC0_INFRA_REQ_MASK_B,
 	PW_REG_MSDC0_APSRC_REQ_MASK_B,
 	PW_REG_MSDC0_VRF18_REQ_MASK_B,
-	PW_REG_MSDC0_DDR_EN_MASK_B,
+	PW_REG_MSDC0_DDREN_REQ_MASK_B,
 	PW_REG_MSDC1_SRCCLKENA_MASK_B,
 	PW_REG_MSDC1_INFRA_REQ_MASK_B,
 	PW_REG_MSDC1_APSRC_REQ_MASK_B,
 	PW_REG_MSDC1_VRF18_REQ_MASK_B,
-	PW_REG_MSDC1_DDR_EN_MASK_B,
+	PW_REG_MSDC1_DDREN_REQ_MASK_B,
 
 	/* SPM_SRC4_MASK */
-	PW_CCIF_EVENT_MASK_B,
+	PW_REG_CCIF_EVENT_SRCCLKENA_MASK_B,
 	PW_REG_BAK_PSRI_SRCCLKENA_MASK_B,
 	PW_REG_BAK_PSRI_INFRA_REQ_MASK_B,
 	PW_REG_BAK_PSRI_APSRC_REQ_MASK_B,
 	PW_REG_BAK_PSRI_VRF18_REQ_MASK_B,
-	PW_REG_BAK_PSRI_DDR_EN_MASK_B,
-	PW_REG_DRAMC0_MD32_INFRA_REQ_MASK_B,
-	PW_REG_DRAMC0_MD32_VRF18_REQ_MASK_B,
-	PW_REG_DRAMC1_MD32_INFRA_REQ_MASK_B,
-	PW_REG_DRAMC1_MD32_VRF18_REQ_MASK_B,
+	PW_REG_BAK_PSRI_DDREN_REQ_MASK_B,
+	PW_REG_DRAMC_MD32_INFRA_REQ_MASK_B,
+	PW_REG_DRAMC_MD32_VRF18_REQ_MASK_B,
 	PW_REG_CONN_SRCCLKENB2PWRAP_MASK_B,
-	PW_REG_DRAMC0_MD32_WAKEUP_MASK,
-	PW_REG_DRAMC1_MD32_WAKEUP_MASK,
+	PW_REG_DRAMC_MD32_APSRC_REQ_MASK_B,
 
 	/* SPM_SRC5_MASK */
 	PW_REG_MCUSYS_MERGE_APSRC_REQ_MASK_B,
-	PW_REG_MCUSYS_MERGE_DDR_EN_MASK_B,
+	PW_REG_MCUSYS_MERGE_DDREN_REQ_MASK_B,
+	PW_REG_AFE_SRCCLKENA_MASK_B,
+	PW_REG_AFE_INFRA_REQ_MASK_B,
+	PW_REG_AFE_APSRC_REQ_MASK_B,
+	PW_REG_AFE_VRF18_REQ_MASK_B,
+	PW_REG_AFE_DDREN_REQ_MASK_B,
 	PW_REG_MSDC2_SRCCLKENA_MASK_B,
 	PW_REG_MSDC2_INFRA_REQ_MASK_B,
 	PW_REG_MSDC2_APSRC_REQ_MASK_B,
 	PW_REG_MSDC2_VRF18_REQ_MASK_B,
-	PW_REG_MSDC2_DDR_EN_MASK_B,
+	PW_REG_MSDC2_DDREN_REQ_MASK_B,
+
+	/* SPM_SRC7_MASK */
 	PW_REG_PCIE_SRCCLKENA_MASK_B,
 	PW_REG_PCIE_INFRA_REQ_MASK_B,
 	PW_REG_PCIE_APSRC_REQ_MASK_B,
 	PW_REG_PCIE_VRF18_REQ_MASK_B,
-	PW_REG_PCIE_DDR_EN_MASK_B,
+	PW_REG_PCIE_DDREN_REQ_MASK_B,
+	PW_REG_DPMAIF_SRCCLKENA_MASK_B,
+	PW_REG_DPMAIF_INFRA_REQ_MASK_B,
+	PW_REG_DPMAIF_APSRC_REQ_MASK_B,
+	PW_REG_DPMAIF_VRF18_REQ_MASK_B,
+	PW_REG_DPMAIF_DDREN_REQ_MASK_B,
 
 	/* SPM_WAKEUP_EVENT_MASK */
 	PW_REG_WAKEUP_EVENT_MASK,

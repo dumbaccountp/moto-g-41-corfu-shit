@@ -1,6 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2008-2014 Mathieu Desnoyers
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -15,56 +28,11 @@
 #include <linux/sched/task.h>
 #include <linux/static_key.h>
 
-enum tp_func_state {
-	TP_FUNC_0,
-	TP_FUNC_1,
-	TP_FUNC_2,
-	TP_FUNC_N,
-};
-
 extern tracepoint_ptr_t __start___tracepoints_ptrs[];
 extern tracepoint_ptr_t __stop___tracepoints_ptrs[];
 
 DEFINE_SRCU(tracepoint_srcu);
 EXPORT_SYMBOL_GPL(tracepoint_srcu);
-
-enum tp_transition_sync {
-	TP_TRANSITION_SYNC_1_0_1,
-	TP_TRANSITION_SYNC_N_2_1,
-
-	_NR_TP_TRANSITION_SYNC,
-};
-
-struct tp_transition_snapshot {
-	unsigned long rcu;
-	unsigned long srcu;
-	bool ongoing;
-};
-
-/* Protected by tracepoints_mutex */
-static struct tp_transition_snapshot tp_transition_snapshot[_NR_TP_TRANSITION_SYNC];
-
-static void tp_rcu_get_state(enum tp_transition_sync sync)
-{
-	struct tp_transition_snapshot *snapshot = &tp_transition_snapshot[sync];
-
-	/* Keep the latest get_state snapshot. */
-	snapshot->rcu = get_state_synchronize_rcu();
-	snapshot->srcu = start_poll_synchronize_srcu(&tracepoint_srcu);
-	snapshot->ongoing = true;
-}
-
-static void tp_rcu_cond_sync(enum tp_transition_sync sync)
-{
-	struct tp_transition_snapshot *snapshot = &tp_transition_snapshot[sync];
-
-	if (!snapshot->ongoing)
-		return;
-	cond_synchronize_rcu(snapshot->rcu);
-	if (!poll_state_synchronize_srcu(&tracepoint_srcu, snapshot->srcu))
-		synchronize_srcu(&tracepoint_srcu);
-	snapshot->ongoing = false;
-}
 
 /* Set to 1 to enable tracepoint debug output */
 static const int tracepoint_debug;
@@ -95,7 +63,7 @@ static bool ok_to_free_tracepoints;
  */
 struct tp_probes {
 	struct rcu_head rcu;
-	struct tracepoint_func probes[];
+	struct tracepoint_func probes[0];
 };
 
 /* Called in removal of a func but failed to allocate a new tp_funcs */
@@ -106,8 +74,8 @@ static void tp_stub_func(void)
 
 static inline void *allocate_probes(int count)
 {
-	struct tp_probes *p  = kmalloc(struct_size(p, probes, count),
-				       GFP_KERNEL);
+	struct tp_probes *p  = kmalloc(count * sizeof(struct tracepoint_func)
+			+ sizeof(struct tp_probes), GFP_KERNEL);
 	return p == NULL ? NULL : p->probes;
 }
 
@@ -130,7 +98,7 @@ static __init int release_early_probes(void)
 	while (early_probes) {
 		tmp = early_probes;
 		early_probes = tmp->next;
-		call_rcu(tmp, rcu_free_old_probes);
+		call_rcu_sched(tmp, rcu_free_old_probes);
 	}
 
 	return 0;
@@ -161,7 +129,7 @@ static inline void release_probes(struct tracepoint_func *old)
 		 * cover both cases. So let us chain the SRCU and sched RCU
 		 * callbacks to wait for both grace periods.
 		 */
-		call_rcu(&tp_probes->rcu, rcu_free_old_probes);
+		call_rcu_sched(&tp_probes->rcu, rcu_free_old_probes);
 	}
 }
 
@@ -313,37 +281,10 @@ static void *func_remove(struct tracepoint_func **funcs,
 }
 
 /*
- * Count the number of functions (enum tp_func_state) in a tp_funcs array.
- */
-static enum tp_func_state nr_func_state(const struct tracepoint_func *tp_funcs)
-{
-	if (!tp_funcs)
-		return TP_FUNC_0;
-	if (!tp_funcs[1].func)
-		return TP_FUNC_1;
-	if (!tp_funcs[2].func)
-		return TP_FUNC_2;
-	return TP_FUNC_N;	/* 3 or more */
-}
-
-static void tracepoint_update_call(struct tracepoint *tp, struct tracepoint_func *tp_funcs)
-{
-	void *func = tp->iterator;
-
-	/* Synthetic events do not have static call sites */
-	if (!tp->static_call_key)
-		return;
-	if (nr_func_state(tp_funcs) == TP_FUNC_1)
-		func = tp_funcs[0].func;
-	__static_call_update(tp->static_call_key, tp->static_call_tramp, func);
-}
-
-/*
  * Add the probe function to a tracepoint.
  */
 static int tracepoint_add_func(struct tracepoint *tp,
-			       struct tracepoint_func *func, int prio,
-			       bool warn)
+			       struct tracepoint_func *func, int prio)
 {
 	struct tracepoint_func *old, *tp_funcs;
 	int ret;
@@ -358,7 +299,7 @@ static int tracepoint_add_func(struct tracepoint *tp,
 			lockdep_is_held(&tracepoints_mutex));
 	old = func_add(&tp_funcs, func, prio);
 	if (IS_ERR(old)) {
-		WARN_ON_ONCE(warn && PTR_ERR(old) != -ENOMEM);
+		WARN_ON_ONCE(PTR_ERR(old) != -ENOMEM);
 		return PTR_ERR(old);
 	}
 
@@ -368,42 +309,9 @@ static int tracepoint_add_func(struct tracepoint *tp,
 	 * a pointer to it.  This array is referenced by __DO_TRACE from
 	 * include/linux/tracepoint.h using rcu_dereference_sched().
 	 */
-	switch (nr_func_state(tp_funcs)) {
-	case TP_FUNC_1:		/* 0->1 */
-		/*
-		 * Make sure new static func never uses old data after a
-		 * 1->0->1 transition sequence.
-		 */
-		tp_rcu_cond_sync(TP_TRANSITION_SYNC_1_0_1);
-		/* Set static call to first function */
-		tracepoint_update_call(tp, tp_funcs);
-		/* Both iterator and static call handle NULL tp->funcs */
-		rcu_assign_pointer(tp->funcs, tp_funcs);
-		static_key_enable(&tp->key);
-		break;
-	case TP_FUNC_2:		/* 1->2 */
-		/* Set iterator static call */
-		tracepoint_update_call(tp, tp_funcs);
-		/*
-		 * Iterator callback installed before updating tp->funcs.
-		 * Requires ordering between RCU assign/dereference and
-		 * static call update/call.
-		 */
-		fallthrough;
-	case TP_FUNC_N:		/* N->N+1 (N>1) */
-		rcu_assign_pointer(tp->funcs, tp_funcs);
-		/*
-		 * Make sure static func never uses incorrect data after a
-		 * N->...->2->1 (N>1) transition sequence.
-		 */
-		if (tp_funcs[0].data != old[0].data)
-			tp_rcu_get_state(TP_TRANSITION_SYNC_N_2_1);
-		break;
-	default:
-		WARN_ON_ONCE(1);
-		break;
-	}
-
+	rcu_assign_pointer(tp->funcs, tp_funcs);
+	if (!static_key_enabled(&tp->key))
+		static_key_slow_inc(&tp->key);
 	release_probes(old);
 	return 0;
 }
@@ -429,82 +337,18 @@ static int tracepoint_remove_func(struct tracepoint *tp,
 		/* Failed allocating new tp_funcs, replaced func with stub */
 		return 0;
 
-	switch (nr_func_state(tp_funcs)) {
-	case TP_FUNC_0:		/* 1->0 */
+	if (!tp_funcs) {
 		/* Removed last function */
 		if (tp->unregfunc && static_key_enabled(&tp->key))
 			tp->unregfunc();
 
-		static_key_disable(&tp->key);
-		/* Set iterator static call */
-		tracepoint_update_call(tp, tp_funcs);
-		/* Both iterator and static call handle NULL tp->funcs */
-		rcu_assign_pointer(tp->funcs, NULL);
-		/*
-		 * Make sure new static func never uses old data after a
-		 * 1->0->1 transition sequence.
-		 */
-		tp_rcu_get_state(TP_TRANSITION_SYNC_1_0_1);
-		break;
-	case TP_FUNC_1:		/* 2->1 */
-		rcu_assign_pointer(tp->funcs, tp_funcs);
-		/*
-		 * Make sure static func never uses incorrect data after a
-		 * N->...->2->1 (N>2) transition sequence. If the first
-		 * element's data has changed, then force the synchronization
-		 * to prevent current readers that have loaded the old data
-		 * from calling the new function.
-		 */
-		if (tp_funcs[0].data != old[0].data)
-			tp_rcu_get_state(TP_TRANSITION_SYNC_N_2_1);
-		tp_rcu_cond_sync(TP_TRANSITION_SYNC_N_2_1);
-		/* Set static call to first function */
-		tracepoint_update_call(tp, tp_funcs);
-		break;
-	case TP_FUNC_2:		/* N->N-1 (N>2) */
-		fallthrough;
-	case TP_FUNC_N:
-		rcu_assign_pointer(tp->funcs, tp_funcs);
-		/*
-		 * Make sure static func never uses incorrect data after a
-		 * N->...->2->1 (N>2) transition sequence.
-		 */
-		if (tp_funcs[0].data != old[0].data)
-			tp_rcu_get_state(TP_TRANSITION_SYNC_N_2_1);
-		break;
-	default:
-		WARN_ON_ONCE(1);
-		break;
+		if (static_key_enabled(&tp->key))
+			static_key_slow_dec(&tp->key);
 	}
+	rcu_assign_pointer(tp->funcs, tp_funcs);
 	release_probes(old);
 	return 0;
 }
-
-/**
- * tracepoint_probe_register_prio_may_exist -  Connect a probe to a tracepoint with priority
- * @tp: tracepoint
- * @probe: probe handler
- * @data: tracepoint data
- * @prio: priority of this function over other registered functions
- *
- * Same as tracepoint_probe_register_prio() except that it will not warn
- * if the tracepoint is already registered.
- */
-int tracepoint_probe_register_prio_may_exist(struct tracepoint *tp, void *probe,
-					     void *data, int prio)
-{
-	struct tracepoint_func tp_func;
-	int ret;
-
-	mutex_lock(&tracepoints_mutex);
-	tp_func.func = probe;
-	tp_func.data = data;
-	tp_func.prio = prio;
-	ret = tracepoint_add_func(tp, &tp_func, prio, false);
-	mutex_unlock(&tracepoints_mutex);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(tracepoint_probe_register_prio_may_exist);
 
 /**
  * tracepoint_probe_register_prio -  Connect a probe to a tracepoint with priority
@@ -529,7 +373,7 @@ int tracepoint_probe_register_prio(struct tracepoint *tp, void *probe,
 	tp_func.func = probe;
 	tp_func.data = data;
 	tp_func.prio = prio;
-	ret = tracepoint_add_func(tp, &tp_func, prio, true);
+	ret = tracepoint_add_func(tp, &tp_func, prio);
 	mutex_unlock(&tracepoints_mutex);
 	return ret;
 }
@@ -738,7 +582,7 @@ static int tracepoint_module_notify(struct notifier_block *self,
 	case MODULE_STATE_UNFORMED:
 		break;
 	}
-	return notifier_from_errno(ret);
+	return ret;
 }
 
 static struct notifier_block tracepoint_module_nb = {
@@ -806,83 +650,4 @@ void syscall_unregfunc(void)
 		read_unlock(&tasklist_lock);
 	}
 }
-#endif
-
-#ifdef CONFIG_ANDROID_VENDOR_HOOKS
-
-static void *rvh_zalloc_funcs(int count)
-{
-	return kzalloc(sizeof(struct tracepoint_func) * count, GFP_KERNEL);
-}
-
-#define ANDROID_RVH_NR_PROBES_MAX	2
-static int rvh_func_add(struct tracepoint *tp, struct tracepoint_func *func)
-{
-	int i;
-
-	if (!static_key_enabled(&tp->key)) {
-		/* '+ 1' for the last NULL element */
-		tp->funcs = rvh_zalloc_funcs(ANDROID_RVH_NR_PROBES_MAX + 1);
-		if (!tp->funcs)
-			return ENOMEM;
-	}
-
-	for (i = 0; i < ANDROID_RVH_NR_PROBES_MAX; i++) {
-		if (!tp->funcs[i].func) {
-			if (!static_key_enabled(&tp->key))
-				tp->funcs[i].data = func->data;
-			WRITE_ONCE(tp->funcs[i].func, func->func);
-
-			return 0;
-		}
-	}
-
-	return -EBUSY;
-}
-
-static int android_rvh_add_func(struct tracepoint *tp, struct tracepoint_func *func)
-{
-	int ret;
-
-	if (tp->regfunc && !static_key_enabled(&tp->key)) {
-		ret = tp->regfunc();
-		if (ret < 0)
-			return ret;
-	}
-
-	ret = rvh_func_add(tp, func);
-	if (ret)
-		return ret;
-	tracepoint_update_call(tp, tp->funcs);
-	static_key_enable(&tp->key);
-
-	return 0;
-}
-
-int android_rvh_probe_register(struct tracepoint *tp, void *probe, void *data)
-{
-	struct tracepoint_func tp_func;
-	int ret;
-
-	/*
-	 * Once the static key has been flipped, the array may be read
-	 * concurrently. Although __traceiter_*()  always checks .func first,
-	 * it doesn't enforce read->read dependencies, and we can't strongly
-	 * guarantee it will see the correct .data for the second element
-	 * without adding smp_load_acquire() in the fast path. But this is a
-	 * corner case which is unlikely to be needed by anybody in practice,
-	 * so let's just forbid it and keep the fast path clean.
-	 */
-	if (WARN_ON(static_key_enabled(&tp->key) && data))
-		return -EINVAL;
-
-	mutex_lock(&tracepoints_mutex);
-	tp_func.func = probe;
-	tp_func.data = data;
-	ret = android_rvh_add_func(tp, &tp_func);
-	mutex_unlock(&tracepoints_mutex);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(android_rvh_probe_register);
 #endif

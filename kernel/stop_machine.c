@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * kernel/stop_machine.c
  *
@@ -6,8 +5,9 @@
  * Copyright (C) 2008, 2005	Rusty Russell rusty@rustcorp.com.au
  * Copyright (C) 2010		SUSE Linux Products GmbH
  * Copyright (C) 2010		Tejun Heo <tj@kernel.org>
+ *
+ * This file is released under the GPLv2 and any later version.
  */
-#include <linux/compiler.h>
 #include <linux/completion.h>
 #include <linux/cpu.h>
 #include <linux/init.h>
@@ -22,7 +22,16 @@
 #include <linux/atomic.h>
 #include <linux/nmi.h>
 #include <linux/sched/wake_q.h>
-#include <linux/slab.h>
+
+/*
+ * Structure to determine completion condition and record errors.  May
+ * be shared by works on different cpus.
+ */
+struct cpu_stop_done {
+	atomic_t		nr_todo;	/* nr left to execute */
+	int			ret;		/* collected return value */
+	struct completion	completion;	/* fired if nr_todo reaches 0 */
+};
 
 /* the actual stopper, one per every possible cpu, enabled on online cpus */
 struct cpu_stopper {
@@ -159,7 +168,7 @@ static void set_state(struct multi_stop_data *msdata,
 	/* Reset ack counter. */
 	atomic_set(&msdata->thread_ack, msdata->num_threads);
 	smp_wmb();
-	WRITE_ONCE(msdata->state, newstate);
+	msdata->state = newstate;
 }
 
 /* Last one to ack a state moves to the next state. */
@@ -169,18 +178,12 @@ static void ack_state(struct multi_stop_data *msdata)
 		set_state(msdata, msdata->state + 1);
 }
 
-notrace void __weak stop_machine_yield(const struct cpumask *cpumask)
-{
-	cpu_relax();
-}
-
 /* This is the cpu_stop function which stops the CPU. */
 static int multi_cpu_stop(void *data)
 {
 	struct multi_stop_data *msdata = data;
-	enum multi_stop_state newstate, curstate = MULTI_STOP_NONE;
+	enum multi_stop_state curstate = MULTI_STOP_NONE;
 	int cpu = smp_processor_id(), err = 0;
-	const struct cpumask *cpumask;
 	unsigned long flags;
 	bool is_active;
 
@@ -190,21 +193,17 @@ static int multi_cpu_stop(void *data)
 	 */
 	local_save_flags(flags);
 
-	if (!msdata->active_cpus) {
-		cpumask = cpu_online_mask;
-		is_active = cpu == cpumask_first(cpumask);
-	} else {
-		cpumask = msdata->active_cpus;
-		is_active = cpumask_test_cpu(cpu, cpumask);
-	}
+	if (!msdata->active_cpus)
+		is_active = cpu == cpumask_first(cpu_online_mask);
+	else
+		is_active = cpumask_test_cpu(cpu, msdata->active_cpus);
 
 	/* Simple state machine */
 	do {
 		/* Chill out and ensure we re-read multi_stop_state. */
-		stop_machine_yield(cpumask);
-		newstate = READ_ONCE(msdata->state);
-		if (newstate != curstate) {
-			curstate = newstate;
+		cpu_relax_yield();
+		if (msdata->state != curstate) {
+			curstate = msdata->state;
 			switch (curstate) {
 			case MULTI_STOP_DISABLE_IRQ:
 				local_irq_disable();
@@ -226,7 +225,6 @@ static int multi_cpu_stop(void *data)
 			 */
 			touch_nmi_watchdog();
 		}
-		rcu_momentary_dyntick_idle();
 	} while (curstate != MULTI_STOP_EXIT);
 
 	local_irq_restore(flags);
@@ -361,55 +359,6 @@ bool stop_one_cpu_nowait(unsigned int cpu, cpu_stop_fn_t fn, void *arg,
 	*work_buf = (struct cpu_stop_work){ .fn = fn, .arg = arg, };
 	return cpu_stop_queue_work(cpu, work_buf);
 }
-EXPORT_SYMBOL_GPL(stop_one_cpu_nowait);
-
-/**
- * stop_one_cpu_async - stop a cpu and wait for completion in a separated
- *			function: stop_wait_work()
- * @cpu: cpu to stop
- * @fn: function to execute
- * @arg: argument to @fn
- * @work_buf: pointer to cpu_stop_work structure
- *
- * CONTEXT:
- * Might sleep.
- *
- * RETURNS:
- * 0 if cpu_stop_work was queued successfully and @fn will be called.
- * ENOENT if @fn(@arg) was not executed because @cpu was offline.
- */
-int stop_one_cpu_async(unsigned int cpu, cpu_stop_fn_t fn, void *arg,
-		       struct cpu_stop_work *work_buf,
-		       struct cpu_stop_done *done)
-{
-	cpu_stop_init_done(done, 1);
-
-	work_buf->done = done;
-	work_buf->fn = fn;
-	work_buf->arg = arg;
-
-	if (cpu_stop_queue_work(cpu, work_buf))
-		return 0;
-
-	work_buf->done = NULL;
-
-	return -ENOENT;
-}
-
-/**
- * cpu_stop_work_wait - wait for a stop initiated by stop_one_cpu_async().
- * @work_buf: pointer to cpu_stop_work structure
- *
- * CONTEXT:
- * Might sleep.
- */
-void cpu_stop_work_wait(struct cpu_stop_work *work_buf)
-{
-	struct cpu_stop_done *done = work_buf->done;
-
-	wait_for_completion(&done->completion);
-	work_buf->done = NULL;
-}
 
 static bool queue_stop_cpus_work(const struct cpumask *cpumask,
 				 cpu_stop_fn_t fn, void *arg,
@@ -426,7 +375,6 @@ static bool queue_stop_cpus_work(const struct cpumask *cpumask,
 	 */
 	preempt_disable();
 	stop_cpus_in_progress = true;
-	barrier();
 	for_each_cpu(cpu, cpumask) {
 		work = &per_cpu(cpu_stopper.stop_work, cpu);
 		work->fn = fn;
@@ -435,7 +383,6 @@ static bool queue_stop_cpus_work(const struct cpumask *cpumask,
 		if (cpu_stop_queue_work(cpu, work))
 			queued = true;
 	}
-	barrier();
 	stop_cpus_in_progress = false;
 	preempt_enable();
 
@@ -482,12 +429,42 @@ static int __stop_cpus(const struct cpumask *cpumask,
  * @cpumask were offline; otherwise, 0 if all executions of @fn
  * returned 0, any non zero return value if any returned non zero.
  */
-static int stop_cpus(const struct cpumask *cpumask, cpu_stop_fn_t fn, void *arg)
+int stop_cpus(const struct cpumask *cpumask, cpu_stop_fn_t fn, void *arg)
 {
 	int ret;
 
 	/* static works are used, process one request at a time */
 	mutex_lock(&stop_cpus_mutex);
+	ret = __stop_cpus(cpumask, fn, arg);
+	mutex_unlock(&stop_cpus_mutex);
+	return ret;
+}
+
+/**
+ * try_stop_cpus - try to stop multiple cpus
+ * @cpumask: cpus to stop
+ * @fn: function to execute
+ * @arg: argument to @fn
+ *
+ * Identical to stop_cpus() except that it fails with -EAGAIN if
+ * someone else is already using the facility.
+ *
+ * CONTEXT:
+ * Might sleep.
+ *
+ * RETURNS:
+ * -EAGAIN if someone else is already stopping cpus, -ENOENT if
+ * @fn(@arg) was not executed at all because all cpus in @cpumask were
+ * offline; otherwise, 0 if all executions of @fn returned 0, any non
+ * zero return value if any returned non zero.
+ */
+int try_stop_cpus(const struct cpumask *cpumask, cpu_stop_fn_t fn, void *arg)
+{
+	int ret;
+
+	/* static works are used, process one request at a time */
+	if (!mutex_trylock(&stop_cpus_mutex))
+		return -EAGAIN;
 	ret = __stop_cpus(cpumask, fn, arg);
 	mutex_unlock(&stop_cpus_mutex);
 	return ret;
@@ -536,7 +513,7 @@ repeat:
 		}
 		preempt_count_dec();
 		WARN_ONCE(preempt_count(),
-			  "cpu_stop: %ps(%p) leaked preempt count\n", fn, arg);
+			  "cpu_stop: %pf(%p) leaked preempt count\n", fn, arg);
 		goto repeat;
 	}
 }

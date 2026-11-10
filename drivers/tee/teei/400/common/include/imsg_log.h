@@ -21,7 +21,7 @@ enum {
 	IMSG_LV_TRACE
 };
 
-#if IS_ENABLED(CONFIG_MICROTRUST_DEBUG)
+#if defined(CONFIG_MICROTRUST_DEBUG)
 #define IMSG_LOG_LEVEL          IMSG_LV_DEBUG
 #define IMSG_PROFILE_LEVEL      IMSG_LV_TRACE
 #else
@@ -34,15 +34,14 @@ enum {
 #include <linux/ktime.h>
 #include <linux/timekeeping.h>
 
-extern uint32_t get_imsg_log_level(void);
+uint32_t get_imsg_log_level(void);
 
 static inline unsigned long now_ms(void)
 {
-	struct timespec64 now_time;
+	struct timeval now_time;
 
-	ktime_get_real_ts64(&now_time);
-
-	return (now_time.tv_sec * 1000) + now_time.tv_nsec / 1000000;
+	do_gettimeofday(&now_time);
+	return ((now_time.tv_sec * 1000000) + now_time.tv_usec)/1000;
 }
 
 #define IMSG_PRINTK(fmt, ...)           pr_info(fmt, ##__VA_ARGS__)

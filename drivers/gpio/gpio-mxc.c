@@ -15,7 +15,6 @@
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
 #include <linux/irqchip/chained_irq.h>
-#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/syscore_ops.h>
@@ -159,7 +158,6 @@ static const struct of_device_id mxc_gpio_dt_ids[] = {
 	{ .compatible = "fsl,imx7d-gpio", .data = &mxc_gpio_devtype[IMX35_GPIO], },
 	{ /* sentinel */ }
 };
-MODULE_DEVICE_TABLE(of, mxc_gpio_dt_ids);
 
 /*
  * MX2 has one interrupt *for all* gpio ports. The list is used
@@ -231,7 +229,7 @@ static int gpio_set_irq_type(struct irq_data *d, u32 type)
 
 	writel(1 << gpio_idx, port->base + GPIO_ISR);
 
-	return port->gc.direction_input(&port->gc, gpio_idx);
+	return 0;
 }
 
 static void mxc_flip_edge(struct mxc_gpio_port *port, u32 gpio)
@@ -361,7 +359,7 @@ static int mxc_gpio_init_gc(struct mxc_gpio_port *port, int irq_base)
 	ct->chip.irq_unmask = irq_gc_mask_set_bit;
 	ct->chip.irq_set_type = gpio_set_irq_type;
 	ct->chip.irq_set_wake = gpio_set_wake_irq;
-	ct->chip.flags = IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND;
+	ct->chip.flags = IRQCHIP_MASK_ON_SUSPEND;
 	ct->regs.ack = GPIO_ISR;
 	ct->regs.mask = GPIO_IMR;
 
@@ -413,7 +411,7 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct mxc_gpio_port *port;
-	int irq_count;
+	struct resource *iores;
 	int irq_base;
 	int err;
 
@@ -425,28 +423,26 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 
 	port->dev = &pdev->dev;
 
-	port->base = devm_platform_ioremap_resource(pdev, 0);
+	iores = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	port->base = devm_ioremap_resource(&pdev->dev, iores);
 	if (IS_ERR(port->base))
 		return PTR_ERR(port->base);
 
-	irq_count = platform_irq_count(pdev);
-	if (irq_count < 0)
-		return irq_count;
-
-	if (irq_count > 1) {
-		port->irq_high = platform_get_irq(pdev, 1);
-		if (port->irq_high < 0)
-			port->irq_high = 0;
-	}
+	port->irq_high = platform_get_irq(pdev, 1);
+	if (port->irq_high < 0)
+		port->irq_high = 0;
 
 	port->irq = platform_get_irq(pdev, 0);
 	if (port->irq < 0)
 		return port->irq;
 
 	/* the controller clock is optional */
-	port->clk = devm_clk_get_optional(&pdev->dev, NULL);
-	if (IS_ERR(port->clk))
-		return PTR_ERR(port->clk);
+	port->clk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(port->clk)) {
+		if (PTR_ERR(port->clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		port->clk = NULL;
+	}
 
 	err = clk_prepare_enable(port->clk);
 	if (err) {
@@ -487,8 +483,11 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 	if (err)
 		goto out_bgio;
 
-	port->gc.request = gpiochip_generic_request;
-	port->gc.free = gpiochip_generic_free;
+	if (of_property_read_bool(np, "gpio-ranges")) {
+		port->gc.request = gpiochip_generic_request;
+		port->gc.free = gpiochip_generic_free;
+	}
+
 	port->gc.to_irq = mxc_gpio_to_irq;
 	port->gc.base = (pdev->id < 0) ? of_alias_get_id(np, "gpio") * 32 :
 					     pdev->id * 32;
@@ -606,7 +605,3 @@ static int __init gpio_mxc_init(void)
 	return platform_driver_register(&mxc_gpio_driver);
 }
 subsys_initcall(gpio_mxc_init);
-
-MODULE_AUTHOR("Shawn Guo <shawn.guo@linaro.org>");
-MODULE_DESCRIPTION("i.MX GPIO Driver");
-MODULE_LICENSE("GPL");

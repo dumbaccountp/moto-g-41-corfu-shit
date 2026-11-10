@@ -11,24 +11,9 @@
 #include <linux/rbtree.h>
 #include <linux/hrtimer.h>
 #include <linux/workqueue.h>
-#include <linux/sched/task.h>
-#include <linux/sched.h>
 
-#define MAX_DEP_NUM 50
 #define WINDOW 20
-#define RESCUE_TIMER_NUM 5
-#define QUOTA_MAX_SIZE 300
-#define GCC_MAX_SIZE 300
-#define LOADING_CNT 64
-
-enum {
-	FPSGO_SET_UNKNOWN = -1,
-	FPSGO_SET_BOOST_TA = 0,
-	FPSGO_SET_IDLE_PREFER = 1,
-	FPSGO_SET_SCHED_RATE = 2,
-	FPSGO_SET_DRAM = 3,
-	FPSGO_SET_ISOLATION = 4,
-};
+#define RESCUE_TIMER_NUM 2
 
 /* EARA job type */
 enum HW_EVENT4RENDER {
@@ -60,57 +45,32 @@ struct fbt_frame_info {
 struct fbt_thread_loading {
 	int pid;
 	unsigned long long buffer_id;
-	int hwui;
 	atomic_t loading;
 	atomic_t *loading_cl;
 	atomic_t last_cb_ts;
-	atomic_t lastest_loading[LOADING_CNT];
-	atomic_t lastest_ts[LOADING_CNT];
-	atomic_t prev_cb_ts[LOADING_CNT];
-	atomic_t lastest_obv[LOADING_CNT];
-	atomic_t *lastest_loading_cl[LOADING_CNT];
-	atomic_t *lastest_obv_cl[LOADING_CNT];
-	atomic_t lastest_idx;
 	struct list_head entry;
-	int ext_id;
-};
-
-
-struct fpsgo_loading {
-	int pid;
-	int loading;
-	int prefer_type;
-	int policy;
-	long nice_bk;
-	int action;
 };
 
 struct fbt_thread_blc {
 	int pid;
 	unsigned long long buffer_id;
 	unsigned int blc;
-	int dep_num;
-	struct fpsgo_loading dep[MAX_DEP_NUM];
+	int freerun;
 	struct list_head entry;
 };
 
 struct fbt_boost_info {
-	int target_fps;
 	unsigned long long target_time;
 	unsigned int last_blc;
-	unsigned int last_normal_blc;
-	unsigned int sbe_rescue;
 
 	/* adjust loading */
 	int loading_weight;
 	int weight_cnt;
 	int hit_cnt;
 	int deb_cnt;
-	int hit_cluster;
 
 	/* rescue*/
 	struct fbt_proc proc;
-	int cur_stage;
 
 	/* variance control */
 	struct fbt_frame_info frame_info[WINDOW];
@@ -118,36 +78,6 @@ struct fbt_boost_info {
 	int floor_count;
 	int reset_floor_bound;
 	int f_iter;
-
-	/* quota */
-	long long quota_raw[QUOTA_MAX_SIZE];
-	int quota_cnt;
-	int quota_cur_idx;
-	int quota_fps;
-	int quota;
-	int quota_adj; /* remove outlier */
-	int quota_mod; /* mod target time */
-	int enq_raw[QUOTA_MAX_SIZE];
-	int enq_sum;
-	int enq_avg;
-
-	/* GCC */
-	int gcc_quota;
-	int gcc_count;
-	int gcc_target_fps;
-	int correction;
-	int quantile_cpu_time;
-	int quantile_gpu_time;
-
-};
-
-struct uboost {
-	unsigned long long vsync_u_runtime;
-	unsigned long long checkp_u_runtime;
-	unsigned long long timer_period;
-	int uboosting;
-	struct hrtimer timer;
-	struct work_struct work;
 };
 
 struct render_info {
@@ -164,9 +94,6 @@ struct render_info {
 	int tgid;	/*render's process pid*/
 	int api;	/*connected API*/
 	int frame_type;
-	int hwui;
-	int ux;
-	int video;
 
 	/*render queue/dequeue/frame time info*/
 	unsigned long long t_enqueue_start;
@@ -174,7 +101,6 @@ struct render_info {
 	unsigned long long t_dequeue_start;
 	unsigned long long t_dequeue_end;
 	unsigned long long enqueue_length;
-	unsigned long long enqueue_length_real;
 	unsigned long long dequeue_length;
 	unsigned long long Q2Q_time;
 	unsigned long long running_time;
@@ -184,17 +110,14 @@ struct render_info {
 	struct fbt_boost_info boost_info;
 	struct fbt_thread_loading *pLoading;
 	struct fbt_thread_blc *p_blc;
+	int is_listed;
 	struct fpsgo_loading *dep_arr;
 	int dep_valid_size;
 	unsigned long long dep_loading_ts;
 	unsigned long long linger_ts;
-	long long last_sched_runtime;
 
 	/*TODO: EARA mid list*/
 	unsigned long long mid;
-
-	/*uboost*/
-	struct uboost uboost_info;
 
 	struct mutex thr_mlock;
 };
@@ -209,15 +132,10 @@ struct BQ_id {
 	struct rb_node entry;
 };
 
-struct hwui_info {
+struct fpsgo_loading {
 	int pid;
-	struct rb_node entry;
-};
-
-struct video_info {
-	int pid;
-	unsigned int count_instance;
-	struct rb_node entry;
+	int loading;
+	int prefer_type;
 };
 
 struct gbe_runtime {
@@ -235,15 +153,9 @@ struct gbe_runtime {
 #define FPSGO_CONTAINER_OF(ptr, type, member) \
 	((type *)(((char *)ptr) - offsetof(type, member)))
 
-long long fpsgo_task_sched_runtime(struct task_struct *p);
-long fpsgo_sched_setaffinity(pid_t pid, const struct cpumask *in_mask);
 void *fpsgo_alloc_atomic(int i32Size);
 void fpsgo_free(void *pvBuf, int i32Size);
 unsigned long long fpsgo_get_time(void);
-int fpsgo_arch_nr_clusters(void);
-unsigned int fpsgo_cpufreq_get_freq_by_idx(
-	int cpu, unsigned int opp);
-bool fpsgo_sentuevent(const char *src);
 
 int fpsgo_get_tgid(int pid);
 void fpsgo_render_tree_lock(const char *tag);
@@ -256,8 +168,6 @@ void fpsgo_delete_render_info(int pid,
 	unsigned long long buffer_id, unsigned long long identifier);
 struct render_info *fpsgo_search_and_add_render_info(int pid,
 		unsigned long long identifier, int force);
-struct hwui_info *fpsgo_search_and_add_hwui_info(int pid, int force);
-void fpsgo_delete_hwui_info(int pid);
 int fpsgo_has_bypass(void);
 void fpsgo_check_thread_status(void);
 void fpsgo_clear(void);
@@ -266,17 +176,24 @@ struct BQ_id *fpsgo_find_BQ_id(int pid, int tgid, long long identifier,
 int fpsgo_get_BQid_pair(int pid, int tgid, long long identifier,
 		unsigned long long *buffer_id, int *queue_SF, int enqueue);
 void fpsgo_main_trace(const char *fmt, ...);
-void fpsgo_clear_uclamp_boost(void);
+void fpsgo_clear_uclamp_boost(int check);
 void fpsgo_clear_llf_cpu_policy(int orig_llf);
 void fpsgo_del_linger(struct render_info *thr);
-int fpsgo_uboost_traverse(unsigned long long ts);
-int fpsgo_base_is_finished(struct render_info *thr);
-int fpsgo_update_swap_buffer(int pid);
-void fpsgo_sentcmd(int cmd, int value1, int value2);
-void fpsgo_ctrl2base_get_pwr_cmd(int *cmd, int *value1, int *value2);
-int fpsgo_sbe_rescue_traverse(int pid, int start, int enhance);
 
 int init_fpsgo_common(void);
+
+
+enum FPSGO_ERROR {
+	FPSGO_OK,
+	FPSGO_ERROR_FAIL,
+	FPSGO_ERROR_OOM,
+	FPSGO_ERROR_OUT_OF_FD,
+	FPSGO_ERROR_FAIL_WITH_LIMIT,
+	FPSGO_ERROR_TIMEOUT,
+	FPSGO_ERROR_CMD_NOT_PROCESSED,
+	FPSGO_ERROR_INVALID_PARAMS,
+	FPSGO_INTENTIONAL_BLOCK
+};
 
 enum FPSGO_FRAME_TYPE {
 	NON_VSYNC_ALIGNED_TYPE = 0,
@@ -302,17 +219,6 @@ enum FPSGO_BQID_ACT {
 	ACTION_FIND_ADD,
 	ACTION_FIND_DEL,
 	ACTION_DEL_PID
-};
-
-enum FPSGO_RENDER_INFO_HWUI {
-	RENDER_INFO_HWUI_UNKNOWN = 0,
-	RENDER_INFO_HWUI_TYPE = 1,
-	RENDER_INFO_HWUI_NONE = 2,
-};
-
-enum FPSGO_RENDER_INFO_VIDEO {
-	RENDER_INFO_VIDEO_NONE = 0,
-	RENDER_INFO_VIDEO_TYPE = 1,
 };
 
 #endif

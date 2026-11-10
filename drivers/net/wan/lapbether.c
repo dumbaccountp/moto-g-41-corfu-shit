@@ -1,8 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	"LAPB via ethernet" driver release 001
  *
  *	This code REQUIRES 2.1.15 or higher/ NET3.038
+ *
+ *	This module:
+ *		This module is free software; you can redistribute it and/or
+ *		modify it under the terms of the GNU General Public License
+ *		as published by the Free Software Foundation; either version
+ *		2 of the License, or (at your option) any later version.
  *
  *	This is a "pseudo" network driver to allow LAPB over Ethernet.
  *
@@ -66,7 +71,7 @@ static struct lapbethdev *lapbeth_get_x25_dev(struct net_device *dev)
 {
 	struct lapbethdev *lapbeth;
 
-	list_for_each_entry_rcu(lapbeth, &lapbeth_devices, node, lockdep_rtnl_is_held()) {
+	list_for_each_entry_rcu(lapbeth, &lapbeth_devices, node) {
 		if (lapbeth->ethdev == dev) 
 			return lapbeth;
 	}
@@ -134,12 +139,10 @@ static int lapbeth_data_indication(struct net_device *dev, struct sk_buff *skb)
 {
 	unsigned char *ptr;
 
-	if (skb_cow(skb, 1)) {
-		kfree_skb(skb);
-		return NET_RX_DROP;
-	}
-
 	skb_push(skb, 1);
+
+	if (skb_cow(skb, 1))
+		return NET_RX_DROP;
 
 	ptr  = skb->data;
 	*ptr = X25_IFACE_DATA;
@@ -177,7 +180,7 @@ static netdev_tx_t lapbeth_xmit(struct sk_buff *skb,
 	case X25_IFACE_DISCONNECT:
 		if ((err = lapb_disconnect_request(dev)) != LAPB_OK)
 			pr_err("lapb_disconnect_request err: %d\n", err);
-		fallthrough;
+		/* Fall thru */
 	default:
 		goto drop;
 	}
@@ -403,7 +406,7 @@ static int lapbeth_device_event(struct notifier_block *this,
 	if (dev_net(dev) != &init_net)
 		return NOTIFY_DONE;
 
-	if (!dev_is_ethdev(dev) && !lapbeth_get_x25_dev(dev))
+	if (!dev_is_ethdev(dev))
 		return NOTIFY_DONE;
 
 	switch (event) {

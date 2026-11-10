@@ -335,7 +335,7 @@ static void pvscsi_create_sg(struct pvscsi_ctx *ctx,
 	BUG_ON(count > PVSCSI_MAX_NUM_SG_ENTRIES_PER_SEGMENT);
 
 	sge = &ctx->sgl->sge[0];
-	for (i = 0; i < count; i++, sg = sg_next(sg)) {
+	for (i = 0; i < count; i++, sg++) {
 		sge[i].addr   = sg_dma_address(sg);
 		sge[i].length = sg_dma_len(sg);
 		sge[i].flags  = 0;
@@ -365,16 +365,16 @@ static int pvscsi_map_buffers(struct pvscsi_adapter *adapter,
 		int segs = scsi_dma_map(cmd);
 
 		if (segs == -ENOMEM) {
-			scmd_printk(KERN_DEBUG, cmd,
+			scmd_printk(KERN_ERR, cmd,
 				    "vmw_pvscsi: Failed to map cmd sglist for DMA.\n");
 			return -ENOMEM;
 		} else if (segs > 1) {
 			pvscsi_create_sg(ctx, sg, segs);
 
 			e->flags |= PVSCSI_FLAG_CMD_WITH_SG_LIST;
-			ctx->sglPA = dma_map_single(&adapter->dev->dev,
-					ctx->sgl, SGL_SIZE, DMA_TO_DEVICE);
-			if (dma_mapping_error(&adapter->dev->dev, ctx->sglPA)) {
+			ctx->sglPA = pci_map_single(adapter->dev, ctx->sgl,
+						    SGL_SIZE, PCI_DMA_TODEVICE);
+			if (pci_dma_mapping_error(adapter->dev, ctx->sglPA)) {
 				scmd_printk(KERN_ERR, cmd,
 					    "vmw_pvscsi: Failed to map ctx sglist for DMA.\n");
 				scsi_dma_unmap(cmd);
@@ -389,10 +389,10 @@ static int pvscsi_map_buffers(struct pvscsi_adapter *adapter,
 		 * In case there is no S/G list, scsi_sglist points
 		 * directly to the buffer.
 		 */
-		ctx->dataPA = dma_map_single(&adapter->dev->dev, sg, bufflen,
+		ctx->dataPA = pci_map_single(adapter->dev, sg, bufflen,
 					     cmd->sc_data_direction);
-		if (dma_mapping_error(&adapter->dev->dev, ctx->dataPA)) {
-			scmd_printk(KERN_DEBUG, cmd,
+		if (pci_dma_mapping_error(adapter->dev, ctx->dataPA)) {
+			scmd_printk(KERN_ERR, cmd,
 				    "vmw_pvscsi: Failed to map direct data buffer for DMA.\n");
 			return -ENOMEM;
 		}
@@ -400,17 +400,6 @@ static int pvscsi_map_buffers(struct pvscsi_adapter *adapter,
 	}
 
 	return 0;
-}
-
-/*
- * The device incorrectly doesn't clear the first byte of the sense
- * buffer in some cases. We have to do it ourselves.
- * Otherwise we run into trouble when SWIOTLB is forced.
- */
-static void pvscsi_patch_sense(struct scsi_cmnd *cmd)
-{
-	if (cmd->sense_buffer)
-		cmd->sense_buffer[0] = 0;
 }
 
 static void pvscsi_unmap_buffers(const struct pvscsi_adapter *adapter,
@@ -428,23 +417,23 @@ static void pvscsi_unmap_buffers(const struct pvscsi_adapter *adapter,
 		if (count != 0) {
 			scsi_dma_unmap(cmd);
 			if (ctx->sglPA) {
-				dma_unmap_single(&adapter->dev->dev, ctx->sglPA,
-						 SGL_SIZE, DMA_TO_DEVICE);
+				pci_unmap_single(adapter->dev, ctx->sglPA,
+						 SGL_SIZE, PCI_DMA_TODEVICE);
 				ctx->sglPA = 0;
 			}
 		} else
-			dma_unmap_single(&adapter->dev->dev, ctx->dataPA,
-					 bufflen, cmd->sc_data_direction);
+			pci_unmap_single(adapter->dev, ctx->dataPA, bufflen,
+					 cmd->sc_data_direction);
 	}
 	if (cmd->sense_buffer)
-		dma_unmap_single(&adapter->dev->dev, ctx->sensePA,
-				 SCSI_SENSE_BUFFERSIZE, DMA_FROM_DEVICE);
+		pci_unmap_single(adapter->dev, ctx->sensePA,
+				 SCSI_SENSE_BUFFERSIZE, PCI_DMA_FROMDEVICE);
 }
 
 static int pvscsi_allocate_rings(struct pvscsi_adapter *adapter)
 {
-	adapter->rings_state = dma_alloc_coherent(&adapter->dev->dev, PAGE_SIZE,
-			&adapter->ringStatePA, GFP_KERNEL);
+	adapter->rings_state = pci_alloc_consistent(adapter->dev, PAGE_SIZE,
+						    &adapter->ringStatePA);
 	if (!adapter->rings_state)
 		return -ENOMEM;
 
@@ -452,17 +441,17 @@ static int pvscsi_allocate_rings(struct pvscsi_adapter *adapter)
 				 pvscsi_ring_pages);
 	adapter->req_depth = adapter->req_pages
 					* PVSCSI_MAX_NUM_REQ_ENTRIES_PER_PAGE;
-	adapter->req_ring = dma_alloc_coherent(&adapter->dev->dev,
-			adapter->req_pages * PAGE_SIZE, &adapter->reqRingPA,
-			GFP_KERNEL);
+	adapter->req_ring = pci_alloc_consistent(adapter->dev,
+						 adapter->req_pages * PAGE_SIZE,
+						 &adapter->reqRingPA);
 	if (!adapter->req_ring)
 		return -ENOMEM;
 
 	adapter->cmp_pages = min(PVSCSI_MAX_NUM_PAGES_CMP_RING,
 				 pvscsi_ring_pages);
-	adapter->cmp_ring = dma_alloc_coherent(&adapter->dev->dev,
-			adapter->cmp_pages * PAGE_SIZE, &adapter->cmpRingPA,
-			GFP_KERNEL);
+	adapter->cmp_ring = pci_alloc_consistent(adapter->dev,
+						 adapter->cmp_pages * PAGE_SIZE,
+						 &adapter->cmpRingPA);
 	if (!adapter->cmp_ring)
 		return -ENOMEM;
 
@@ -475,9 +464,9 @@ static int pvscsi_allocate_rings(struct pvscsi_adapter *adapter)
 
 	adapter->msg_pages = min(PVSCSI_MAX_NUM_PAGES_MSG_RING,
 				 pvscsi_msg_ring_pages);
-	adapter->msg_ring = dma_alloc_coherent(&adapter->dev->dev,
-			adapter->msg_pages * PAGE_SIZE, &adapter->msgRingPA,
-			GFP_KERNEL);
+	adapter->msg_ring = pci_alloc_consistent(adapter->dev,
+						 adapter->msg_pages * PAGE_SIZE,
+						 &adapter->msgRingPA);
 	if (!adapter->msg_ring)
 		return -ENOMEM;
 	BUG_ON(!IS_ALIGNED(adapter->msgRingPA, PAGE_SIZE));
@@ -555,8 +544,6 @@ static void pvscsi_complete_request(struct pvscsi_adapter *adapter,
 	cmd = ctx->cmd;
 	abort_cmp = ctx->abort_cmp;
 	pvscsi_unmap_buffers(adapter, ctx);
-	if (sdstat != SAM_STAT_CHECK_CONDITION)
-		pvscsi_patch_sense(cmd);
 	pvscsi_release_context(adapter, ctx);
 	if (abort_cmp) {
 		/*
@@ -587,16 +574,7 @@ static void pvscsi_complete_request(struct pvscsi_adapter *adapter,
 		case BTSTAT_SUCCESS:
 		case BTSTAT_LINKED_COMMAND_COMPLETED:
 		case BTSTAT_LINKED_COMMAND_COMPLETED_WITH_FLAG:
-			/*
-			 * Commands like INQUIRY may transfer less data than
-			 * requested by the initiator via bufflen. Set residual
-			 * count to make upper layer aware of the actual amount
-			 * of data returned. There are cases when controller
-			 * returns zero dataLen with non zero data - do not set
-			 * residual count in that case.
-			 */
-			if (e->dataLen && (e->dataLen < scsi_bufflen(cmd)))
-				scsi_set_resid(cmd, scsi_bufflen(cmd) - e->dataLen);
+			/* If everything went fine, let's move on..  */
 			cmd->result = (DID_OK << 16);
 			break;
 
@@ -616,7 +594,7 @@ static void pvscsi_complete_request(struct pvscsi_adapter *adapter,
 		case BTSTAT_TAGREJECT:
 		case BTSTAT_BADMSG:
 			cmd->result = (DRIVER_INVALID << 24);
-			fallthrough;
+			/* fall through */
 
 		case BTSTAT_HAHARDWARE:
 		case BTSTAT_INVPHASE:
@@ -730,11 +708,11 @@ static int pvscsi_queue_ring(struct pvscsi_adapter *adapter,
 	e->lun[1] = sdev->lun;
 
 	if (cmd->sense_buffer) {
-		ctx->sensePA = dma_map_single(&adapter->dev->dev,
-				cmd->sense_buffer, SCSI_SENSE_BUFFERSIZE,
-				DMA_FROM_DEVICE);
-		if (dma_mapping_error(&adapter->dev->dev, ctx->sensePA)) {
-			scmd_printk(KERN_DEBUG, cmd,
+		ctx->sensePA = pci_map_single(adapter->dev, cmd->sense_buffer,
+					      SCSI_SENSE_BUFFERSIZE,
+					      PCI_DMA_FROMDEVICE);
+		if (pci_dma_mapping_error(adapter->dev, ctx->sensePA)) {
+			scmd_printk(KERN_ERR, cmd,
 				    "vmw_pvscsi: Failed to map sense buffer for DMA.\n");
 			ctx->sensePA = 0;
 			return -ENOMEM;
@@ -762,9 +740,9 @@ static int pvscsi_queue_ring(struct pvscsi_adapter *adapter,
 
 	if (pvscsi_map_buffers(adapter, ctx, cmd, e) != 0) {
 		if (cmd->sense_buffer) {
-			dma_unmap_single(&adapter->dev->dev, ctx->sensePA,
+			pci_unmap_single(adapter->dev, ctx->sensePA,
 					 SCSI_SENSE_BUFFERSIZE,
-					 DMA_FROM_DEVICE);
+					 PCI_DMA_FROMDEVICE);
 			ctx->sensePA = 0;
 		}
 		return -ENOMEM;
@@ -895,7 +873,6 @@ static void pvscsi_reset_all(struct pvscsi_adapter *adapter)
 			scmd_printk(KERN_ERR, cmd,
 				    "Forced reset on cmd %p\n", cmd);
 			pvscsi_unmap_buffers(adapter, ctx);
-			pvscsi_patch_sense(cmd);
 			pvscsi_release_context(adapter, ctx);
 			cmd->result = (DID_RESET << 16);
 			cmd->scsi_done(cmd);
@@ -917,7 +894,7 @@ static int pvscsi_host_reset(struct scsi_cmnd *cmd)
 	use_msg = adapter->use_msg;
 
 	if (use_msg) {
-		adapter->use_msg = false;
+		adapter->use_msg = 0;
 		spin_unlock_irqrestore(&adapter->hw_lock, flags);
 
 		/*
@@ -1032,6 +1009,7 @@ static struct scsi_host_template pvscsi_template = {
 	.sg_tablesize			= PVSCSI_MAX_NUM_SG_ENTRIES_PER_SEGMENT,
 	.dma_boundary			= UINT_MAX,
 	.max_sectors			= 0xffff,
+	.use_clustering			= ENABLE_CLUSTERING,
 	.change_queue_depth		= pvscsi_change_queue_depth,
 	.eh_abort_handler		= pvscsi_abort,
 	.eh_device_reset_handler	= pvscsi_device_reset,
@@ -1240,21 +1218,21 @@ static void pvscsi_release_resources(struct pvscsi_adapter *adapter)
 	}
 
 	if (adapter->rings_state)
-		dma_free_coherent(&adapter->dev->dev, PAGE_SIZE,
+		pci_free_consistent(adapter->dev, PAGE_SIZE,
 				    adapter->rings_state, adapter->ringStatePA);
 
 	if (adapter->req_ring)
-		dma_free_coherent(&adapter->dev->dev,
+		pci_free_consistent(adapter->dev,
 				    adapter->req_pages * PAGE_SIZE,
 				    adapter->req_ring, adapter->reqRingPA);
 
 	if (adapter->cmp_ring)
-		dma_free_coherent(&adapter->dev->dev,
+		pci_free_consistent(adapter->dev,
 				    adapter->cmp_pages * PAGE_SIZE,
 				    adapter->cmp_ring, adapter->cmpRingPA);
 
 	if (adapter->msg_ring)
-		dma_free_coherent(&adapter->dev->dev,
+		pci_free_consistent(adapter->dev,
 				    adapter->msg_pages * PAGE_SIZE,
 				    adapter->msg_ring, adapter->msgRingPA);
 }
@@ -1313,8 +1291,8 @@ static u32 pvscsi_get_max_targets(struct pvscsi_adapter *adapter)
 	u32 numPhys = 16;
 
 	dev = pvscsi_dev(adapter);
-	config_page = dma_alloc_coherent(&adapter->dev->dev, PAGE_SIZE,
-			&configPagePA, GFP_KERNEL);
+	config_page = pci_alloc_consistent(adapter->dev, PAGE_SIZE,
+					   &configPagePA);
 	if (!config_page) {
 		dev_warn(dev, "vmw_pvscsi: failed to allocate memory for config page\n");
 		goto exit;
@@ -1348,8 +1326,7 @@ static u32 pvscsi_get_max_targets(struct pvscsi_adapter *adapter)
 	} else
 		dev_warn(dev, "vmw_pvscsi: PVSCSI_CMD_CONFIG failed. hostStatus = 0x%x, scsiStatus = 0x%x\n",
 			 header->hostStatus, header->scsiStatus);
-	dma_free_coherent(&adapter->dev->dev, PAGE_SIZE, config_page,
-			  configPagePA);
+	pci_free_consistent(adapter->dev, PAGE_SIZE, config_page, configPagePA);
 exit:
 	return numPhys;
 }
@@ -1369,9 +1346,11 @@ static int pvscsi_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (pci_enable_device(pdev))
 		return error;
 
-	if (!dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64))) {
+	if (pci_set_dma_mask(pdev, DMA_BIT_MASK(64)) == 0 &&
+	    pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64)) == 0) {
 		printk(KERN_INFO "vmw_pvscsi: using 64bit dma\n");
-	} else if (!dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32))) {
+	} else if (pci_set_dma_mask(pdev, DMA_BIT_MASK(32)) == 0 &&
+		   pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32)) == 0) {
 		printk(KERN_INFO "vmw_pvscsi: using 32bit dma\n");
 	} else {
 		printk(KERN_ERR "vmw_pvscsi: failed to set DMA mask\n");

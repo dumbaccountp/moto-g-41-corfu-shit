@@ -10,12 +10,44 @@
 #include <linux/pstore.h>
 
 enum AEE_FIQ_STEP_NUM {
+	AEE_FIQ_STEP_FIQ_ISR_BASE = 1,
+	AEE_FIQ_STEP_WDT_FIQ_INFO = 4,
+	AEE_FIQ_STEP_WDT_FIQ_STACK,
+	AEE_FIQ_STEP_WDT_FIQ_LOOP,
+	AEE_FIQ_STEP_WDT_FIQ_DONE,
+	AEE_FIQ_STEP_WDT_IRQ_INFO = 8,
+	AEE_FIQ_STEP_WDT_IRQ_KICK,
+	AEE_FIQ_STEP_WDT_IRQ_SMP_STOP,
+	AEE_FIQ_STEP_WDT_IRQ_TIME,
+	AEE_FIQ_STEP_WDT_IRQ_STACK,
+	AEE_FIQ_STEP_WDT_IRQ_GIC,
+	AEE_FIQ_STEP_WDT_IRQ_LOCALTIMER,
+	AEE_FIQ_STEP_WDT_IRQ_IDLE,
+	AEE_FIQ_STEP_WDT_IRQ_SCHED,
+	AEE_FIQ_STEP_WDT_IRQ_DONE,
+	AEE_FIQ_STEP_HANG_DETECT,
+	AEE_FIQ_STEP_KE_WDT_INFO = 20,
+	AEE_FIQ_STEP_KE_WDT_PERCPU,
+	AEE_FIQ_STEP_KE_WDT_LOG,
+	AEE_FIQ_STEP_KE_SCHED_DEBUG,
+	AEE_FIQ_STEP_KE_EINT_DEBUG,
+	AEE_FIQ_STEP_KE_WDT_DONE,
+	AEE_FIQ_STEP_KE_IPANIC_DIE = 32,
+	AEE_FIQ_STEP_KE_IPANIC_START,
+	AEE_FIQ_STEP_KE_IPANIC_OOP_HEADER,
+	AEE_FIQ_STEP_KE_IPANIC_DETAIL,
+	AEE_FIQ_STEP_KE_IPANIC_CONSOLE,
+	AEE_FIQ_STEP_KE_IPANIC_USERSPACE,
+	AEE_FIQ_STEP_KE_IPANIC_ANDROID,
+	AEE_FIQ_STEP_KE_IPANIC_MMPROFILE,
+	AEE_FIQ_STEP_KE_IPANIC_HEADER,
+	AEE_FIQ_STEP_KE_IPANIC_DONE,
 	AEE_FIQ_STEP_COMMON_DIE_START = 64,
 	AEE_FIQ_STEP_COMMON_DIE_LOCK,
 	AEE_FIQ_STEP_COMMON_DIE_KASLR,
 	AEE_FIQ_STEP_COMMON_DIE_SCP,
-	AEE_FIQ_STEP_COMMON_DIE_TRACE,
 	AEE_FIQ_STEP_COMMON_DIE_EMISC,
+	AEE_FIQ_STEP_COMMON_DIE_TRACE,
 	AEE_FIQ_STEP_COMMON_DIE_CS,
 	AEE_FIQ_STEP_COMMON_DIE_DONE
 };
@@ -26,11 +58,6 @@ enum AEE_EXP_TYPE_NUM {
 	AEE_EXP_TYPE_NESTED_PANIC = 3,
 	AEE_EXP_TYPE_SMART_RESET = 4,
 	AEE_EXP_TYPE_HANG_DETECT = 5,
-	AEE_EXP_TYPE_BL33_CRASH = 6,
-	AEE_EXP_TYPE_BL2_EXT_CRASH = 7,
-	AEE_EXP_TYPE_AEE_LK_CRASH = 8,
-	AEE_EXP_TYPE_TFA_CRASH = 9,
-	AEE_EXP_TYPE_MAX_NUM = 16,
 };
 
 #if IS_ENABLED(CONFIG_MTK_AEE_IPANIC)
@@ -171,11 +198,9 @@ extern void aee_rr_rec_ppm_min_pwr_bgt(u32 val);
 extern void aee_rr_rec_ppm_policy_mask(u32 val);
 extern void aee_rr_rec_ppm_waiting_for_pbm(u8 val);
 extern void aee_rr_rec_gpu_dvfs_vgpu(u8 val);
-extern u8 aee_rr_curr_gpu_dvfs_vgpu(void);
 extern void aee_rr_rec_gpu_dvfs_oppidx(u8 val);
 extern void aee_rr_rec_gpu_dvfs_status(u8 val);
 extern u8 aee_rr_curr_gpu_dvfs_status(void);
-extern void aee_rr_rec_gpu_dvfs_power_count(int val);
 extern void aee_rr_rec_hang_detect_timeout_count(unsigned int val);
 extern int aee_rr_curr_fiq_step(void);
 extern void aee_rr_rec_fiq_step(u8 i);
@@ -213,9 +238,13 @@ extern void aee_rr_rec_cpu_dying_ktime(u64 val);
 extern void aee_rr_rec_cpu_dead_ktime(u64 val);
 extern void aee_rr_rec_cpu_post_dead_ktime(u64 val);
 extern void aee_sram_fiq_log(const char *msg);
+extern void aee_sram_fiq_save_bin(const char *buffer, size_t len);
 extern void aee_rr_rec_wdk_ktime(u64 val);
 extern void aee_rr_rec_wdk_systimer_cnt(u64 val);
 
+extern int ipanic_kmsg_write(unsigned int part, const char *buf, size_t size);
+extern int ipanic_kmsg_get_next(int *count, u64 *id, enum pstore_type_id *type,
+		struct timespec *time, char **buf, struct pstore_info *psi);
 #else
 static inline void aee_rr_rec_clk(int id, u32 val)
 {
@@ -828,11 +857,6 @@ static inline void aee_rr_rec_gpu_dvfs_vgpu(u8 val)
 {
 }
 
-static inline u8 aee_rr_curr_gpu_dvfs_vgpu(void)
-{
-	return 0;
-}
-
 static inline void aee_rr_rec_gpu_dvfs_oppidx(u8 val)
 {
 }
@@ -844,10 +868,6 @@ static inline void aee_rr_rec_gpu_dvfs_status(u8 val)
 static inline u8 aee_rr_curr_gpu_dvfs_status(void)
 {
 	return 0;
-}
-
-static inline void aee_rr_rec_gpu_dvfs_power_count(int val)
-{
 }
 
 static inline void aee_rr_rec_hang_detect_timeout_count(unsigned int val)
@@ -1005,6 +1025,10 @@ static inline void aee_sram_fiq_log(const char *msg)
 {
 }
 
+static inline void aee_sram_fiq_save_bin(unsigned char *buffer, size_t len)
+{
+}
+
 static inline void aee_rr_rec_wdk_ktime(u64 val)
 {
 }
@@ -1013,6 +1037,18 @@ static inline void aee_rr_rec_wdk_systimer_cnt(u64 val)
 {
 }
 
+static inline int ipanic_kmsg_write(unsigned int part, const char *buf,
+				size_t size)
+{
+	return 0;
+}
+
+static inline int ipanic_kmsg_get_next(int *count, u64 *id,
+			enum pstore_type_id *type, struct timespec *time,
+			char **buf, struct pstore_info *psi)
+{
+	return 0;
+}
 #endif /* CONFIG_MTK_AEE_IPANIC */
 
 #endif

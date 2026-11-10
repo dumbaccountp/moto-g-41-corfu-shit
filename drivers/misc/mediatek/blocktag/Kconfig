@@ -4,9 +4,10 @@
 
 comment "Storage Block Tag"
 
-config MTK_BLOCK_IO_TRACER
-	tristate "Storage Block IO Tracer"
+config MTK_BLOCK_TAG
+	bool "Storage Block Tag"
 	depends on BLOCK
+	default y
 	help
 	  Enable block tagging at block driver, tag requester pid to
 	  the accessing pages. This allows MMC/UFS Block IO log to obtian
@@ -14,7 +15,3 @@ config MTK_BLOCK_IO_TRACER
 	  utility functions to MMC/UFS Block IO log, such as throughput
 	  calculation, log printing, and ring trace handling.
 
-config MTK_FSCMD_TRACER
-	tristate "filesystem Syscall Tracer"
-	help
-	  If enable, record the syscall start and end timestamp.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
+/**
  * USB Typec-C DisplayPort Alternate Mode driver
  *
  * Copyright (C) 2018 Intel Corporation
@@ -13,10 +13,9 @@
 #include <linux/module.h>
 #include <linux/usb/pd_vdo.h>
 #include <linux/usb/typec_dp.h>
-#include "displayport.h"
 
-#define DP_HEADER(_dp, ver, cmd)	(VDO((_dp)->alt->svid, 1, ver, cmd)	\
-					 | VDO_OPOS(USB_TYPEC_DP_MODE))
+#define DP_HEADER(cmd)			(VDO(USB_TYPEC_DP_SID, 1, cmd) | \
+					 VDO_OPOS(USB_TYPEC_DP_MODE))
 
 enum {
 	DP_CONF_USB,
@@ -24,6 +23,10 @@ enum {
 	DP_CONF_UFP_D,
 	DP_CONF_DUAL_D,
 };
+
+/* Helper for setting/getting the pin assignement value to the configuration */
+#define DP_CONF_SET_PIN_ASSIGN(_a_)	((_a_) << 8)
+#define DP_CONF_GET_PIN_ASSIGN(_conf_)	(((_conf_) & GENMASK(15, 8)) >> 8)
 
 /* Pin assignments that use USB3.1 Gen2 signaling to carry DP protocol */
 #define DP_PIN_ASSIGN_GEN2_BR_MASK	(BIT(DP_PIN_ASSIGN_A) | \
@@ -88,8 +91,8 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 	case DP_STATUS_CON_UFP_D:
 	case DP_STATUS_CON_BOTH: /* NOTE: First acting as DP source */
 		conf |= DP_CONF_UFP_U_AS_UFP_D;
-		pin_assign = DP_CAP_PIN_ASSIGN_UFP_D(dp->alt->vdo) &
-				 DP_CAP_PIN_ASSIGN_DFP_D(dp->port->vdo);
+		pin_assign = DP_CAP_DFP_D_PIN_ASSIGN(dp->alt->vdo) &
+			     DP_CAP_UFP_D_PIN_ASSIGN(dp->port->vdo);
 		break;
 	default:
 		break;
@@ -101,7 +104,7 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 		if (dp->data.status & DP_STATUS_PREFER_MULTI_FUNC &&
 		    pin_assign & DP_PIN_ASSIGN_MULTI_FUNC_MASK)
 			pin_assign &= DP_PIN_ASSIGN_MULTI_FUNC_MASK;
-		else if (pin_assign & DP_PIN_ASSIGN_DP_ONLY_MASK)
+		else
 			pin_assign &= DP_PIN_ASSIGN_DP_ONLY_MASK;
 
 		if (!pin_assign)
@@ -156,14 +159,9 @@ static int dp_altmode_configured(struct dp_altmode *dp)
 
 static int dp_altmode_configure_vdm(struct dp_altmode *dp, u32 conf)
 {
-	int svdm_version = typec_altmode_get_svdm_version(dp->alt);
-	u32 header;
+	u32 header = DP_HEADER(DP_CMD_CONFIGURE);
 	int ret;
 
-	if (svdm_version < 0)
-		return svdm_version;
-
-	header = DP_HEADER(dp, svdm_version, DP_CMD_CONFIGURE);
 	ret = typec_altmode_notify(dp->alt, TYPEC_STATE_SAFE, &dp->data);
 	if (ret) {
 		dev_err(&dp->alt->dev,
@@ -186,7 +184,6 @@ static int dp_altmode_configure_vdm(struct dp_altmode *dp, u32 conf)
 static void dp_altmode_work(struct work_struct *work)
 {
 	struct dp_altmode *dp = container_of(work, struct dp_altmode, work);
-	int svdm_version;
 	u32 header;
 	u32 vdo;
 	int ret;
@@ -195,15 +192,12 @@ static void dp_altmode_work(struct work_struct *work)
 
 	switch (dp->state) {
 	case DP_STATE_ENTER:
-		ret = typec_altmode_enter(dp->alt, NULL);
-		if (ret && ret != -EBUSY)
+		ret = typec_altmode_enter(dp->alt);
+		if (ret)
 			dev_err(&dp->alt->dev, "failed to enter mode\n");
 		break;
 	case DP_STATE_UPDATE:
-		svdm_version = typec_altmode_get_svdm_version(dp->alt);
-		if (svdm_version < 0)
-			break;
-		header = DP_HEADER(dp, svdm_version, DP_CMD_STATUS_UPDATE);
+		header = DP_HEADER(DP_CMD_STATUS_UPDATE);
 		vdo = 1;
 		ret = typec_altmode_vdm(dp->alt, header, &vdo, 2);
 		if (ret)
@@ -316,8 +310,7 @@ err_unlock:
 
 static int dp_altmode_activate(struct typec_altmode *alt, int activate)
 {
-	return activate ? typec_altmode_enter(alt, NULL) :
-			  typec_altmode_exit(alt);
+	return activate ? typec_altmode_enter(alt) : typec_altmode_exit(alt);
 }
 
 static const struct typec_altmode_ops dp_altmode_ops = {
@@ -418,18 +411,6 @@ static const char * const pin_assignments[] = {
 	[DP_PIN_ASSIGN_F] = "F",
 };
 
-/*
- * Helper function to extract a peripheral's currently supported
- * Pin Assignments from its DisplayPort alternate mode state.
- */
-static u8 get_current_pin_assignments(struct dp_altmode *dp)
-{
-	if (DP_CONF_CURRENTLY(dp->data.conf) == DP_CONF_DFP_D)
-		return DP_CAP_PIN_ASSIGN_DFP_D(dp->alt->vdo);
-	else
-		return DP_CAP_PIN_ASSIGN_UFP_D(dp->alt->vdo);
-}
-
 static ssize_t
 pin_assignment_store(struct device *dev, struct device_attribute *attr,
 		     const char *buf, size_t size)
@@ -456,7 +437,10 @@ pin_assignment_store(struct device *dev, struct device_attribute *attr,
 		goto out_unlock;
 	}
 
-	assignments = get_current_pin_assignments(dp);
+	if (DP_CONF_CURRENTLY(dp->data.conf) == DP_CONF_DFP_D)
+		assignments = DP_CAP_UFP_D_PIN_ASSIGN(dp->alt->vdo);
+	else
+		assignments = DP_CAP_DFP_D_PIN_ASSIGN(dp->alt->vdo);
 
 	if (!(DP_CONF_GET_PIN_ASSIGN(conf) & assignments)) {
 		ret = -EINVAL;
@@ -493,7 +477,10 @@ static ssize_t pin_assignment_show(struct device *dev,
 
 	cur = get_count_order(DP_CONF_GET_PIN_ASSIGN(dp->data.conf));
 
-	assignments = get_current_pin_assignments(dp);
+	if (DP_CONF_CURRENTLY(dp->data.conf) == DP_CONF_DFP_D)
+		assignments = DP_CAP_UFP_D_PIN_ASSIGN(dp->alt->vdo);
+	else
+		assignments = DP_CAP_DFP_D_PIN_ASSIGN(dp->alt->vdo);
 
 	for (i = 0; assignments; assignments >>= 1, i++) {
 		if (assignments & 1) {
@@ -524,7 +511,7 @@ static const struct attribute_group dp_altmode_group = {
 	.attrs = dp_altmode_attrs,
 };
 
-int dp_altmode_probe(struct typec_altmode *alt)
+static int dp_altmode_probe(struct typec_altmode *alt)
 {
 	const struct typec_altmode *port = typec_altmode_get_partner(alt);
 	struct dp_altmode *dp;
@@ -533,10 +520,10 @@ int dp_altmode_probe(struct typec_altmode *alt)
 	/* FIXME: Port can only be DFP_U. */
 
 	/* Make sure we have compatiple pin configurations */
-	if (!(DP_CAP_PIN_ASSIGN_DFP_D(port->vdo) &
-	      DP_CAP_PIN_ASSIGN_UFP_D(alt->vdo)) &&
-	    !(DP_CAP_PIN_ASSIGN_UFP_D(port->vdo) &
-	      DP_CAP_PIN_ASSIGN_DFP_D(alt->vdo)))
+	if (!(DP_CAP_DFP_D_PIN_ASSIGN(port->vdo) &
+	      DP_CAP_UFP_D_PIN_ASSIGN(alt->vdo)) &&
+	    !(DP_CAP_UFP_D_PIN_ASSIGN(port->vdo) &
+	      DP_CAP_DFP_D_PIN_ASSIGN(alt->vdo)))
 		return -ENODEV;
 
 	ret = sysfs_create_group(&alt->dev.kobj, &dp_altmode_group);
@@ -562,16 +549,14 @@ int dp_altmode_probe(struct typec_altmode *alt)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(dp_altmode_probe);
 
-void dp_altmode_remove(struct typec_altmode *alt)
+static void dp_altmode_remove(struct typec_altmode *alt)
 {
 	struct dp_altmode *dp = typec_altmode_get_drvdata(alt);
 
 	sysfs_remove_group(&alt->dev.kobj, &dp_altmode_group);
 	cancel_work_sync(&dp->work);
 }
-EXPORT_SYMBOL_GPL(dp_altmode_remove);
 
 static const struct typec_device_id dp_typec_id[] = {
 	{ USB_TYPEC_DP_SID, USB_TYPEC_DP_MODE },

@@ -1,15 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2015 MediaTek Inc.
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 
+#include <mt-plat/mtk_lpae.h>
 #include <linux/sched/clock.h>
 
-#include "cmdq_record.h"
+#include "mdp_cmdq_record.h"
 #include "cmdq_reg.h"
 #include "cmdq_virtual.h"
-#include "cmdq_helper_ext.h"
-#include "cmdq_device.h"
+#include "mdp_cmdq_helper_ext.h"
+#include "mdp_cmdq_device.h"
 #if IS_ENABLED(CONFIG_MMPROFILE)
 #include "cmdq_mmp.h"
 #endif
@@ -123,7 +124,7 @@ static void cmdq_save_op_variable_position(
 	u32 *p_new_buffer = NULL;
 	u32 *p_instr_position = NULL;
 	u32 array_num = 0;
-	u64 inst, logic_inst;
+	u64 *inst, *logic_inst;
 	u32 offset;
 
 	if (!handle)
@@ -137,6 +138,11 @@ static void cmdq_save_op_variable_position(
 			sizeof(u32);
 
 		p_new_buffer = kzalloc(array_num, GFP_KERNEL);
+		if (!p_new_buffer) {
+			CMDQ_ERR("buffer allocate failed, handle:%p index:%d\n",
+				handle, index);
+			return;
+		}
 
 		/* copy and release old buffer */
 		if (handle->replace_instr.position) {
@@ -157,14 +163,23 @@ static void cmdq_save_op_variable_position(
 	if (offset >= handle->pkt->cmd_buf_size)
 		offset = (u32)(handle->pkt->cmd_buf_size - CMDQ_INST_SIZE);
 
-	inst = *cmdq_pkt_get_va_by_offset(handle->pkt, offset);
-	logic_inst = *cmdq_pkt_get_va_by_offset(handle->pkt,
+	inst = cmdq_pkt_get_va_by_offset(handle->pkt, offset);
+	logic_inst = cmdq_pkt_get_va_by_offset(handle->pkt,
 		offset - CMDQ_INST_SIZE);
-	CMDQ_MSG(
-		"Add replace_instr: index:%u (real offset:%u) position:%u number:%u inst:0x%016llx logic:0x%016llx scenario:%d thread:%d\n",
-		index, offset, p_instr_position[handle->replace_instr.number-1],
-		handle->replace_instr.number, inst, logic_inst,
-		handle->scenario, handle->thread);
+	if (!inst || !logic_inst)
+		CMDQ_MSG(
+			"Add replace_instr: index:%u (real offset:%u) position:%u number:%u scenario:%d thread:%d\n",
+			index, offset,
+			p_instr_position[handle->replace_instr.number-1],
+			handle->replace_instr.number,
+			handle->scenario, handle->thread);
+	else
+		CMDQ_MSG(
+			"Add replace_instr: index:%u (real offset:%u) position:%u number:%u inst:0x%016llx logic:0x%016llx scenario:%d thread:%d\n",
+			index, offset,
+			p_instr_position[handle->replace_instr.number-1],
+			handle->replace_instr.number, *inst, *logic_inst,
+			handle->scenario, handle->thread);
 }
 
 static s32 cmdq_var_data_type(CMDQ_VARIABLE arg_in, u32 *arg_out,
@@ -364,7 +379,7 @@ s32 cmdq_task_create(enum CMDQ_SCENARIO_ENUM scenario,
 
 	*handle_out = NULL;
 
-	if (unlikely(scenario >= CMDQ_MAX_SCENARIO_COUNT)) {
+	if (scenario < 0 || scenario >= CMDQ_MAX_SCENARIO_COUNT) {
 		CMDQ_ERR("Unknown scenario type %d\n", scenario);
 		CMDQ_PROF_MMP(mdp_mmp_get_event()->alloc_task,
 			MMPROFILE_FLAG_END, current->pid, scenario);
@@ -487,7 +502,7 @@ s32 cmdq_task_duplicate(struct cmdqRecStruct *handle,
 		if (last_buf) {
 			va = (u32 *)(last_buf->va_base + CMDQ_CMD_BUFFER_SIZE -
 				CMDQ_INST_SIZE);
-			va[0] = CMDQ_REG_SHIFT_ADDR(CMDQ_BUF_ADDR(new_buf));
+			va[0] = CMDQ_REG_SHIFT_ADDR(new_buf->pa_base);
 		}
 		last_buf = new_buf;
 	}
@@ -1044,10 +1059,6 @@ static void cmdq_task_release_buffer(struct cmdqRecStruct *handle)
 	handle->pkt = NULL;
 	handle->cmd_end = NULL;
 
-	if (handle->pkt_rb)
-		cmdq_pkt_destroy(handle->pkt_rb);
-	handle->pkt_rb = NULL;
-
 	/* secure path buffer */
 	if (handle->secData.addrMetadatas) {
 		kfree(CMDQ_U32_PTR(handle->secData.addrMetadatas));
@@ -1120,6 +1131,8 @@ s32 cmdq_task_reset(struct cmdqRecStruct *handle)
 	handle->durRelease = 0;
 	handle->prepare = cmdq_task_prepare;
 	handle->unprepare = cmdq_task_unprepare;
+	handle->prev_subsys = 0;
+	handle->prev_addr = 0;
 
 	/* store caller info for debug */
 	if (current) {
@@ -1131,6 +1144,25 @@ s32 cmdq_task_reset(struct cmdqRecStruct *handle)
 	/* we should have new buffers for new commands */
 	cmdq_task_release_buffer(handle);
 
+	/* TODO: support user space buffer */
+#if 0
+	if (cmdq_core_is_request_from_user_space(handle->scenario)) {
+		/* for user space command will copy from desc directly */
+		handle->pkt = NULL;
+		handle->user_req = kzalloc(sizeof(*handle->user_req),
+			GFP_KERNEL);
+		if (!handle->user_req)
+			return -ENOMEM;
+	} else {
+		handle->user_req = NULL;
+		handle->pkt = cmdq_pkt_create(NULL);
+		err = PTR_ERR(handle->pkt);
+		if (err < 0) {
+			handle->pkt = NULL;
+			return err;
+		}
+	}
+#else
 	if (handle->thread != CMDQ_INVALID_THREAD)
 		handle->pkt = cmdq_pkt_create(
 			cmdq_helper_mbox_client(handle->thread));
@@ -1146,7 +1178,8 @@ s32 cmdq_task_reset(struct cmdqRecStruct *handle)
 
 	/* assign cmdq dev to pkt which may use in dma alloc */
 	if (!handle->pkt->dev)
-		handle->pkt->dev = cmdq_mbox_dev_get();
+		handle->pkt->dev = cmdq_dev_get();
+#endif
 
 	/* assign handle to pkt */
 	handle->pkt->user_data = (void *)handle;
@@ -1158,6 +1191,14 @@ s32 cmdq_task_reset(struct cmdqRecStruct *handle)
 		cmdq_task_set_secure(handle, false);
 		handle->secData.enginesNeedDAPC = 0LL;
 		handle->secData.enginesNeedPortSecurity = 0LL;
+	}
+
+	/* performance debug begin */
+	if (cmdq_core_profile_exec_enabled()) {
+		cmdq_pkt_write(handle->pkt, NULL, CMDQ_TPR_MASK_PA,
+			0xffffffff, 0x8000000);
+		cmdq_pkt_perf_begin(handle->pkt);
+		handle->profile_exec = true;
 	}
 
 	return 0;
@@ -1185,6 +1226,24 @@ s32 cmdq_task_set_secure(struct cmdqRecStruct *handle, const bool is_secure)
 	cmdq_task_reset_thread(handle);
 
 	return 0;
+
+#if 0
+	if (!is_secure) {
+		handle->ctrl = cmdq_core_get_controller();
+		cmdq_task_reset_thread(handle);
+		return 0;
+	}
+#ifdef CMDQ_SECURE_PATH_SUPPORT
+	handle->ctrl = cmdq_sec_get_controller();
+	cmdq_task_reset_thread(handle);
+	CMDQ_VERBOSE("REC:0x%p secure:%d exclusive thread:%d\n",
+		handle, is_secure, handle->thread);
+	return 0;
+#else
+	CMDQ_ERR("%s failed since not support secure path\n", __func__);
+	return -EFAULT;
+#endif
+#endif
 }
 
 s32 cmdq_task_is_secure(struct cmdqRecStruct *handle)
@@ -1296,9 +1355,10 @@ s32 cmdq_op_poll(struct cmdqRecStruct *handle, u32 addr, u32 value, u32 mask)
 			~mask, 0, 0);
 		if (status)
 			return status;
+		addr = addr | 0x1;
 	}
 
-	status = cmdq_append_command(handle, CMDQ_CODE_POLL, (addr | 0x1),
+	status = cmdq_append_command(handle, CMDQ_CODE_POLL, addr,
 		value, 0, 0);
 	if (status)
 		return status;
@@ -1367,36 +1427,6 @@ s32 cmdq_op_set_event(struct cmdqRecStruct *handle, enum cmdq_event event)
 	return cmdq_pkt_set_event(handle->pkt, arg_a);
 }
 
-s32 cmdq_op_get_event(struct cmdqRecStruct *handle, enum cmdq_event event)
-{
-	s32 event_id = cmdq_get_event_op_id(event);
-
-	if (event_id < 0 || !handle)
-		return -EINVAL;
-
-	return event_id;
-}
-
-s32 cmdq_op_set_event_readback(struct cmdqRecStruct *handle, enum cmdq_event event)
-{
-	s32 arg_a = cmdq_get_event_op_id(event);
-
-	if (arg_a < 0 || !handle)
-		return -EINVAL;
-
-	return cmdq_pkt_set_event(handle->pkt_rb, arg_a);
-}
-
-s32 cmdq_op_wait_event_readback(struct cmdqRecStruct *handle, enum cmdq_event event)
-{
-	s32 arg_a = cmdq_get_event_op_id(event);
-
-	if (arg_a < 0 || !handle)
-		return -EINVAL;
-
-	return cmdq_pkt_wfe(handle->pkt_rb, arg_a);
-}
-
 s32 cmdq_op_replace_overwrite_cpr(struct cmdqRecStruct *handle, u32 index,
 	s32 new_arg_a, s32 new_arg_b, s32 new_arg_c)
 {
@@ -1414,6 +1444,11 @@ s32 cmdq_op_replace_overwrite_cpr(struct cmdqRecStruct *handle, u32 index,
 	}
 
 	va = (u32 *)cmdq_pkt_get_va_by_offset(handle->pkt, offset);
+	if (!va) {
+		CMDQ_LOG("Cannot find va, handle:%p pkt:%p offset:%u\n",
+			handle, handle->pkt, offset);
+		return -EINVAL;
+	}
 	if (new_arg_a >= 0)
 		va[1] = (va[1] & 0xffff0000) | (new_arg_a & 0xffff);
 	if (new_arg_b >= 0)
@@ -1551,10 +1586,30 @@ if (unlikely(err)) {				\
 }					\
 }
 
+static s8 cmdq_op_get_subsys(struct cmdqRecStruct *handle, u32 addr)
+{
+#if 1
+	return CMDQ_SPECIAL_SUBSYS_ADDR;
+#else
+	s8 subsys;
+
+	if ((handle->prev_addr & 0xFFFF0000) == (addr & 0xFFFF0000)) {
+		subsys = handle->prev_subsys;
+	} else {
+		subsys = cmdq_core_subsys_from_phys_addr(addr);
+		// subsys = CMDQ_SPECIAL_SUBSYS_ADDR;
+		handle->prev_addr = addr;
+		handle->prev_subsys = subsys;
+	}
+	return subsys;
+#endif
+}
+
 s32 cmdq_op_poll_ex(struct cmdqRecStruct *handle,
 	struct cmdq_command_buffer *cmd_buf, u32 addr,
 	CMDQ_VARIABLE value, u32 mask)
 {
+	s8 subsys;
 	s32 err;
 	bool use_gpr = false;
 	u16 arg_a;
@@ -1568,18 +1623,25 @@ s32 cmdq_op_poll_ex(struct cmdqRecStruct *handle,
 		addr = addr | 0x1;
 	}
 
-	use_gpr = true;
-	err = cmdq_op_wait_ex(handle, cmd_buf,
-		CMDQ_SYNC_TOKEN_GPR_SET_4);
-	CMDQ_CHECK_ERR(err);
-	/* Move extra handle APB address to GPR */
-	err = cmdq_instr_encoder(handle, cmd_buf, CMDQ_GET_ARG_C(addr),
-		CMDQ_GET_ARG_B(addr), 0, CMDQ_DATA_REG_DEBUG,
-		0, 0, 1, CMDQ_CODE_MOVE);
-	CMDQ_CHECK_ERR(err);
-	arg_a = addr & 0x1;
-	s_op = CMDQ_DATA_REG_DEBUG;
-	arg_a_type = 1;
+	subsys = cmdq_op_get_subsys(handle, addr);
+	if (subsys < 0 || subsys == CMDQ_SPECIAL_SUBSYS_ADDR) {
+		use_gpr = true;
+		err = cmdq_op_wait_ex(handle, cmd_buf,
+			CMDQ_SYNC_TOKEN_GPR_SET_4);
+		CMDQ_CHECK_ERR(err);
+		/* Move extra handle APB address to GPR */
+		err = cmdq_instr_encoder(handle, cmd_buf, CMDQ_GET_ARG_C(addr),
+			CMDQ_GET_ARG_B(addr), 0, CMDQ_DATA_REG_DEBUG,
+			0, 0, 1, CMDQ_CODE_MOVE);
+		CMDQ_CHECK_ERR(err);
+		arg_a = addr & 0x1;
+		s_op = CMDQ_DATA_REG_DEBUG;
+		arg_a_type = 1;
+	} else {
+		arg_a = CMDQ_GET_REG_OFFSET(addr);
+		s_op = subsys;
+		arg_a_type = 0;
+	}
 
 	err = cmdq_instr_encoder(handle, cmd_buf,
 		CMDQ_GET_ARG_C(value), CMDQ_GET_ARG_B(value),
@@ -1594,22 +1656,13 @@ s32 cmdq_op_poll_ex(struct cmdqRecStruct *handle,
 	return err;
 }
 
-s32 cmdq_op_assign_reg_idx_ex(struct cmdqRecStruct *handle,
-	struct cmdq_command_buffer *cmd_buf, u16 reg_idx, CMDQ_VARIABLE value)
-{
-	return cmdq_instr_encoder(handle, cmd_buf,
-		CMDQ_GET_ARG_C(value), CMDQ_GET_ARG_B(value), reg_idx,
-		CMDQ_LOGIC_ASSIGN,
-		CMDQ_IMMEDIATE_VALUE, CMDQ_IMMEDIATE_VALUE, CMDQ_REG_TYPE,
-		CMDQ_CODE_LOGIC);
-}
-
 s32 cmdq_op_read_reg_to_mem_ex(struct cmdqRecStruct *handle,
 	struct cmdq_command_buffer *cmd_buf,
 	cmdqBackupSlotHandle h_backup_slot, u32 slot_index, u32 addr)
 {
 	const dma_addr_t dram_addr = h_backup_slot + slot_index * sizeof(u32);
 	s32 err;
+	s8 subsys;
 	u32 value;
 	u16 arg_b;
 	u8 s_op;
@@ -1617,16 +1670,22 @@ s32 cmdq_op_read_reg_to_mem_ex(struct cmdqRecStruct *handle,
 	if (!handle || !cmd_buf)
 		return -EINVAL;
 
-	value = CMDQ_GET_ADDR_HIGH(addr);
+	subsys = cmdq_op_get_subsys(handle, addr);
+	if (subsys < 0 || subsys == CMDQ_SPECIAL_SUBSYS_ADDR) {
+		value = CMDQ_GET_ADDR_HIGH(addr);
 
-	err = cmdq_instr_encoder(handle, cmd_buf,
-		CMDQ_GET_ARG_C(value), CMDQ_GET_ARG_B(value),
-		CMDQ_SPR_FOR_TEMP, CMDQ_LOGIC_ASSIGN,
-		CMDQ_IMMEDIATE_VALUE, CMDQ_IMMEDIATE_VALUE,
-		CMDQ_REG_TYPE, CMDQ_CODE_LOGIC);
-	CMDQ_CHECK_ERR(err);
-	arg_b = CMDQ_GET_ADDR_LOW(addr);
-	s_op = CMDQ_SPR_FOR_TEMP;
+		err = cmdq_instr_encoder(handle, cmd_buf,
+			CMDQ_GET_ARG_C(value), CMDQ_GET_ARG_B(value),
+			CMDQ_SPR_FOR_TEMP, CMDQ_LOGIC_ASSIGN,
+			CMDQ_IMMEDIATE_VALUE, CMDQ_IMMEDIATE_VALUE,
+			CMDQ_REG_TYPE, CMDQ_CODE_LOGIC);
+		CMDQ_CHECK_ERR(err);
+		arg_b = CMDQ_GET_ADDR_LOW(addr);
+		s_op = CMDQ_SPR_FOR_TEMP;
+	} else {
+		arg_b = CMDQ_GET_REG_OFFSET(addr);
+		s_op = subsys;
+	}
 	err = cmdq_instr_encoder(handle, cmd_buf,
 		0, arg_b, CMDQ_THR_SPR_IDX1, s_op, CMDQ_IMMEDIATE_VALUE,
 		CMDQ_IMMEDIATE_VALUE, CMDQ_REG_TYPE, CMDQ_CODE_READ_S);
@@ -1652,21 +1711,29 @@ s32 cmdq_op_write_reg_ex(struct cmdqRecStruct *handle,
 	struct cmdq_command_buffer *cmd_buf, u32 addr,
 	CMDQ_VARIABLE value, u32 mask)
 {
+	s32 subsys;
 	s32 err;
 	u16 arg_a;
 	u8 s_op;
 	enum cmdq_code op = CMDQ_CODE_WRITE_S;
-	u32 high_addr = CMDQ_GET_ADDR_HIGH(addr);
 
-	/* assign bit 47:16 to spr temp */
-	err = cmdq_instr_encoder(handle, cmd_buf,
-		CMDQ_GET_ARG_C(high_addr), CMDQ_GET_ARG_B(high_addr),
-		CMDQ_SPR_FOR_TEMP, CMDQ_LOGIC_ASSIGN,
-		CMDQ_IMMEDIATE_VALUE, CMDQ_IMMEDIATE_VALUE,
-		CMDQ_REG_TYPE, CMDQ_CODE_LOGIC);
-	CMDQ_CHECK_ERR(err);
-	arg_a = CMDQ_GET_ADDR_LOW(addr);
-	s_op = CMDQ_SPR_FOR_TEMP;
+	subsys = cmdq_op_get_subsys(handle, addr);
+	if (subsys < 0 || subsys == CMDQ_SPECIAL_SUBSYS_ADDR) {
+		u32 high_addr = CMDQ_GET_ADDR_HIGH(addr);
+
+		/* assign bit 47:16 to spr temp */
+		err = cmdq_instr_encoder(handle, cmd_buf,
+			CMDQ_GET_ARG_C(high_addr), CMDQ_GET_ARG_B(high_addr),
+			CMDQ_SPR_FOR_TEMP, CMDQ_LOGIC_ASSIGN,
+			CMDQ_IMMEDIATE_VALUE, CMDQ_IMMEDIATE_VALUE,
+			CMDQ_REG_TYPE, CMDQ_CODE_LOGIC);
+		CMDQ_CHECK_ERR(err);
+		arg_a = CMDQ_GET_ADDR_LOW(addr);
+		s_op = CMDQ_SPR_FOR_TEMP;
+	} else {
+		arg_a = CMDQ_GET_REG_OFFSET(addr);
+		s_op = subsys;
+	}
 
 	if (mask != 0xffffffff) {
 		err = cmdq_instr_encoder(handle, cmd_buf,
@@ -1990,6 +2057,82 @@ s32 cmdq_op_write_mem(struct cmdqRecStruct *handle,
 s32 cmdq_op_finalize_command(struct cmdqRecStruct *handle, bool loop)
 {
 	return 0;
+#if 0
+	s32 status = 0;
+	u32 arg_b = 0;
+
+	if (!handle)
+		return -EFAULT;
+
+	if (handle->if_stack_node) {
+		CMDQ_ERR(
+			"Incorrect if-else statement, please review your if-else instructions.");
+		return -EFAULT;
+	}
+
+	if (handle->while_stack_node) {
+		CMDQ_ERR(
+			"Incorrect while statement, please review your while instructions.");
+		return -EFAULT;
+	}
+
+	if (!handle->finalized) {
+		/* performance debug end before finalize */
+		if (loop)
+			handle->profile_exec = false;
+		else if (handle->profile_exec)
+			cmdq_pkt_perf_end(handle->pkt);
+
+		/* insert EOF instruction */
+		arg_b = 0x1;	/* generate IRQ for each command iteration */
+#ifndef CMDQ_DEBUG_LOOP_IRQ
+		/* no generate IRQ for loop thread to save power */
+		if (loop)
+			arg_b = 0x0;
+#endif
+		/* no generate IRQ for delay loop thread */
+		if (handle->scenario == CMDQ_SCENARIO_TIMER_LOOP)
+			arg_b = 0x0;
+
+#ifdef CMDQ_SECURE_PATH_SUPPORT
+		if (handle->secData.is_secure) {
+			status = cmdq_sec_insert_backup_cookie_instr(handle,
+				handle->thread);
+			if (status < 0) {
+				CMDQ_ERR(
+					"insert backup cookie fail task:%p status:%d size:%zu thread:%d\n",
+					handle, status,
+					handle->pkt->cmd_buf_size,
+					handle->thread);
+				return status;
+			}
+		}
+#endif
+		status = cmdq_append_command(handle, CMDQ_CODE_EOC,
+			0, arg_b, 0, 0);
+
+		if (status != 0)
+			return status;
+
+		/* insert JUMP to loop beginning or as a scheduling mark(8) */
+		status = cmdq_append_command(handle, CMDQ_CODE_JUMP,
+			0, /* not absolute */
+			loop ? -handle->pkt->cmd_buf_size : 8,
+			0, 0);
+		if (status)
+			return status;
+
+		handle->finalized = true;
+		handle->pkt->loop = loop;
+
+		CMDQ_MSG(
+			"finalized handle:0x%p buf size:%zu size:%zu avail:%zu\n",
+			handle, handle->pkt->cmd_buf_size,
+			handle->pkt->buf_size, handle->pkt->avail_buf_size);
+	}
+
+	return status;
+#endif
 }
 
 s32 cmdq_setup_sec_data_of_command_desc_by_rec_handle(
@@ -2548,6 +2691,11 @@ static s32 cmdq_append_logic_command(struct cmdqRecStruct *handle,
 	u32 arg_a_i, arg_b_i, arg_c_i;
 	u32 arg_a_type, arg_b_type, arg_c_type, arg_abc_type;
 
+#if 0
+	if (handle->thread == CMDQ_INVALID_THREAD)
+		return -EINVAL;
+#endif
+
 	status = cmdq_check_before_append(handle);
 	if (status < 0) {
 		CMDQ_ERR(
@@ -2849,6 +2997,11 @@ s32 cmdq_op_rewrite_jump_c(struct cmdqRecStruct *handle,
 	if (likely(handle->scenario != CMDQ_SCENARIO_TIMER_LOOP)) {
 		va_logic = (u32 *)cmdq_pkt_get_va_by_offset(handle->pkt,
 			logic_pos);
+		if (!va_logic) {
+			CMDQ_LOG("Cannot find va, handle:%p pkt:%p pos:%u\n",
+				handle, handle->pkt, logic_pos);
+			return -EINVAL;
+		}
 		if (((logic_pos + CMDQ_INST_SIZE * 2) %
 			CMDQ_CMD_BUFFER_SIZE) == 0)
 			jump_pos = logic_pos + CMDQ_INST_SIZE * 2;
@@ -2857,6 +3010,11 @@ s32 cmdq_op_rewrite_jump_c(struct cmdqRecStruct *handle,
 
 		va_jump = (u32 *)cmdq_pkt_get_va_by_offset(handle->pkt,
 			jump_pos);
+		if (!va_jump) {
+			CMDQ_LOG("Cannot find va, handle:%p pkt:%p pos:%u\n",
+				handle, handle->pkt, jump_pos);
+			return -EINVAL;
+		}
 
 		/* reserve condition statement */
 		op = (va_logic[1] & 0xFF000000) >> 24;
@@ -2881,6 +3039,11 @@ s32 cmdq_op_rewrite_jump_c(struct cmdqRecStruct *handle,
 	} else {
 		va_jump = (u32 *)cmdq_pkt_get_va_by_offset(handle->pkt,
 			logic_pos);
+		if (!va_jump) {
+			CMDQ_LOG("Cannot find va, handle:%p pkt:%p pos:%u\n",
+				handle, handle->pkt, logic_pos);
+			return -EINVAL;
+		}
 		op = (va_jump[1] & 0xFF000000) >> 24;
 		if (op != CMDQ_CODE_JUMP_C_RELATIVE) {
 			CMDQ_ERR("fail to rewrite jump c handle:0x%p\n",

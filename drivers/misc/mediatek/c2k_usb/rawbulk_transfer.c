@@ -8,7 +8,7 @@
 
 #define DRIVER_AUTHOR   "Juelun Guo <jlguo@via-telecom.com>"
 #define DRIVER_DESC     "Rawbulk Driver - perform bypass for QingCheng"
-#define DRIVER_VERSION  "1.0.3"
+#define DRIVER_VERSION  "1.0.2"
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -23,6 +23,11 @@
 #endif
 #include "viatel_rawbulk.h"
 /* #include "modem_sdio.h" */
+#include "usb_boost.h"
+
+#ifdef CONFIG_MTK_ECCCI_C2K
+#define FS_CH_C2K 4
+#endif
 
 #define DATA_IN_ASCII	0
 #define DATA_IN_TAIL	1
@@ -36,7 +41,7 @@
 /* extern int modem_buffer_push(int port_num, const unsigned char *buf,
  * int count);
  */
-#if IS_ENABLED(CONFIG_EVDO_DT_VIA_SUPPORT)
+#ifdef CONFIG_EVDO_DT_VIA_SUPPORT
 char *transfer_name[] = { "modem", "ets", "at", "pcv", "gps" };
 #else
 char *transfer_name[] = { "pcv", "modem", "dummy0", "at", "gps", "dummy1",
@@ -235,7 +240,7 @@ static struct upstream_transaction *alloc_upstream_transaction(
 	if (!t)
 		return NULL;
 
-#if IS_ENABLED(CONFIG_64BIT) && IS_ENABLED(CONFIG_MTK_LM_MODE)
+#if defined(CONFIG_64BIT) && defined(CONFIG_MTK_LM_MODE)
 	t->buffer = (char *)__get_free_page(GFP_KERNEL | GFP_DMA);
 #else
 	t->buffer = (char *)__get_free_page(GFP_KERNEL);
@@ -413,6 +418,8 @@ static void upstream_complete(struct usb_ep *ep, struct usb_request *req)
 	struct rawbulk_transfer *transfer = t->transfer;
 
 	C2K_DBG("%s\n", __func__);
+
+	usb_boost();
 
 	t->state = UPSTREAM_STAT_FREE;
 
@@ -593,7 +600,7 @@ static struct downstream_transaction *alloc_downstream_transaction(
 	if (!t)
 		return NULL;
 
-#if IS_ENABLED(CONFIG_64BIT) && IS_ENABLED(CONFIG_MTK_LM_MODE)
+#if defined(CONFIG_64BIT) && defined(CONFIG_MTK_LM_MODE)
 	t->buffer = (char *)__get_free_page(GFP_ATOMIC | GFP_DMA);
 #else
 	t->buffer = (char *)__get_free_page(GFP_ATOMIC);
@@ -753,6 +760,8 @@ static void downstream_complete(struct usb_ep *ep, struct usb_request *req)
 	struct rawbulk_transfer *transfer = t->transfer;
 
 	C2K_DBG("%s\n", __func__);
+
+	usb_boost();
 
 	t->state = DOWNSTREAM_STAT_FREE;
 
@@ -1311,7 +1320,7 @@ void rawbulk_unbind_sdio_channel(int transfer_id)
 }
 EXPORT_SYMBOL_GPL(rawbulk_unbind_sdio_channel);
 
-int rawbulk_transfer_init(void)
+static __init int rawbulk_init(void)
 {
 	int n;
 	char name[20];
@@ -1319,7 +1328,6 @@ int rawbulk_transfer_init(void)
 
 	C2K_NOTE("%s\n", __func__);
 	drop_check_timeout = jiffies;
-	ccci_c2k_set_usb_callback(rawbulk_push_upstream_buffer);
 
 	rawbulk = kzalloc(sizeof(*rawbulk), GFP_KERNEL);
 	if (!rawbulk)
@@ -1361,9 +1369,9 @@ int rawbulk_transfer_init(void)
 
 	return 0;
 }
-EXPORT_SYMBOL(rawbulk_transfer_init);
+module_init(rawbulk_init);
 
-void rawbulk_transfer_exit(void)
+static __exit void rawbulk_exit(void)
 {
 	int n;
 	struct rawbulk_transfer *t;
@@ -1378,7 +1386,7 @@ void rawbulk_transfer_exit(void)
 	}
 	kfree(rawbulk);
 }
-EXPORT_SYMBOL(rawbulk_transfer_exit);
+module_exit(rawbulk_exit);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);

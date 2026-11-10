@@ -6,8 +6,11 @@
 #ifndef __CCCI_MD_AUXADC__
 #define __CCCI_MD_AUXADC__
 
+#ifdef CONFIG_MEDIATEK_MT6577_AUXADC
 int ccci_get_adc_num(void);
 int ccci_get_adc_val(void);
-int ccci_get_adc_mV(void);
+#endif
+
+signed int battery_get_bat_voltage(void);
 
 #endif

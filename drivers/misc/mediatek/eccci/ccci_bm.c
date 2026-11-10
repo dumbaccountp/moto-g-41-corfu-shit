@@ -294,7 +294,6 @@ void ccci_skb_enqueue(struct ccci_skb_queue *queue, struct sk_buff *newsk)
 	}
 	spin_unlock_irqrestore(&queue->skb_list.lock, flags);
 }
-EXPORT_SYMBOL(ccci_skb_enqueue);
 
 void ccci_skb_queue_init(struct ccci_skb_queue *queue, unsigned int skb_size,
 	unsigned int max_len, char fill_now)
@@ -377,10 +376,6 @@ struct sk_buff *ccci_alloc_skb(int size, unsigned char from_pool,
 			skb = __alloc_skb_from_kernel(size, GFP_ATOMIC);
 			if (!skb && count++ < 20)
 				goto fast_retry;
-			if (count > 1)
-				CCCI_NORMAL_LOG(-1, BM,
-						"%s, try to alloc skb %d times\n",
-						__func__, count);
 		}
 	}
  err_exit:
@@ -454,7 +449,6 @@ void ccci_dump_skb_pool_usage(int md_id)
 	skb_pool_16.enq_count = 0;
 	skb_pool_16.deq_count = 0;
 }
-EXPORT_SYMBOL(ccci_dump_skb_pool_usage);
 
 static void __4K_reload_work(struct work_struct *work)
 {

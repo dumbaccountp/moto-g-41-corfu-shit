@@ -37,10 +37,8 @@
 #include <asm/irq.h>
 #include <asm/nmi.h>
 #include <asm/smp.h>
-#include <asm/stacktrace.h>
 #include <asm/switch_to.h>
 #include <asm/runtime_instr.h>
-#include <asm/unwind.h>
 #include "entry.h"
 
 asmlinkage void ret_from_fork(void) asm ("ret_from_fork");
@@ -77,23 +75,11 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 
 	memcpy(dst, src, arch_task_struct_size);
 	dst->thread.fpu.regs = dst->thread.fpu.fprs;
-
-	/*
-	 * Don't transfer over the runtime instrumentation or the guarded
-	 * storage control block pointers. These fields are cleared here instead
-	 * of in copy_thread() to avoid premature freeing of associated memory
-	 * on fork() failure. Wait to clear the RI flag because ->stack still
-	 * refers to the source thread.
-	 */
-	dst->thread.ri_cb = NULL;
-	dst->thread.gs_cb = NULL;
-	dst->thread.gs_bc_cb = NULL;
-
 	return 0;
 }
 
-int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
-		unsigned long arg, struct task_struct *p, unsigned long tls)
+int copy_thread_tls(unsigned long clone_flags, unsigned long new_stackp,
+		    unsigned long arg, struct task_struct *p, unsigned long tls)
 {
 	struct fake_frame
 	{
@@ -118,7 +104,6 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	p->thread.system_timer = 0;
 	p->thread.hardirq_timer = 0;
 	p->thread.softirq_timer = 0;
-	p->thread.last_break = 1;
 
 	frame->sf.back_chain = 0;
 	/* new return point is ret_from_fork */
@@ -127,7 +112,7 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	frame->sf.gprs[9] = (unsigned long) frame;
 
 	/* Store access registers to kernel stack of new process. */
-	if (unlikely(p->flags & (PF_KTHREAD | PF_IO_WORKER))) {
+	if (unlikely(p->flags & PF_KTHREAD)) {
 		/* kernel thread */
 		memset(&frame->childregs, 0, sizeof(struct pt_regs));
 		frame->childregs.psw.mask = PSW_KERNEL_BITS | PSW_MASK_DAT |
@@ -146,11 +131,13 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	frame->childregs.flags = 0;
 	if (new_stackp)
 		frame->childregs.gprs[15] = new_stackp;
-	/*
-	 * Clear the runtime instrumentation flag after the above childregs
-	 * copy. The CB pointer was already cleared in arch_dup_task_struct().
-	 */
+
+	/* Don't copy runtime instrumentation info */
+	p->thread.ri_cb = NULL;
 	frame->childregs.psw.mask &= ~PSW_MASK_RI;
+	/* Don't copy guarded storage control block */
+	p->thread.gs_cb = NULL;
+	p->thread.gs_bc_cb = NULL;
 
 	/* Set a new TLS ?  */
 	if (clone_flags & CLONE_SETTLS) {
@@ -170,10 +157,29 @@ asmlinkage void execve_tail(void)
 	asm volatile("sfpc %0" : : "d" (0));
 }
 
+/*
+ * fill in the FPU structure for a core dump.
+ */
+int dump_fpu (struct pt_regs * regs, s390_fp_regs *fpregs)
+{
+	save_fpu_regs();
+	fpregs->fpc = current->thread.fpu.fpc;
+	fpregs->pad = 0;
+	if (MACHINE_HAS_VX)
+		convert_vx_to_fp((freg_t *)&fpregs->fprs,
+				 current->thread.fpu.vxrs);
+	else
+		memcpy(&fpregs->fprs, current->thread.fpu.fprs,
+		       sizeof(fpregs->fprs));
+	return 1;
+}
+EXPORT_SYMBOL(dump_fpu);
+
 unsigned long get_wchan(struct task_struct *p)
 {
-	struct unwind_state state;
-	unsigned long ip = 0;
+	struct stack_frame *sf, *low, *high;
+	unsigned long return_address;
+	int count;
 
 	if (!p || p == current || p->state == TASK_RUNNING || !task_stack_page(p))
 		return 0;
@@ -181,22 +187,26 @@ unsigned long get_wchan(struct task_struct *p)
 	if (!try_get_task_stack(p))
 		return 0;
 
-	unwind_for_each_frame(&state, p, NULL, 0) {
-		if (state.stack_info.type != STACK_TYPE_TASK) {
-			ip = 0;
-			break;
-		}
-
-		ip = unwind_get_return_address(&state);
-		if (!ip)
-			break;
-
-		if (!in_sched_functions(ip))
-			break;
+	low = task_stack_page(p);
+	high = (struct stack_frame *) task_pt_regs(p);
+	sf = (struct stack_frame *) p->thread.ksp;
+	if (sf <= low || sf > high) {
+		return_address = 0;
+		goto out;
 	}
-
+	for (count = 0; count < 16; count++) {
+		sf = (struct stack_frame *) sf->back_chain;
+		if (sf <= low || sf > high) {
+			return_address = 0;
+			goto out;
+		}
+		return_address = sf->gprs[8];
+		if (!in_sched_functions(return_address))
+			goto out;
+	}
+out:
 	put_task_stack(p);
-	return ip;
+	return return_address;
 }
 
 unsigned long arch_align_stack(unsigned long sp)

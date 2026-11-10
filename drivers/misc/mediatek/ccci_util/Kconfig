@@ -1,7 +1,7 @@
 menuconfig MTK_CCCI_DEVICES
 	bool "CCCI Devices"
+	default n
 	help
-	  Cross Core Communication Interface:
 	  Say Y here to enable CCCI basic
 	  support. If you say N,
 	  all CCCI related code

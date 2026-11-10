@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /* net/sched/sch_atm.c - ATM VC selection "queueing discipline" */
 
 /* Written 1998-2000 by Werner Almesberger, EPFL ICA */
@@ -58,7 +57,7 @@ struct atm_flow_data {
 	struct atm_flow_data	*excess;	/* flow for excess traffic;
 						   NULL to set CLP instead */
 	int			hdr_len;
-	unsigned char		hdr[];		/* header data; MUST BE LAST */
+	unsigned char		hdr[0];		/* header data; MUST BE LAST */
 };
 
 struct atm_qdisc_data {
@@ -151,7 +150,7 @@ static void atm_tc_put(struct Qdisc *sch, unsigned long cl)
 	pr_debug("atm_tc_put: destroying\n");
 	list_del_init(&flow->list);
 	pr_debug("atm_tc_put: qdisc %p\n", flow->q);
-	qdisc_put(flow->q);
+	qdisc_destroy(flow->q);
 	tcf_block_put(flow->block);
 	if (flow->sock) {
 		pr_debug("atm_tc_put: f_count %ld\n",
@@ -224,8 +223,7 @@ static int atm_tc_change(struct Qdisc *sch, u32 classid, u32 parent,
 	if (opt == NULL)
 		return -EINVAL;
 
-	error = nla_parse_nested_deprecated(tb, TCA_ATM_MAX, opt, atm_policy,
-					    NULL);
+	error = nla_parse_nested(tb, TCA_ATM_MAX, opt, atm_policy, NULL);
 	if (error < 0)
 		return error;
 
@@ -396,13 +394,10 @@ static int atm_tc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				result = tcf_classify(skb, fl, &res, true);
 				if (result < 0)
 					continue;
-				if (result == TC_ACT_SHOT)
-					goto done;
-
 				flow = (struct atm_flow_data *)res.class;
 				if (!flow)
 					flow = lookup_flow(sch, res.classid);
-				goto drop;
+				goto done;
 			}
 		}
 		flow = NULL;
@@ -578,6 +573,7 @@ static void atm_tc_reset(struct Qdisc *sch)
 	pr_debug("atm_tc_reset(sch %p,[qdisc %p])\n", sch, p);
 	list_for_each_entry(flow, &p->flows, list)
 		qdisc_reset(flow->q);
+	sch->q.qlen = 0;
 }
 
 static void atm_tc_destroy(struct Qdisc *sch)
@@ -613,7 +609,7 @@ static int atm_tc_dump_class(struct Qdisc *sch, unsigned long cl,
 	tcm->tcm_handle = flow->common.classid;
 	tcm->tcm_info = flow->q->handle;
 
-	nest = nla_nest_start_noflag(skb, TCA_OPTIONS);
+	nest = nla_nest_start(skb, TCA_OPTIONS);
 	if (nest == NULL)
 		goto nla_put_failure;
 

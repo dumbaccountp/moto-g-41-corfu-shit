@@ -1,8 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
-
 /* Glue code to lib/swiotlb-xen.c */
 
-#include <linux/dma-map-ops.h>
+#include <linux/dma-mapping.h>
 #include <linux/pci.h>
 #include <xen/swiotlb-xen.h>
 

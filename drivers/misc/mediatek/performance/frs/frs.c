@@ -20,6 +20,7 @@
 
 static int frs_nl_id = 31;
 module_param(frs_nl_id, int, 0644);
+struct frs_info frs_data;
 struct _EARA_THRM_PACKAGE {
 	__s32 type;
 	__s32 request;
@@ -211,9 +212,61 @@ static ssize_t frs_nl_id_show(struct kobject *kobj,
 
 	return len;
 }
+
+static ssize_t frs_info_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	int len = 0;
+
+	len += snprintf(buf + len, PAGE_SIZE - len, "%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+			frs_data.enable,
+			frs_data.activated, frs_data.pid,
+			frs_data.target_fps, frs_data.diff,
+			frs_data.tpcb, frs_data.tpcb_slope,
+			frs_data.ap_headroom, frs_data.n_sec_to_ttpcb);
+
+	return len;
+}
+
+static ssize_t frs_info_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int enable, act, target_fps, tpcb, tpcb_slope;
+	int ap_headroom, n_sec_to_ttpcb;
+	int pid, diff;
+	int ret;
+
+	ret = sscanf(buf, "%d,%d,%d,%d,%d,%d,%d,%d,%d", &enable, &act, &pid, &target_fps,
+				&diff, &tpcb, &tpcb_slope, &ap_headroom, &n_sec_to_ttpcb);
+	if (ret == 9) {
+		if ((ap_headroom >= -1000) && (ap_headroom <= 1000)) {
+			frs_data.ap_headroom = ap_headroom;
+		} else {
+			pr_info("[%s] invalid ap head room input\n", __func__);
+			return -EINVAL;
+		}
+
+		frs_data.enable = enable;
+		frs_data.activated = act;
+		frs_data.tpcb = tpcb;
+		frs_data.pid = pid;
+		frs_data.target_fps = target_fps;
+		frs_data.diff = diff;
+		frs_data.tpcb_slope = tpcb_slope;
+		frs_data.n_sec_to_ttpcb = n_sec_to_ttpcb;
+	} else {
+		pr_info("[%s] invalid input\n", __func__);
+		return -EINVAL;
+	}
+
+	return count;
+}
+
 static struct kobj_attribute frs_nl_id_attr = __ATTR_RO(frs_nl_id);
+static struct kobj_attribute frs_info_attr = __ATTR_RW(frs_info);
 static struct attribute *thermal_attrs[] = {
 	&frs_nl_id_attr.attr,
+	&frs_info_attr.attr,
 	NULL
 };
 static struct attribute_group thermal_attr_group = {
@@ -230,11 +283,12 @@ void __exit eara_thrm_pre_exit(void)
 int __init eara_thrm_pre_init(void)
 {
 	int ret;
+
 	eara_pre_change_fp = pre_change_event;
 	eara_pre_change_single_fp =  pre_change_single_event;
 	eara_netlink_init();
 
-	ret = sysfs_merge_group(kernel_kobj, &thermal_attr_group);
+	ret = sysfs_create_group(kernel_kobj, &thermal_attr_group);
 	if (ret) {
 		pr_info(TAG, "failed to create thermal sysfs, ret=%d!\n", ret);
 		return ret;

@@ -1,9 +1,20 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 1999 - 2010 Intel Corporation.
  * Copyright (C) 2010 - 2012 LAPIS SEMICONDUCTOR CO., LTD.
  *
  * This code was derived from the Intel e1000e Linux driver.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "pch_gbe.h"
@@ -107,7 +118,7 @@ static int pch_ptp_match(struct sk_buff *skb, u16 uid_hi, u32 uid_lo, u16 seqid)
 {
 	u8 *data = skb->data;
 	unsigned int offset;
-	u16 hi, id;
+	u16 *hi, *id;
 	u32 lo;
 
 	if (ptp_classify_raw(skb) == PTP_CLASS_NONE)
@@ -118,11 +129,14 @@ static int pch_ptp_match(struct sk_buff *skb, u16 uid_hi, u32 uid_lo, u16 seqid)
 	if (skb->len < offset + OFF_PTP_SEQUENCE_ID + sizeof(seqid))
 		return 0;
 
-	hi = get_unaligned_be16(data + offset + OFF_PTP_SOURCE_UUID + 0);
-	lo = get_unaligned_be32(data + offset + OFF_PTP_SOURCE_UUID + 2);
-	id = get_unaligned_be16(data + offset + OFF_PTP_SEQUENCE_ID);
+	hi = (u16 *)(data + offset + OFF_PTP_SOURCE_UUID);
+	id = (u16 *)(data + offset + OFF_PTP_SEQUENCE_ID);
 
-	return (uid_hi == hi && uid_lo == lo && seqid == id);
+	memcpy(&lo, &hi[1], sizeof(lo));
+
+	return (uid_hi == *hi &&
+		uid_lo == lo &&
+		seqid  == *id);
 }
 
 static void
@@ -132,6 +146,7 @@ pch_rx_timestamp(struct pch_gbe_adapter *adapter, struct sk_buff *skb)
 	struct pci_dev *pdev;
 	u64 ns;
 	u32 hi, lo, val;
+	u16 uid, seq;
 
 	if (!adapter->hwts_rx_en)
 		return;
@@ -147,7 +162,10 @@ pch_rx_timestamp(struct pch_gbe_adapter *adapter, struct sk_buff *skb)
 	lo = pch_src_uuid_lo_read(pdev);
 	hi = pch_src_uuid_hi_read(pdev);
 
-	if (!pch_ptp_match(skb, hi, lo, hi >> 16))
+	uid = hi & 0xffff;
+	seq = (hi >> 16) & 0xffff;
+
+	if (!pch_ptp_match(skb, htons(uid), htonl(lo), htons(seq)))
 		goto out;
 
 	ns = pch_rx_snap_read(pdev);
@@ -288,7 +306,7 @@ static s32 pch_gbe_mac_read_mac_addr(struct pch_gbe_hw *hw)
 /**
  * pch_gbe_wait_clr_bit - Wait to clear a bit
  * @reg:	Pointer of register
- * @bit:	Busy bit
+ * @busy:	Busy bit
  */
 static void pch_gbe_wait_clr_bit(void *reg, u32 bit)
 {
@@ -1027,7 +1045,7 @@ static void pch_gbe_set_mode(struct pch_gbe_adapter *adapter, u16 speed,
 
 /**
  * pch_gbe_watchdog - Watchdog process
- * @t:  timer list containing a Board private structure
+ * @data:  Board private structure
  */
 static void pch_gbe_watchdog(struct timer_list *t)
 {
@@ -1166,7 +1184,6 @@ static void pch_gbe_tx_queue(struct pch_gbe_adapter *adapter,
 		buffer_info->dma = 0;
 		buffer_info->time_stamp = 0;
 		tx_ring->next_to_use = ring_num;
-		dev_kfree_skb_any(skb);
 		return;
 	}
 	buffer_info->mapped = true;
@@ -1420,8 +1437,8 @@ pch_gbe_alloc_rx_buffers_pool(struct pch_gbe_adapter *adapter,
 
 	size = rx_ring->count * bufsz + PCH_GBE_RESERVE_MEMORY;
 	rx_ring->rx_buff_pool =
-		dma_alloc_coherent(&pdev->dev, size,
-				   &rx_ring->rx_buff_pool_logic, GFP_KERNEL);
+		dma_zalloc_coherent(&pdev->dev, size,
+				    &rx_ring->rx_buff_pool_logic, GFP_KERNEL);
 	if (!rx_ring->rx_buff_pool)
 		return -ENOMEM;
 
@@ -1735,8 +1752,8 @@ int pch_gbe_setup_tx_resources(struct pch_gbe_adapter *adapter,
 
 	tx_ring->size = tx_ring->count * (int)sizeof(struct pch_gbe_tx_desc);
 
-	tx_ring->desc = dma_alloc_coherent(&pdev->dev, tx_ring->size,
-					   &tx_ring->dma, GFP_KERNEL);
+	tx_ring->desc = dma_zalloc_coherent(&pdev->dev, tx_ring->size,
+					    &tx_ring->dma, GFP_KERNEL);
 	if (!tx_ring->desc) {
 		vfree(tx_ring->buffer_info);
 		return -ENOMEM;
@@ -1778,8 +1795,8 @@ int pch_gbe_setup_rx_resources(struct pch_gbe_adapter *adapter,
 		return -ENOMEM;
 
 	rx_ring->size = rx_ring->count * (int)sizeof(struct pch_gbe_rx_desc);
-	rx_ring->desc =	dma_alloc_coherent(&pdev->dev, rx_ring->size,
-						  &rx_ring->dma, GFP_KERNEL);
+	rx_ring->desc =	dma_zalloc_coherent(&pdev->dev, rx_ring->size,
+					    &rx_ring->dma, GFP_KERNEL);
 	if (!rx_ring->desc) {
 		vfree(rx_ring->buffer_info);
 		return -ENOMEM;
@@ -2058,7 +2075,7 @@ static int pch_gbe_stop(struct net_device *netdev)
  *	- NETDEV_TX_OK:   Normal end
  *	- NETDEV_TX_BUSY: Error end
  */
-static netdev_tx_t pch_gbe_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
+static int pch_gbe_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct pch_gbe_adapter *adapter = netdev_priv(netdev);
 	struct pch_gbe_tx_ring *tx_ring = adapter->tx_ring;
@@ -2264,9 +2281,8 @@ static int pch_gbe_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 /**
  * pch_gbe_tx_timeout - Respond to a Tx Hang
  * @netdev:   Network interface device structure
- * @txqueue: index of hanging queue
  */
-static void pch_gbe_tx_timeout(struct net_device *netdev, unsigned int txqueue)
+static void pch_gbe_tx_timeout(struct net_device *netdev)
 {
 	struct pch_gbe_adapter *adapter = netdev_priv(netdev);
 
@@ -2482,7 +2498,6 @@ static void pch_gbe_remove(struct pci_dev *pdev)
 	unregister_netdev(netdev);
 
 	pch_gbe_phy_hw_reset(&adapter->hw);
-	pci_dev_put(adapter->ptp_pdev);
 
 	free_netdev(netdev);
 }
@@ -2531,13 +2546,9 @@ static int pch_gbe_probe(struct pci_dev *pdev,
 	adapter->pdev = pdev;
 	adapter->hw.back = adapter;
 	adapter->hw.reg = pcim_iomap_table(pdev)[PCH_GBE_PCI_BAR];
-
 	adapter->pdata = (struct pch_gbe_privdata *)pci_id->driver_data;
-	if (adapter->pdata && adapter->pdata->platform_init) {
-		ret = adapter->pdata->platform_init(pdev);
-		if (ret)
-			goto err_free_netdev;
-	}
+	if (adapter->pdata && adapter->pdata->platform_init)
+		adapter->pdata->platform_init(pdev);
 
 	adapter->ptp_pdev =
 		pci_get_domain_bus_and_slot(pci_domain_nr(adapter->pdev->bus),
@@ -2564,7 +2575,7 @@ static int pch_gbe_probe(struct pci_dev *pdev,
 	/* setup the private structure */
 	ret = pch_gbe_sw_init(adapter);
 	if (ret)
-		goto err_put_dev;
+		goto err_free_netdev;
 
 	/* Initialize PHY */
 	ret = pch_gbe_init_phy(adapter);
@@ -2622,8 +2633,6 @@ static int pch_gbe_probe(struct pci_dev *pdev,
 
 err_free_adapter:
 	pch_gbe_phy_hw_reset(&adapter->hw);
-err_put_dev:
-	pci_dev_put(adapter->ptp_pdev);
 err_free_netdev:
 	free_netdev(netdev);
 	return ret;
@@ -2634,7 +2643,7 @@ err_free_netdev:
  */
 static int pch_gbe_minnow_platform_init(struct pci_dev *pdev)
 {
-	unsigned long flags = GPIOF_OUT_INIT_HIGH;
+	unsigned long flags = GPIOF_DIR_OUT | GPIOF_INIT_HIGH | GPIOF_EXPORT;
 	unsigned gpio = MINNOW_PHY_RESET_GPIO;
 	int ret;
 

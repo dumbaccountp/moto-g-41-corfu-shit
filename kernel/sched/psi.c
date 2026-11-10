@@ -142,12 +142,9 @@
 #include <linux/psi.h>
 #include "sched.h"
 
-#include <trace/hooks/psi.h>
-
 static int psi_bug __read_mostly;
 
 DEFINE_STATIC_KEY_FALSE(psi_disabled);
-DEFINE_STATIC_KEY_TRUE(psi_cgroups_enabled);
 
 #ifdef CONFIG_PSI_DEFAULT_DISABLED
 static bool psi_enable;
@@ -176,13 +173,11 @@ static u64 psi_period __read_mostly;
 
 /* System-level pressure and stall tracking */
 static DEFINE_PER_CPU(struct psi_group_cpu, system_group_pcpu);
-struct psi_group psi_system = {
+static struct psi_group psi_system = {
 	.pcpu = &system_group_pcpu,
 };
 
 static void psi_avgs_work(struct work_struct *work);
-
-static void poll_timer_fn(struct timer_list *t);
 
 static void group_init(struct psi_group *group)
 {
@@ -204,9 +199,7 @@ static void group_init(struct psi_group *group)
 	memset(group->polling_total, 0, sizeof(group->polling_total));
 	group->polling_next_update = ULLONG_MAX;
 	group->polling_until = 0;
-	init_waitqueue_head(&group->poll_wait);
-	timer_setup(&group->poll_timer, poll_timer_fn, 0);
-	rcu_assign_pointer(group->poll_task, NULL);
+	rcu_assign_pointer(group->poll_kworker, NULL);
 }
 
 void __init psi_init(void)
@@ -215,9 +208,6 @@ void __init psi_init(void)
 		static_branch_enable(&psi_disabled);
 		return;
 	}
-
-	if (!cgroup_psi_enabled())
-		static_branch_disable(&psi_cgroups_enabled);
 
 	psi_period = jiffies_to_nsecs(PSI_FREQ);
 	group_init(&psi_system);
@@ -235,7 +225,7 @@ static bool test_state(unsigned int *tasks, enum psi_states state)
 	case PSI_MEM_FULL:
 		return tasks[NR_MEMSTALL] && !tasks[NR_RUNNING];
 	case PSI_CPU_SOME:
-		return tasks[NR_RUNNING] > tasks[NR_ONCPU];
+		return tasks[NR_RUNNING] > 1;
 	case PSI_NONIDLE:
 		return tasks[NR_IOWAIT] || tasks[NR_MEMSTALL] ||
 			tasks[NR_RUNNING];
@@ -544,15 +534,11 @@ static u64 update_triggers(struct psi_group *group, u64 now)
 		if (now < t->last_event_time + t->win.size)
 			continue;
 
-		trace_android_vh_psi_event(t);
-
 		/* Generate an event */
 		if (cmpxchg(&t->event, 0, 1) == 0)
 			wake_up_interruptible(&t->event_wait);
 		t->last_event_time = now;
 	}
-
-	trace_android_vh_psi_group(group);
 
 	if (new_stall)
 		memcpy(group->polling_total, total,
@@ -561,80 +547,53 @@ static u64 update_triggers(struct psi_group *group, u64 now)
 	return now + group->poll_min_period;
 }
 
-/* Schedule polling if it's not already scheduled or forced. */
-static void psi_schedule_poll_work(struct psi_group *group, unsigned long delay,
-				   bool force)
+/*
+ * Schedule polling if it's not already scheduled. It's safe to call even from
+ * hotpath because even though kthread_queue_delayed_work takes worker->lock
+ * spinlock that spinlock is never contended due to poll_scheduled atomic
+ * preventing such competition.
+ */
+static void psi_schedule_poll_work(struct psi_group *group, unsigned long delay)
 {
-	struct task_struct *task;
+	struct kthread_worker *kworker;
 
-	/*
-	 * atomic_xchg should be called even when !force to provide a
-	 * full memory barrier (see the comment inside psi_poll_work).
-	 */
-	if (atomic_xchg(&group->poll_scheduled, 1) && !force)
+	/* Do not reschedule if already scheduled */
+	if (atomic_cmpxchg(&group->poll_scheduled, 0, 1) != 0)
 		return;
 
 	rcu_read_lock();
 
-	task = rcu_dereference(group->poll_task);
+	kworker = rcu_dereference(group->poll_kworker);
 	/*
 	 * kworker might be NULL in case psi_trigger_destroy races with
 	 * psi_task_change (hotpath) which can't use locks
 	 */
-	if (likely(task))
-		mod_timer(&group->poll_timer, jiffies + delay);
+	if (likely(kworker)) {
+		lockdep_off();
+		kthread_queue_delayed_work(kworker, &group->poll_work, delay);
+		lockdep_on();
+	}
 	else
 		atomic_set(&group->poll_scheduled, 0);
 
 	rcu_read_unlock();
 }
 
-static void psi_poll_work(struct psi_group *group)
+static void psi_poll_work(struct kthread_work *work)
 {
-	bool force_reschedule = false;
+	struct kthread_delayed_work *dwork;
+	struct psi_group *group;
 	u32 changed_states;
 	u64 now;
+
+	dwork = container_of(work, struct kthread_delayed_work, work);
+	group = container_of(dwork, struct psi_group, poll_work);
+
+	atomic_set(&group->poll_scheduled, 0);
 
 	mutex_lock(&group->trigger_lock);
 
 	now = sched_clock();
-
-	if (now > group->polling_until) {
-		/*
-		 * We are either about to start or might stop polling if no
-		 * state change was recorded. Resetting poll_scheduled leaves
-		 * a small window for psi_group_change to sneak in and schedule
-		 * an immegiate poll_work before we get to rescheduling. One
-		 * potential extra wakeup at the end of the polling window
-		 * should be negligible and polling_next_update still keeps
-		 * updates correctly on schedule.
-		 */
-		atomic_set(&group->poll_scheduled, 0);
-		/*
-		 * A task change can race with the poll worker that is supposed to
-		 * report on it. To avoid missing events, ensure ordering between
-		 * poll_scheduled and the task state accesses, such that if the poll
-		 * worker misses the state update, the task change is guaranteed to
-		 * reschedule the poll worker:
-		 *
-		 * poll worker:
-		 *   atomic_set(poll_scheduled, 0)
-		 *   smp_mb()
-		 *   LOAD states
-		 *
-		 * task change:
-		 *   STORE states
-		 *   if atomic_xchg(poll_scheduled, 1) == 0:
-		 *     schedule poll worker
-		 *
-		 * The atomic_xchg() implies a full barrier.
-		 */
-		smp_mb();
-	} else {
-		/* Polling window is not over, keep rescheduling */
-		force_reschedule = true;
-	}
-
 
 	collect_percpu_times(group, PSI_POLL, &changed_states);
 
@@ -661,37 +620,10 @@ static void psi_poll_work(struct psi_group *group)
 		group->polling_next_update = update_triggers(group, now);
 
 	psi_schedule_poll_work(group,
-		nsecs_to_jiffies(group->polling_next_update - now) + 1,
-		force_reschedule);
+		nsecs_to_jiffies(group->polling_next_update - now) + 1);
 
 out:
 	mutex_unlock(&group->trigger_lock);
-}
-
-static int psi_poll_worker(void *data)
-{
-	struct psi_group *group = (struct psi_group *)data;
-
-	sched_set_fifo_low(current);
-
-	while (true) {
-		wait_event_interruptible(group->poll_wait,
-				atomic_cmpxchg(&group->poll_wakeup, 1, 0) ||
-				kthread_should_stop());
-		if (kthread_should_stop())
-			break;
-
-		psi_poll_work(group);
-	}
-	return 0;
-}
-
-static void poll_timer_fn(struct timer_list *t)
-{
-	struct psi_group *group = from_timer(group, t, poll_timer);
-
-	atomic_set(&group->poll_wakeup, 1);
-	wake_up_interruptible(&group->poll_wait);
 }
 
 static void record_times(struct psi_group_cpu *groupc, int cpu,
@@ -740,14 +672,13 @@ static void record_times(struct psi_group_cpu *groupc, int cpu,
 		groupc->times[PSI_NONIDLE] += delta;
 }
 
-static void psi_group_change(struct psi_group *group, int cpu,
-			     unsigned int clear, unsigned int set,
-			     bool wake_clock)
+static u32 psi_group_change(struct psi_group *group, int cpu,
+			    unsigned int clear, unsigned int set)
 {
 	struct psi_group_cpu *groupc;
-	u32 state_mask = 0;
 	unsigned int t, m;
 	enum psi_states s;
+	u32 state_mask = 0;
 
 	groupc = per_cpu_ptr(group->pcpu, cpu);
 
@@ -766,15 +697,14 @@ static void psi_group_change(struct psi_group *group, int cpu,
 	for (t = 0, m = clear; m; m &= ~(1 << t), t++) {
 		if (!(m & (1 << t)))
 			continue;
-		if (groupc->tasks[t]) {
-			groupc->tasks[t]--;
-		} else if (!psi_bug) {
-			printk_deferred(KERN_ERR "psi: task underflow! cpu=%d t=%d tasks=[%u %u %u %u] clear=%x set=%x\n",
+		if (groupc->tasks[t] == 0 && !psi_bug) {
+			printk_deferred(KERN_ERR "psi: task underflow! cpu=%d t=%d tasks=[%u %u %u] clear=%x set=%x\n",
 					cpu, t, groupc->tasks[0],
 					groupc->tasks[1], groupc->tasks[2],
-					groupc->tasks[3], clear, set);
+					clear, set);
 			psi_bug = 1;
 		}
+		groupc->tasks[t]--;
 	}
 
 	for (t = 0; set; set &= ~(1 << t), t++)
@@ -790,50 +720,31 @@ static void psi_group_change(struct psi_group *group, int cpu,
 
 	write_seqcount_end(&groupc->seq);
 
-	if (state_mask & group->poll_states)
-		psi_schedule_poll_work(group, 1, false);
-
-	if (wake_clock && !delayed_work_pending(&group->avgs_work))
-		schedule_delayed_work(&group->avgs_work, PSI_FREQ);
+	return state_mask;
 }
 
 static struct psi_group *iterate_groups(struct task_struct *task, void **iter)
 {
-	if (*iter == &psi_system)
-		return NULL;
-
 #ifdef CONFIG_CGROUPS
-	if (static_branch_likely(&psi_cgroups_enabled)) {
-		struct cgroup *cgroup = NULL;
+	struct cgroup *cgroup = NULL;
 
-		if (!*iter)
-			cgroup = task->cgroups->dfl_cgrp;
-		else
-			cgroup = cgroup_parent(*iter);
+	if (!*iter)
+		cgroup = task->cgroups->dfl_cgrp;
+	else if (*iter == &psi_system)
+		return NULL;
+	else
+		cgroup = cgroup_parent(*iter);
 
-		if (cgroup && cgroup_parent(cgroup)) {
-			*iter = cgroup;
-			return cgroup_psi(cgroup);
-		}
+	if (cgroup && cgroup_parent(cgroup)) {
+		*iter = cgroup;
+		return cgroup_psi(cgroup);
 	}
+#else
+	if (*iter)
+		return NULL;
 #endif
 	*iter = &psi_system;
 	return &psi_system;
-}
-
-static void psi_flags_change(struct task_struct *task, int clear, int set)
-{
-	if (((task->psi_flags & set) ||
-	     (task->psi_flags & clear) != clear) &&
-	    !psi_bug) {
-		printk_deferred(KERN_ERR "psi: inconsistent task state! task=%d:%s cpu=%d psi_flags=%x clear=%x set=%x\n",
-				task->pid, task->comm, task_cpu(task),
-				task->psi_flags, clear, set);
-		psi_bug = 1;
-	}
-
-	task->psi_flags &= ~clear;
-	task->psi_flags |= set;
 }
 
 void psi_task_change(struct task_struct *task, int clear, int set)
@@ -846,7 +757,17 @@ void psi_task_change(struct task_struct *task, int clear, int set)
 	if (!task->pid)
 		return;
 
-	psi_flags_change(task, clear, set);
+	if (((task->psi_flags & set) ||
+	     (task->psi_flags & clear) != clear) &&
+	    !psi_bug) {
+		printk_deferred(KERN_ERR "psi: inconsistent task state! task=%d:%s cpu=%d psi_flags=%x clear=%x set=%x\n",
+				task->pid, task->comm, cpu,
+				task->psi_flags, clear, set);
+		psi_bug = 1;
+	}
+
+	task->psi_flags &= ~clear;
+	task->psi_flags |= set;
 
 	/*
 	 * Periodic aggregation shuts off if there is a period of no
@@ -859,51 +780,14 @@ void psi_task_change(struct task_struct *task, int clear, int set)
 		     wq_worker_last_func(task) == psi_avgs_work))
 		wake_clock = false;
 
-	while ((group = iterate_groups(task, &iter)))
-		psi_group_change(group, cpu, clear, set, wake_clock);
-}
+	while ((group = iterate_groups(task, &iter))) {
+		u32 state_mask = psi_group_change(group, cpu, clear, set);
 
-void psi_task_switch(struct task_struct *prev, struct task_struct *next,
-		     bool sleep)
-{
-	struct psi_group *group, *common = NULL;
-	int cpu = task_cpu(prev);
-	void *iter;
+		if (state_mask & group->poll_states)
+			psi_schedule_poll_work(group, 1);
 
-	if (next->pid) {
-		psi_flags_change(next, 0, TSK_ONCPU);
-		/*
-		 * When moving state between tasks, the group that
-		 * contains them both does not change: we can stop
-		 * updating the tree once we reach the first common
-		 * ancestor. Iterate @next's ancestors until we
-		 * encounter @prev's state.
-		 */
-		iter = NULL;
-		while ((group = iterate_groups(next, &iter))) {
-			if (per_cpu_ptr(group->pcpu, cpu)->tasks[NR_ONCPU]) {
-				common = group;
-				break;
-			}
-
-			psi_group_change(group, cpu, 0, TSK_ONCPU, true);
-		}
-	}
-
-	/*
-	 * If this is a voluntary sleep, dequeue will have taken care
-	 * of the outgoing TSK_ONCPU alongside TSK_RUNNING already. We
-	 * only need to deal with it during preemption.
-	 */
-	if (sleep)
-		return;
-
-	if (prev->pid) {
-		psi_flags_change(prev, TSK_ONCPU, 0);
-
-		iter = NULL;
-		while ((group = iterate_groups(prev, &iter)) && group != common)
-			psi_group_change(group, cpu, TSK_ONCPU, 0, true);
+		if (wake_clock && !delayed_work_pending(&group->avgs_work))
+			schedule_delayed_work(&group->avgs_work, PSI_FREQ);
 	}
 }
 
@@ -937,17 +821,17 @@ void psi_memstall_enter(unsigned long *flags)
 	if (static_branch_likely(&psi_disabled))
 		return;
 
-	*flags = current->in_memstall;
+	*flags = current->flags & PF_MEMSTALL;
 	if (*flags)
 		return;
 	/*
-	 * in_memstall setting & accounting needs to be atomic wrt
+	 * PF_MEMSTALL setting & accounting needs to be atomic wrt
 	 * changes to the task's scheduling state, otherwise we can
 	 * race with CPU migration.
 	 */
 	rq = this_rq_lock_irq(&rf);
 
-	current->in_memstall = 1;
+	current->flags |= PF_MEMSTALL;
 	psi_task_change(current, 0, TSK_MEMSTALL);
 
 	rq_unlock_irq(rq, &rf);
@@ -970,13 +854,13 @@ void psi_memstall_leave(unsigned long *flags)
 	if (*flags)
 		return;
 	/*
-	 * in_memstall clearing & accounting needs to be atomic wrt
+	 * PF_MEMSTALL clearing & accounting needs to be atomic wrt
 	 * changes to the task's scheduling state, otherwise we could
 	 * race with CPU migration.
 	 */
 	rq = this_rq_lock_irq(&rf);
 
-	current->in_memstall = 0;
+	current->flags &= ~PF_MEMSTALL;
 	psi_task_change(current, TSK_MEMSTALL, 0);
 
 	rq_unlock_irq(rq, &rf);
@@ -1020,7 +904,7 @@ void psi_cgroup_free(struct cgroup *cgroup)
  */
 void cgroup_move_task(struct task_struct *task, struct css_set *to)
 {
-	unsigned int task_flags;
+	unsigned int task_flags = 0;
 	struct rq_flags rf;
 	struct rq *rq;
 
@@ -1035,31 +919,13 @@ void cgroup_move_task(struct task_struct *task, struct css_set *to)
 
 	rq = task_rq_lock(task, &rf);
 
-	/*
-	 * We may race with schedule() dropping the rq lock between
-	 * deactivating prev and switching to next. Because the psi
-	 * updates from the deactivation are deferred to the switch
-	 * callback to save cgroup tree updates, the task's scheduling
-	 * state here is not coherent with its psi state:
-	 *
-	 * schedule()                   cgroup_move_task()
-	 *   rq_lock()
-	 *   deactivate_task()
-	 *     p->on_rq = 0
-	 *     psi_dequeue() // defers TSK_RUNNING & TSK_IOWAIT updates
-	 *   pick_next_task()
-	 *     rq_unlock()
-	 *                                rq_lock()
-	 *                                psi_task_change() // old cgroup
-	 *                                task->cgroups = to
-	 *                                psi_task_change() // new cgroup
-	 *                                rq_unlock()
-	 *     rq_lock()
-	 *   psi_sched_switch() // does deferred updates in new cgroup
-	 *
-	 * Don't rely on the scheduling state. Use psi_flags instead.
-	 */
-	task_flags = task->psi_flags;
+	if (task_on_rq_queued(task))
+		task_flags = TSK_RUNNING;
+	else if (task->in_iowait)
+		task_flags = TSK_IOWAIT;
+
+	if (task->flags & PF_MEMSTALL)
+		task_flags |= TSK_MEMSTALL;
 
 	if (task_flags)
 		psi_task_change(task, task_flags, 0);
@@ -1183,21 +1049,26 @@ struct psi_trigger *psi_trigger_create(struct psi_group *group,
 	t->event = 0;
 	t->last_event_time = 0;
 	init_waitqueue_head(&t->event_wait);
+	kref_init(&t->refcount);
 
 	mutex_lock(&group->trigger_lock);
 
-	if (!rcu_access_pointer(group->poll_task)) {
-		struct task_struct *task;
+	if (!rcu_access_pointer(group->poll_kworker)) {
+		struct sched_param param = {
+			.sched_priority = 1,
+		};
+		struct kthread_worker *kworker;
 
-		task = kthread_create(psi_poll_worker, group, "psimon");
-		if (IS_ERR(task)) {
+		kworker = kthread_create_worker(0, "psimon");
+		if (IS_ERR(kworker)) {
 			kfree(t);
 			mutex_unlock(&group->trigger_lock);
-			return ERR_CAST(task);
+			return ERR_CAST(kworker);
 		}
-		atomic_set(&group->poll_wakeup, 0);
-		wake_up_process(task);
-		rcu_assign_pointer(group->poll_task, task);
+		sched_setscheduler_nocheck(kworker->task, SCHED_FIFO, &param);
+		kthread_init_delayed_work(&group->poll_work,
+				psi_poll_work);
+		rcu_assign_pointer(group->poll_kworker, kworker);
 	}
 
 	list_add(&t->node, &group->triggers);
@@ -1211,19 +1082,15 @@ struct psi_trigger *psi_trigger_create(struct psi_group *group,
 	return t;
 }
 
-void psi_trigger_destroy(struct psi_trigger *t)
+static void psi_trigger_destroy(struct kref *ref)
 {
-	struct psi_group *group;
-	struct task_struct *task_to_destroy = NULL;
+	struct psi_trigger *t = container_of(ref, struct psi_trigger, refcount);
+	struct psi_group *group = t->group;
+	struct kthread_worker *kworker_to_destroy = NULL;
 
-	/*
-	 * We do not check psi_disabled since it might have been disabled after
-	 * the trigger got created.
-	 */
-	if (!t)
+	if (static_branch_likely(&psi_disabled))
 		return;
 
-	group = t->group;
 	/*
 	 * Wakeup waiters to stop polling. Can happen if cgroup is deleted
 	 * from under a polling process.
@@ -1245,38 +1112,53 @@ void psi_trigger_destroy(struct psi_trigger *t)
 			period = min(period, div_u64(tmp->win.size,
 					UPDATES_PER_WINDOW));
 		group->poll_min_period = period;
-		/* Destroy poll_task when the last trigger is destroyed */
+		/* Destroy poll_kworker when the last trigger is destroyed */
 		if (group->poll_states == 0) {
 			group->polling_until = 0;
-			task_to_destroy = rcu_dereference_protected(
-					group->poll_task,
+			kworker_to_destroy = rcu_dereference_protected(
+					group->poll_kworker,
 					lockdep_is_held(&group->trigger_lock));
-			rcu_assign_pointer(group->poll_task, NULL);
-			del_timer(&group->poll_timer);
+			rcu_assign_pointer(group->poll_kworker, NULL);
 		}
 	}
 
 	mutex_unlock(&group->trigger_lock);
 
 	/*
-	 * Wait for psi_schedule_poll_work RCU to complete its read-side
-	 * critical section before destroying the trigger and optionally the
-	 * poll_task.
+	 * Wait for both *trigger_ptr from psi_trigger_replace and
+	 * poll_kworker RCUs to complete their read-side critical sections
+	 * before destroying the trigger and optionally the poll_kworker
 	 */
 	synchronize_rcu();
 	/*
-	 * Stop kthread 'psimon' after releasing trigger_lock to prevent a
+	 * Destroy the kworker after releasing trigger_lock to prevent a
 	 * deadlock while waiting for psi_poll_work to acquire trigger_lock
 	 */
-	if (task_to_destroy) {
+	if (kworker_to_destroy) {
 		/*
 		 * After the RCU grace period has expired, the worker
-		 * can no longer be found through group->poll_task.
+		 * can no longer be found through group->poll_kworker.
+		 * But it might have been already scheduled before
+		 * that - deschedule it cleanly before destroying it.
 		 */
-		kthread_stop(task_to_destroy);
+		kthread_cancel_delayed_work_sync(&group->poll_work);
 		atomic_set(&group->poll_scheduled, 0);
+
+		kthread_destroy_worker(kworker_to_destroy);
 	}
 	kfree(t);
+}
+
+void psi_trigger_replace(void **trigger_ptr, struct psi_trigger *new)
+{
+	struct psi_trigger *old = *trigger_ptr;
+
+	if (static_branch_likely(&psi_disabled))
+		return;
+
+	rcu_assign_pointer(*trigger_ptr, new);
+	if (old)
+		kref_put(&old->refcount, psi_trigger_destroy);
 }
 
 __poll_t psi_trigger_poll(void **trigger_ptr,
@@ -1288,14 +1170,23 @@ __poll_t psi_trigger_poll(void **trigger_ptr,
 	if (static_branch_likely(&psi_disabled))
 		return DEFAULT_POLLMASK | EPOLLERR | EPOLLPRI;
 
-	t = smp_load_acquire(trigger_ptr);
-	if (!t)
+	rcu_read_lock();
+
+	t = rcu_dereference(*(void __rcu __force **)trigger_ptr);
+	if (!t) {
+		rcu_read_unlock();
 		return DEFAULT_POLLMASK | EPOLLERR | EPOLLPRI;
+	}
+	kref_get(&t->refcount);
+
+	rcu_read_unlock();
 
 	poll_wait(file, &t->event_wait, wait);
 
 	if (cmpxchg(&t->event, 1, 0) == 1)
 		ret |= EPOLLPRI;
+
+	kref_put(&t->refcount, psi_trigger_destroy);
 
 	return ret;
 }
@@ -1320,24 +1211,14 @@ static ssize_t psi_write(struct file *file, const char __user *user_buf,
 
 	buf[buf_size - 1] = '\0';
 
-	seq = file->private_data;
+	new = psi_trigger_create(&psi_system, buf, nbytes, res);
+	if (IS_ERR(new))
+		return PTR_ERR(new);
 
+	seq = file->private_data;
 	/* Take seq->lock to protect seq->private from concurrent writes */
 	mutex_lock(&seq->lock);
-
-	/* Allow only one trigger per file descriptor */
-	if (seq->private) {
-		mutex_unlock(&seq->lock);
-		return -EBUSY;
-	}
-
-	new = psi_trigger_create(&psi_system, buf, nbytes, res);
-	if (IS_ERR(new)) {
-		mutex_unlock(&seq->lock);
-		return PTR_ERR(new);
-	}
-
-	smp_store_release(&seq->private, new);
+	psi_trigger_replace(&seq->private, new);
 	mutex_unlock(&seq->lock);
 
 	return nbytes;
@@ -1372,45 +1253,43 @@ static int psi_fop_release(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq = file->private_data;
 
-	psi_trigger_destroy(seq->private);
+	psi_trigger_replace(&seq->private, NULL);
 	return single_release(inode, file);
 }
 
-static const struct proc_ops psi_io_proc_ops = {
-	.proc_open	= psi_io_open,
-	.proc_read	= seq_read,
-	.proc_lseek	= seq_lseek,
-	.proc_write	= psi_io_write,
-	.proc_poll	= psi_fop_poll,
-	.proc_release	= psi_fop_release,
+static const struct file_operations psi_io_fops = {
+	.open           = psi_io_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.write          = psi_io_write,
+	.poll           = psi_fop_poll,
+	.release        = psi_fop_release,
 };
 
-static const struct proc_ops psi_memory_proc_ops = {
-	.proc_open	= psi_memory_open,
-	.proc_read	= seq_read,
-	.proc_lseek	= seq_lseek,
-	.proc_write	= psi_memory_write,
-	.proc_poll	= psi_fop_poll,
-	.proc_release	= psi_fop_release,
+static const struct file_operations psi_memory_fops = {
+	.open           = psi_memory_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.write          = psi_memory_write,
+	.poll           = psi_fop_poll,
+	.release        = psi_fop_release,
 };
 
-static const struct proc_ops psi_cpu_proc_ops = {
-	.proc_open	= psi_cpu_open,
-	.proc_read	= seq_read,
-	.proc_lseek	= seq_lseek,
-	.proc_write	= psi_cpu_write,
-	.proc_poll	= psi_fop_poll,
-	.proc_release	= psi_fop_release,
+static const struct file_operations psi_cpu_fops = {
+	.open           = psi_cpu_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.write          = psi_cpu_write,
+	.poll           = psi_fop_poll,
+	.release        = psi_fop_release,
 };
 
 static int __init psi_proc_init(void)
 {
-	if (psi_enable) {
-		proc_mkdir("pressure", NULL);
-		proc_create("pressure/io", 0, NULL, &psi_io_proc_ops);
-		proc_create("pressure/memory", 0, NULL, &psi_memory_proc_ops);
-		proc_create("pressure/cpu", 0, NULL, &psi_cpu_proc_ops);
-	}
+	proc_mkdir("pressure", NULL);
+	proc_create("pressure/io", 0, NULL, &psi_io_fops);
+	proc_create("pressure/memory", 0, NULL, &psi_memory_fops);
+	proc_create("pressure/cpu", 0, NULL, &psi_cpu_fops);
 	return 0;
 }
 module_init(psi_proc_init);

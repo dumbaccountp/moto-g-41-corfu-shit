@@ -1,6 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2016 Pablo Neira Ayuso <pablo@netfilter.org>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -35,8 +38,7 @@ static int nft_objref_init(const struct nft_ctx *ctx,
 		return -EINVAL;
 
 	objtype = ntohl(nla_get_be32(tb[NFTA_OBJREF_IMM_TYPE]));
-	obj = nft_obj_lookup(ctx->net, ctx->table,
-			     tb[NFTA_OBJREF_IMM_NAME], objtype,
+	obj = nft_obj_lookup(ctx->table, tb[NFTA_OBJREF_IMM_NAME], objtype,
 			     genmask);
 	if (IS_ERR(obj))
 		return -ENOENT;
@@ -51,7 +53,7 @@ static int nft_objref_dump(struct sk_buff *skb, const struct nft_expr *expr)
 {
 	const struct nft_object *obj = nft_objref_priv(expr);
 
-	if (nla_put_string(skb, NFTA_OBJREF_IMM_NAME, obj->key.name) ||
+	if (nla_put_string(skb, NFTA_OBJREF_IMM_NAME, obj->name) ||
 	    nla_put_be32(skb, NFTA_OBJREF_IMM_TYPE,
 			 htonl(obj->ops->type->type)))
 		goto nla_put_failure;
@@ -95,7 +97,7 @@ static const struct nft_expr_ops nft_objref_ops = {
 
 struct nft_objref_map {
 	struct nft_set		*set;
-	u8			sreg;
+	enum nft_registers	sreg:8;
 	struct nft_set_binding	binding;
 };
 
@@ -137,8 +139,8 @@ static int nft_objref_map_init(const struct nft_ctx *ctx,
 	if (!(set->flags & NFT_SET_OBJECT))
 		return -EINVAL;
 
-	err = nft_parse_register_load(tb[NFTA_OBJREF_SET_SREG], &priv->sreg,
-				      set->klen);
+	priv->sreg = nft_parse_register(tb[NFTA_OBJREF_SET_SREG]);
+	err = nft_validate_register_load(priv->sreg, set->klen);
 	if (err < 0)
 		return err;
 
@@ -252,4 +254,3 @@ module_exit(nft_objref_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Pablo Neira Ayuso <pablo@netfilter.org>");
 MODULE_ALIAS_NFT_EXPR("objref");
-MODULE_DESCRIPTION("nftables stateful object reference module");

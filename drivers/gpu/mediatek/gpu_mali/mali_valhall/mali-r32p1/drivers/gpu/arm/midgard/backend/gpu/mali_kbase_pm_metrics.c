@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
  * (C) COPYRIGHT 2011-2021 ARM Limited. All rights reserved.
@@ -126,7 +126,7 @@ int kbasep_pm_metrics_init(struct kbase_device *kbdev)
 	kbdev->pm.backend.metrics.values.busy_cl[1] = 0;
 	kbdev->pm.backend.metrics.values.busy_gl = 0;
 
-#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 	kbdev->pm.backend.metrics.values.busy_gl_plus[0] = 0;
 	kbdev->pm.backend.metrics.values.busy_gl_plus[1] = 0;
 	kbdev->pm.backend.metrics.values.busy_gl_plus[2] = 0;
@@ -314,7 +314,7 @@ static void kbase_pm_get_dvfs_utilisation_calc(struct kbase_device *kbdev,
 			kbdev->pm.backend.metrics.values.busy_gl += ns_time;
 		if (kbdev->pm.backend.metrics.active_gl_ctx[2])
 			kbdev->pm.backend.metrics.values.busy_gl += ns_time;
-#if IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 		if (kbdev->pm.backend.metrics.active_gl_ctx[0])
 			kbdev->pm.backend.metrics.values.busy_gl_plus[0] += ns_time;
 		if (kbdev->pm.backend.metrics.active_gl_ctx[1])
@@ -356,7 +356,7 @@ void kbase_pm_get_dvfs_metrics(struct kbase_device *kbdev,
 	diff->busy_cl[0] = cur->busy_cl[0] - last->busy_cl[0];
 	diff->busy_cl[1] = cur->busy_cl[1] - last->busy_cl[1];
 	diff->busy_gl = cur->busy_gl - last->busy_gl;
-#if IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 	diff->busy_gl_plus[0]= cur->busy_gl_plus[0]- last->busy_gl_plus[0];
 	diff->busy_gl_plus[1] = cur->busy_gl_plus[1]- last->busy_gl_plus[1];
 	diff->busy_gl_plus[2] = cur->busy_gl_plus[2]- last->busy_gl_plus[2];
@@ -417,7 +417,7 @@ void kbase_pm_get_dvfs_action(struct kbase_device *kbdev)
 #endif
 }
 
-#if IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
+#if IS_ENABLED(CONFIG_MTK_GPU_COMMON_DVFS)
 bool kbase_pm_metrics_is_active(struct kbase_device *kbdev)
 {
 	return false;

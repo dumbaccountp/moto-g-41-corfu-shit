@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Packet matching code for ARP packets.
  *
@@ -787,7 +786,8 @@ static int compat_table_info(const struct xt_table_info *info,
 }
 #endif
 
-static int get_info(struct net *net, void __user *user, const int *len)
+static int get_info(struct net *net, void __user *user,
+		    const int *len, int compat)
 {
 	char name[XT_TABLE_MAXNAMELEN];
 	struct xt_table *t;
@@ -801,7 +801,7 @@ static int get_info(struct net *net, void __user *user, const int *len)
 
 	name[XT_TABLE_MAXNAMELEN-1] = '\0';
 #ifdef CONFIG_COMPAT
-	if (in_compat_syscall())
+	if (compat)
 		xt_compat_lock(NFPROTO_ARP);
 #endif
 	t = xt_request_find_table_lock(net, NFPROTO_ARP, name);
@@ -811,7 +811,7 @@ static int get_info(struct net *net, void __user *user, const int *len)
 #ifdef CONFIG_COMPAT
 		struct xt_table_info tmp;
 
-		if (in_compat_syscall()) {
+		if (compat) {
 			ret = compat_table_info(private, &tmp);
 			xt_compat_flush_offsets(NFPROTO_ARP);
 			private = &tmp;
@@ -836,7 +836,7 @@ static int get_info(struct net *net, void __user *user, const int *len)
 	} else
 		ret = PTR_ERR(t);
 #ifdef CONFIG_COMPAT
-	if (in_compat_syscall())
+	if (compat)
 		xt_compat_unlock(NFPROTO_ARP);
 #endif
 	return ret;
@@ -947,7 +947,8 @@ static int __do_replace(struct net *net, const char *name,
 	return ret;
 }
 
-static int do_replace(struct net *net, sockptr_t arg, unsigned int len)
+static int do_replace(struct net *net, const void __user *user,
+		      unsigned int len)
 {
 	int ret;
 	struct arpt_replace tmp;
@@ -955,7 +956,7 @@ static int do_replace(struct net *net, sockptr_t arg, unsigned int len)
 	void *loc_cpu_entry;
 	struct arpt_entry *iter;
 
-	if (copy_from_sockptr(&tmp, arg, sizeof(tmp)) != 0)
+	if (copy_from_user(&tmp, user, sizeof(tmp)) != 0)
 		return -EFAULT;
 
 	/* overflow check */
@@ -971,8 +972,8 @@ static int do_replace(struct net *net, sockptr_t arg, unsigned int len)
 		return -ENOMEM;
 
 	loc_cpu_entry = newinfo->entries;
-	if (copy_from_sockptr_offset(loc_cpu_entry, arg, sizeof(tmp),
-			tmp.size) != 0) {
+	if (copy_from_user(loc_cpu_entry, user + sizeof(tmp),
+			   tmp.size) != 0) {
 		ret = -EFAULT;
 		goto free_newinfo;
 	}
@@ -995,7 +996,8 @@ static int do_replace(struct net *net, sockptr_t arg, unsigned int len)
 	return ret;
 }
 
-static int do_add_counters(struct net *net, sockptr_t arg, unsigned int len)
+static int do_add_counters(struct net *net, const void __user *user,
+			   unsigned int len, int compat)
 {
 	unsigned int i;
 	struct xt_counters_info tmp;
@@ -1006,7 +1008,7 @@ static int do_add_counters(struct net *net, sockptr_t arg, unsigned int len)
 	struct arpt_entry *iter;
 	unsigned int addend;
 
-	paddc = xt_copy_counters(arg, len, &tmp);
+	paddc = xt_copy_counters_from_user(user, len, &tmp, compat);
 	if (IS_ERR(paddc))
 		return PTR_ERR(paddc);
 
@@ -1054,7 +1056,7 @@ struct compat_arpt_replace {
 	u32				underflow[NF_ARP_NUMHOOKS];
 	u32				num_counters;
 	compat_uptr_t			counters;
-	struct compat_arpt_entry	entries[];
+	struct compat_arpt_entry	entries[0];
 };
 
 static inline void compat_release_entry(struct compat_arpt_entry *e)
@@ -1245,7 +1247,8 @@ out_unlock:
 	return ret;
 }
 
-static int compat_do_replace(struct net *net, sockptr_t arg, unsigned int len)
+static int compat_do_replace(struct net *net, void __user *user,
+			     unsigned int len)
 {
 	int ret;
 	struct compat_arpt_replace tmp;
@@ -1253,7 +1256,7 @@ static int compat_do_replace(struct net *net, sockptr_t arg, unsigned int len)
 	void *loc_cpu_entry;
 	struct arpt_entry *iter;
 
-	if (copy_from_sockptr(&tmp, arg, sizeof(tmp)) != 0)
+	if (copy_from_user(&tmp, user, sizeof(tmp)) != 0)
 		return -EFAULT;
 
 	/* overflow check */
@@ -1269,8 +1272,7 @@ static int compat_do_replace(struct net *net, sockptr_t arg, unsigned int len)
 		return -ENOMEM;
 
 	loc_cpu_entry = newinfo->entries;
-	if (copy_from_sockptr_offset(loc_cpu_entry, arg, sizeof(tmp),
-			tmp.size) != 0) {
+	if (copy_from_user(loc_cpu_entry, user + sizeof(tmp), tmp.size) != 0) {
 		ret = -EFAULT;
 		goto free_newinfo;
 	}
@@ -1290,6 +1292,30 @@ static int compat_do_replace(struct net *net, sockptr_t arg, unsigned int len)
 		cleanup_entry(iter, net);
  free_newinfo:
 	xt_free_table_info(newinfo);
+	return ret;
+}
+
+static int compat_do_arpt_set_ctl(struct sock *sk, int cmd, void __user *user,
+				  unsigned int len)
+{
+	int ret;
+
+	if (!ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN))
+		return -EPERM;
+
+	switch (cmd) {
+	case ARPT_SO_SET_REPLACE:
+		ret = compat_do_replace(sock_net(sk), user, len);
+		break;
+
+	case ARPT_SO_SET_ADD_COUNTERS:
+		ret = do_add_counters(sock_net(sk), user, len, 1);
+		break;
+
+	default:
+		ret = -EINVAL;
+	}
+
 	return ret;
 }
 
@@ -1358,7 +1384,7 @@ static int compat_copy_entries_to_user(unsigned int total_size,
 struct compat_arpt_get_entries {
 	char name[XT_TABLE_MAXNAMELEN];
 	compat_uint_t size;
-	struct compat_arpt_entry entrytable[];
+	struct compat_arpt_entry entrytable[0];
 };
 
 static int compat_get_entries(struct net *net,
@@ -1400,10 +1426,32 @@ static int compat_get_entries(struct net *net,
 	xt_compat_unlock(NFPROTO_ARP);
 	return ret;
 }
+
+static int do_arpt_get_ctl(struct sock *, int, void __user *, int *);
+
+static int compat_do_arpt_get_ctl(struct sock *sk, int cmd, void __user *user,
+				  int *len)
+{
+	int ret;
+
+	if (!ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN))
+		return -EPERM;
+
+	switch (cmd) {
+	case ARPT_SO_GET_INFO:
+		ret = get_info(sock_net(sk), user, len, 1);
+		break;
+	case ARPT_SO_GET_ENTRIES:
+		ret = compat_get_entries(sock_net(sk), user, len);
+		break;
+	default:
+		ret = do_arpt_get_ctl(sk, cmd, user, len);
+	}
+	return ret;
+}
 #endif
 
-static int do_arpt_set_ctl(struct sock *sk, int cmd, sockptr_t arg,
-		unsigned int len)
+static int do_arpt_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 {
 	int ret;
 
@@ -1412,16 +1460,11 @@ static int do_arpt_set_ctl(struct sock *sk, int cmd, sockptr_t arg,
 
 	switch (cmd) {
 	case ARPT_SO_SET_REPLACE:
-#ifdef CONFIG_COMPAT
-		if (in_compat_syscall())
-			ret = compat_do_replace(sock_net(sk), arg, len);
-		else
-#endif
-			ret = do_replace(sock_net(sk), arg, len);
+		ret = do_replace(sock_net(sk), user, len);
 		break;
 
 	case ARPT_SO_SET_ADD_COUNTERS:
-		ret = do_add_counters(sock_net(sk), arg, len);
+		ret = do_add_counters(sock_net(sk), user, len, 0);
 		break;
 
 	default:
@@ -1440,16 +1483,11 @@ static int do_arpt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len
 
 	switch (cmd) {
 	case ARPT_SO_GET_INFO:
-		ret = get_info(sock_net(sk), user, len);
+		ret = get_info(sock_net(sk), user, len, 0);
 		break;
 
 	case ARPT_SO_GET_ENTRIES:
-#ifdef CONFIG_COMPAT
-		if (in_compat_syscall())
-			ret = compat_get_entries(sock_net(sk), user, len);
-		else
-#endif
-			ret = get_entries(sock_net(sk), user, len);
+		ret = get_entries(sock_net(sk), user, len);
 		break;
 
 	case ARPT_SO_GET_REVISION_TARGET: {
@@ -1541,15 +1579,10 @@ out_free:
 	return ret;
 }
 
-void arpt_unregister_table_pre_exit(struct net *net, struct xt_table *table,
-				    const struct nf_hook_ops *ops)
+void arpt_unregister_table(struct net *net, struct xt_table *table,
+			   const struct nf_hook_ops *ops)
 {
 	nf_unregister_net_hooks(net, ops, hweight32(table->valid_hooks));
-}
-EXPORT_SYMBOL(arpt_unregister_table_pre_exit);
-
-void arpt_unregister_table(struct net *net, struct xt_table *table)
-{
 	__arpt_unregister_table(net, table);
 }
 
@@ -1578,9 +1611,15 @@ static struct nf_sockopt_ops arpt_sockopts = {
 	.set_optmin	= ARPT_BASE_CTL,
 	.set_optmax	= ARPT_SO_SET_MAX+1,
 	.set		= do_arpt_set_ctl,
+#ifdef CONFIG_COMPAT
+	.compat_set	= compat_do_arpt_set_ctl,
+#endif
 	.get_optmin	= ARPT_BASE_CTL,
 	.get_optmax	= ARPT_SO_GET_MAX+1,
 	.get		= do_arpt_get_ctl,
+#ifdef CONFIG_COMPAT
+	.compat_get	= compat_do_arpt_get_ctl,
+#endif
 	.owner		= THIS_MODULE,
 };
 

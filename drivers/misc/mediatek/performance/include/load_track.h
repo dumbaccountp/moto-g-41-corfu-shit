@@ -2,13 +2,12 @@
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
-
 #ifndef LOAD_TRACK_H
 #define LOAD_TRACK_H
 
 #include <linux/cpumask.h>
 
-#if IS_ENABLED(CONFIG_MTK_LOAD_TRACKER)
+#ifdef CONFIG_MTK_LOAD_TRACKER
 
 /**
  * DESCRIPTION:

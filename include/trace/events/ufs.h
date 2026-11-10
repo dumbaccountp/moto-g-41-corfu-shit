@@ -1,6 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #undef TRACE_SYSTEM
@@ -10,15 +18,6 @@
 #define _TRACE_UFS_H
 
 #include <linux/tracepoint.h>
-
-#define str_opcode(opcode)						\
-	__print_symbolic(opcode,					\
-		{ WRITE_16,		"WRITE_16" },			\
-		{ WRITE_10,		"WRITE_10" },			\
-		{ READ_16,		"READ_16" },			\
-		{ READ_10,		"READ_10" },			\
-		{ SYNCHRONIZE_CACHE,	"SYNC" },			\
-		{ UNMAP,		"UNMAP" })
 
 #define UFS_LINK_STATES			\
 	EM(UIC_LINK_OFF_STATE)		\
@@ -224,10 +223,10 @@ DEFINE_EVENT(ufshcd_template, ufshcd_init,
 TRACE_EVENT(ufshcd_command,
 	TP_PROTO(const char *dev_name, const char *str, unsigned int tag,
 			u32 doorbell, int transfer_len, u32 intr, u64 lba,
-			u8 opcode, u8 group_id),
+			u8 opcode, u8 crypt_en, u8 crypt_keyslot),
 
-	TP_ARGS(dev_name, str, tag, doorbell, transfer_len,
-				intr, lba, opcode, group_id),
+	TP_ARGS(dev_name, str, tag, doorbell, transfer_len, intr, lba, opcode,
+		crypt_en, crypt_keyslot),
 
 	TP_STRUCT__entry(
 		__string(dev_name, dev_name)
@@ -238,7 +237,8 @@ TRACE_EVENT(ufshcd_command,
 		__field(u32, intr)
 		__field(u64, lba)
 		__field(u8, opcode)
-		__field(u8, group_id)
+		__field(u8, crypt_en)
+		__field(u8, crypt_keyslot)
 	),
 
 	TP_fast_assign(
@@ -250,15 +250,16 @@ TRACE_EVENT(ufshcd_command,
 		__entry->intr = intr;
 		__entry->lba = lba;
 		__entry->opcode = opcode;
-		__entry->group_id = group_id;
+		__entry->crypt_en = crypt_en;
+		__entry->crypt_keyslot = crypt_keyslot;
 	),
 
 	TP_printk(
-		"%s: %s: tag: %u, DB: 0x%x, size: %d, IS: %u, LBA: %llu, opcode: 0x%x (%s), group_id: 0x%x",
+		"%s: %s: tag: %u, DB: 0x%x, size: %d, IS: %u, crypt: %d, %d, LBA: %llu, opcode: 0x%x",
 		__get_str(str), __get_str(dev_name), __entry->tag,
 		__entry->doorbell, __entry->transfer_len,
-		__entry->intr, __entry->lba, (u32)__entry->opcode,
-		str_opcode(__entry->opcode), (u32)__entry->group_id
+		__entry->intr, __entry->crypt_en, __entry->crypt_keyslot,
+		__entry->lba, (u32)__entry->opcode
 	)
 );
 
@@ -319,6 +320,26 @@ TRACE_EVENT(ufshcd_upiu,
 		__print_hex(__entry->tsf, sizeof(__entry->tsf))
 	)
 );
+
+TRACE_EVENT(ufshcd_device_reset,
+	TP_PROTO(const char *dev_name),
+
+	TP_ARGS(dev_name),
+
+	TP_STRUCT__entry(
+		__string(dev_name, dev_name)
+	),
+
+	TP_fast_assign(
+		__assign_str(dev_name, dev_name);
+	),
+
+	TP_printk(
+		"%s: device reset",
+		__get_str(dev_name)
+	)
+);
+
 
 #endif /* if !defined(_TRACE_UFS_H) || defined(TRACE_HEADER_MULTI_READ) */
 

@@ -1,16 +1,25 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*******************************************************************************
   Copyright (C) 2013  Vayavya Labs Pvt Ltd
 
   This implements all the API for managing HW timestamp & PTP.
 
+  This program is free software; you can redistribute it and/or modify it
+  under the terms and conditions of the GNU General Public License,
+  version 2, as published by the Free Software Foundation.
+
+  This program is distributed in the hope it will be useful, but WITHOUT
+  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+  more details.
+
+  The full GNU General Public License is included in this distribution in
+  the file called "COPYING".
 
   Author: Rayagond Kokatanur <rayagond@vayavyalabs.com>
   Author: Giuseppe Cavallaro <peppe.cavallaro@st.com>
 *******************************************************************************/
 
 #include <linux/io.h>
-#include <linux/iopoll.h>
 #include <linux/delay.h>
 #include "common.h"
 #include "stmmac_ptp.h"
@@ -44,8 +53,7 @@ static void config_sub_second_increment(void __iomem *ioaddr,
 	if (!(value & PTP_TCR_TSCTRLSSR))
 		data = (data * 1000) / 465;
 
-	if (data > PTP_SSIR_SSINC_MAX)
-		data = PTP_SSIR_SSINC_MAX;
+	data &= PTP_SSIR_SSINC_MASK;
 
 	reg_value = data;
 	if (gmac4)
@@ -59,6 +67,7 @@ static void config_sub_second_increment(void __iomem *ioaddr,
 
 static int init_systime(void __iomem *ioaddr, u32 sec, u32 nsec)
 {
+	int limit;
 	u32 value;
 
 	writel(sec, ioaddr + PTP_STSUR);
@@ -69,9 +78,16 @@ static int init_systime(void __iomem *ioaddr, u32 sec, u32 nsec)
 	writel(value, ioaddr + PTP_TCR);
 
 	/* wait for present system time initialize to complete */
-	return readl_poll_timeout_atomic(ioaddr + PTP_TCR, value,
-				 !(value & PTP_TCR_TSINIT),
-				 10, 100000);
+	limit = 10;
+	while (limit--) {
+		if (!(readl(ioaddr + PTP_TCR) & PTP_TCR_TSINIT))
+			break;
+		mdelay(10);
+	}
+	if (limit < 0)
+		return -EBUSY;
+
+	return 0;
 }
 
 static int config_addend(void __iomem *ioaddr, u32 addend)
@@ -143,20 +159,15 @@ static int adjust_systime(void __iomem *ioaddr, u32 sec, u32 nsec,
 
 static void get_systime(void __iomem *ioaddr, u64 *systime)
 {
-	u64 ns, sec0, sec1;
+	u64 ns;
 
-	/* Get the TSS value */
-	sec1 = readl_relaxed(ioaddr + PTP_STSR);
-	do {
-		sec0 = sec1;
-		/* Get the TSSS value */
-		ns = readl_relaxed(ioaddr + PTP_STNSR);
-		/* Get the TSS value */
-		sec1 = readl_relaxed(ioaddr + PTP_STSR);
-	} while (sec0 != sec1);
+	/* Get the TSSS value */
+	ns = readl(ioaddr + PTP_STNSR);
+	/* Get the TSS and convert sec time value to nanosecond */
+	ns += readl(ioaddr + PTP_STSR) * 1000000000ULL;
 
 	if (systime)
-		*systime = ns + (sec1 * 1000000000ULL);
+		*systime = ns;
 }
 
 const struct stmmac_hwtimestamp stmmac_ptp = {

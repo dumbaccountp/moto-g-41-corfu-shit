@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
@@ -51,10 +51,11 @@
 static DEFINE_SPINLOCK(imgsensor_drv_lock);
 
 #define MULTI_WRITE 1
+
 #if MULTI_WRITE
-#define I2C_BUFFER_LEN 1020 /*trans# max is 255, each 4 bytes*/
+static const int I2C_BUFFER_LEN = 1020; /*trans# max is 255, each 4 bytes*/
 #else
-#define I2C_BUFFER_LEN 4
+static const int I2C_BUFFER_LEN = 4;
 #endif
 
 static struct imgsensor_info_struct imgsensor_info = {
@@ -157,7 +158,6 @@ static struct imgsensor_info_struct imgsensor_info = {
 	.ae_sensor_gain_delay_frame = 0,
 	.ae_ispGain_delay_frame = 2,	/* isp gain delay frame for AE cycle */
 	.ihdr_support = HDR_SUPPORT_STAGGER,	/* 1, support; 0,not support */
-	//.ihdr_support = 0,	/* 1, support; 0,not support */
 	.ihdr_le_firstline = 0,	/* 1,le first ; 0, se first */
 	.sensor_mode_num = 7,	/* support sensor mode num */
 
@@ -258,9 +258,9 @@ static struct SENSOR_VC_INFO2_STRUCT SENSOR_VC_INFO2[5] = {
 	{//custom2 1080p stagger HDR 3exp
 		0x03, 0x0a, 0x00, 0x08, 0x40, 0x00,
 		{
-			{VC_STAGGER_NE, 0x00, 0x2b, 0x0780, 0x0438},
-			{VC_STAGGER_ME, 0x01, 0x2b, 0x0780, 0x0438},
-			{VC_STAGGER_SE, 0x02, 0x2b, 0x0780, 0x0438},
+			{VC_STAGGER_NE, 0x00, 0x2b, 0x0780, 0x438},
+			{VC_STAGGER_ME, 0x01, 0x2b, 0x0780, 0x438},
+			{VC_STAGGER_SE, 0x02, 0x2b, 0x0780, 0x438},
 		},//custom2
 		1
 	},
@@ -481,97 +481,6 @@ static void hdr_write_shutter(kal_uint16 LE, kal_uint16 SE)
 		imgsensor.frame_length);
 }
 
-/*************************************************************************
- * FUNCTION
- *      set_hdr_shutter_frame_length
- *
- * DESCRIPTION
- *      for frame & 3A sync (HDR stagger)
- *
- *************************************************************************/
-static void set_hdr_shutter_frame_length(
-	kal_uint32 le, kal_uint32 se, kal_uint32 frame_length)
-{
-	kal_uint16 realtime_fps = 0;
-
-	spin_lock(&imgsensor_drv_lock);
-	if (frame_length > 1)
-		imgsensor.frame_length = frame_length;
-
-	if (imgsensor.frame_length > imgsensor_info.max_frame_length)
-		imgsensor.frame_length = imgsensor_info.max_frame_length;
-	spin_unlock(&imgsensor_drv_lock);
-
-	if (imgsensor.autoflicker_en) {
-		realtime_fps = imgsensor.pclk /
-			imgsensor.line_length * 10 / imgsensor.frame_length;
-		if (realtime_fps >= 297 && realtime_fps <= 305)
-			set_max_framerate(296, 0);
-		else if (realtime_fps >= 147 && realtime_fps <= 150)
-			set_max_framerate(146, 0);
-		else {
-			/* Extend frame length */
-			write_cmos_sensor(0x0340,
-					imgsensor.frame_length & 0xFFFF);
-		}
-	} else {
-		/* Extend frame length */
-		write_cmos_sensor(0x0340, imgsensor.frame_length & 0xFFFF);
-	}
-
-	/* Update Shutter */
-	write_cmos_sensor(0x0226, le & 0xFFFF); // long exposure
-	write_cmos_sensor(0x0202, se & 0xFFFF); // short exposure
-	LOG_INF("Input shutter LE = %d SE = %d, framelength = %d\n",
-		le, se, frame_length);
-}       /* set_hdr_shutter_frame_length */
-
-/*************************************************************************
- * FUNCTION
- *      set_hdr_tri_shutter_frame_length
- *
- * DESCRIPTION
- *      for frame & 3A sync (HDR stagger)
- *
- *************************************************************************/
-static void set_hdr_tri_shutter_frame_length(
-	kal_uint32 le, kal_uint32 me, kal_uint32 se, kal_uint32 frame_length)
-{
-	kal_uint16 realtime_fps = 0;
-
-	spin_lock(&imgsensor_drv_lock);
-	if (frame_length > 1)
-		imgsensor.frame_length = frame_length;
-
-	if (imgsensor.frame_length > imgsensor_info.max_frame_length)
-		imgsensor.frame_length = imgsensor_info.max_frame_length;
-	spin_unlock(&imgsensor_drv_lock);
-
-	if (imgsensor.autoflicker_en) {
-		realtime_fps = imgsensor.pclk /
-			imgsensor.line_length * 10 / imgsensor.frame_length;
-		if (realtime_fps >= 297 && realtime_fps <= 305)
-			set_max_framerate(296, 0);
-		else if (realtime_fps >= 147 && realtime_fps <= 150)
-			set_max_framerate(146, 0);
-		else {
-			/* Extend frame length */
-			write_cmos_sensor(0x0340,
-					imgsensor.frame_length & 0xFFFF);
-		}
-	} else {
-		/* Extend frame length */
-		write_cmos_sensor(0x0340, imgsensor.frame_length & 0xFFFF);
-	}
-
-	/* Update Shutter */
-	write_cmos_sensor(0x0226, le & 0xFFFF); // long exposure
-	write_cmos_sensor(0x022C, me & 0xFFFF); // medium exposure
-	write_cmos_sensor(0x0202, se & 0xFFFF); // short exposure
-	LOG_INF("Input shutter LE = %d ME = %d SE = %d, framelength = %d\n",
-		le, me, se, frame_length);
-}       /* set_hdr_tri_shutter_frame_length */
-
 
 /*************************************************************************
  * FUNCTION
@@ -599,65 +508,6 @@ static void set_shutter(kal_uint32 shutter)
 	LOG_INF("set shutter = %ld\n", shutter);
 	write_shutter(shutter);
 }
-
-/*************************************************************************
- * FUNCTION
- *      set_shutter_frame_length
- *
- * DESCRIPTION
- *      for frame & 3A sync
- *
- *************************************************************************/
-static void set_shutter_frame_length(kal_uint32 shutter,
-				     kal_uint32 frame_length,
-				     kal_bool auto_extend_en)
-{
-	unsigned long flags;
-	kal_uint16 realtime_fps = 0;
-
-	spin_lock_irqsave(&imgsensor_drv_lock, flags);
-	imgsensor.shutter = shutter;
-	spin_unlock_irqrestore(&imgsensor_drv_lock, flags);
-
-	spin_lock(&imgsensor_drv_lock);
-	if (frame_length > 1)
-		imgsensor.frame_length = frame_length;
-
-	if (imgsensor.frame_length > imgsensor_info.max_frame_length)
-		imgsensor.frame_length = imgsensor_info.max_frame_length;
-	spin_unlock(&imgsensor_drv_lock);
-
-	shutter = (shutter < imgsensor_info.min_shutter)
-		? imgsensor_info.min_shutter
-		: shutter;
-	shutter = (shutter > (imgsensor_info.max_frame_length
-				- imgsensor_info.margin))
-		? (imgsensor_info.max_frame_length - imgsensor_info.margin)
-		: shutter;
-
-	if (imgsensor.autoflicker_en) {
-		realtime_fps = imgsensor.pclk /
-			imgsensor.line_length * 10 / imgsensor.frame_length;
-		if (realtime_fps >= 297 && realtime_fps <= 305)
-			set_max_framerate(296, 0);
-		else if (realtime_fps >= 147 && realtime_fps <= 150)
-			set_max_framerate(146, 0);
-		else {
-			/* Extend frame length */
-			write_cmos_sensor(0x0340,
-					imgsensor.frame_length & 0xFFFF);
-		}
-	} else {
-		/* Extend frame length */
-		write_cmos_sensor(0x0340, imgsensor.frame_length & 0xFFFF);
-	}
-
-	/* Update Shutter */
-	write_cmos_sensor(0X0202, shutter & 0xFFFF);
-	LOG_INF("Exit! shutter =%d, framelength =%d\n",
-		shutter, imgsensor.frame_length);
-
-}       /* set_shutter_frame_length */
 
 static kal_uint16 gain2reg(const kal_uint16 gain)
 {
@@ -889,7 +739,6 @@ static void night_mode(kal_bool enable)
 {
 	/*No Need to implement this function*/
 }				/*      night_mode      */
-
 
 kal_uint16 addr_data_pair_init_jd1[] = {
 	0x0A02, 0x01F4,
@@ -4942,9 +4791,9 @@ static kal_uint32 get_imgsensor_id(UINT32 *sensor_id)
 			read_cmos_sensor(0x0000), read_cmos_sensor(0x0001),
 			read_cmos_sensor(0x0000));
 		if (*sensor_id == imgsensor_info.sensor_id) {
-			pr_info(
-				"[%s] i2c write id: 0x%x, sensor id: 0x%x module_id 0x%x\n",
-				__func__, imgsensor.i2c_write_id, *sensor_id,
+			LOG_INF(
+				"i2c write id: 0x%x, sensor id: 0x%x module_id 0x%x\n",
+				imgsensor.i2c_write_id, *sensor_id,
 				imgsensor_info.module_id);
 			break;
 		}
@@ -5150,10 +4999,7 @@ static kal_uint32 normal_video(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
 	imgsensor.autoflicker_en = KAL_FALSE;
 	spin_unlock(&imgsensor_drv_lock);
 
-	if (1)
-		normal_video_setting();
-	else
-		preview_setting();
+	normal_video_setting();
 
 	return ERROR_NONE;
 }				/*    normal_video   */
@@ -5237,10 +5083,7 @@ static kal_uint32 Custom2(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
 	imgsensor.dummy_pixel = 0;
 	imgsensor.autoflicker_en = KAL_FALSE;
 	spin_unlock(&imgsensor_drv_lock);
-	if (1)
-		custom2_setting();
-	else
-		custom1_setting();
+	custom2_setting();
 	/* set_mirror_flip(sensor_config_data->SensorImageMirror); */
 
 	return ERROR_NONE;
@@ -5424,7 +5267,6 @@ static kal_uint32 get_info(enum MSDK_SCENARIO_ID_ENUM scenario_id,
 	return ERROR_NONE;
 }				/*    get_info  */
 
-
 static kal_uint32 seamless_switch(enum MSDK_SCENARIO_ID_ENUM scenario_id,
 	kal_uint32 shutter, kal_uint32 gain,
 	kal_uint32 shutter_2ndframe, kal_uint32 gain_2ndframe)
@@ -5562,7 +5404,6 @@ static kal_uint32 seamless_switch(enum MSDK_SCENARIO_ID_ENUM scenario_id,
 
 	return 0;
 }
-
 
 static kal_uint32 control(enum MSDK_SCENARIO_ID_ENUM scenario_id,
 	MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
@@ -5941,11 +5782,6 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 	case SENSOR_FEATURE_SET_ESHUTTER:
 		set_shutter(*feature_data);
 		break;
-	case SENSOR_FEATURE_SET_SHUTTER_FRAME_TIME:
-		set_shutter_frame_length((UINT16) (*feature_data),
-					(UINT16) (*(feature_data + 1)),
-					(BOOL) (*(feature_data + 2)));
-		break;
 	case SENSOR_FEATURE_SET_NIGHTMODE:
 		night_mode((BOOL) * feature_data);
 		break;
@@ -6294,7 +6130,7 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 			case HDR_RAW_STAGGER_3EXP:
 				*(feature_data + 2) = MSDK_SCENARIO_ID_CUSTOM1;
 			default:
-					break;
+				break;
 			}
 		}
 		if (*feature_data == MSDK_SCENARIO_ID_VIDEO_PREVIEW) {
@@ -6330,13 +6166,6 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 		// implement write shutter for NE/ME/SE
 		hdr_write_shutter((UINT16)*feature_data,
 				(UINT16)*(feature_data+1));
-		break;
-	case SENSOR_FEATURE_SET_HDR_SHUTTER_FRAME_TIME:
-		LOG_INF("SENSOR_FEATURE_SET_HDR_SHUTTER_FRAME_TIME\n");
-		set_hdr_shutter_frame_length(
-			*(feature_data + 0),
-			*(feature_data + 1),
-			*(feature_data + 3));
 		break;
 	case SENSOR_FEATURE_SET_DUAL_GAIN:
 		LOG_INF(
@@ -6438,14 +6267,6 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 		break;
 	case SENSOR_FEATURE_SET_SEAMLESS_EXTEND_FRAME_LENGTH:
 		extend_frame_length((MUINT32) *feature_data);
-		break;
-	case SENSOR_FEATURE_SET_HDR_TRI_SHUTTER_FRAME_TIME:
-		LOG_INF("SENSOR_FEATURE_SET_HDR_TRI_SHUTTER_FRAME_TIME\n");
-		set_hdr_tri_shutter_frame_length(
-			*(feature_data + 0),
-			*(feature_data + 1),
-			*(feature_data + 2),
-			*(feature_data + 3));
 		break;
 	default:
 		break;

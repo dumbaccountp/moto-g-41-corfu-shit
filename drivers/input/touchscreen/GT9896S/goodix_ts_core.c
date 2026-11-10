@@ -1,21 +1,8 @@
- /*
-  * Goodix Touchscreen Driver
-  * Core layer of touchdriver architecture.
-  *
-  * Copyright (C) 2019 - 2020 Goodix, Inc.
-  *
-  * This program is free software; you can redistribute it and/or modify
-  * it under the terms of the GNU General Public License as published by
-  * the Free Software Foundation; either version 2 of the License, or
-  * (at your option) any later version.
-  *
-  * This program is distributed in the hope that it will be a reference
-  * to you, when you are integrating the GOODiX's CTP IC into your system,
-  * but WITHOUT ANY WARRANTY; without even the implied warranty of
-  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  * General Public License for more details.
-  *
-  */
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ */
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -26,10 +13,9 @@
 #include <linux/debugfs.h>
 #include <linux/of_irq.h>
 #include <uapi/linux/sched/types.h>
-
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-#include "mtk_panel_ext.h"
-static struct gt9896s_ts_core *ts_core;
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
 #endif
 
 #include "goodix_ts_core.h"
@@ -42,28 +28,23 @@ static struct gt9896s_ts_core *ts_core;
 
 #define GOOIDX_INPUT_PHYS	"goodix_ts/input0"
 
-static struct task_struct *gt9896s_polling_thread;
-static int gt9896s_ts_event_polling(void *arg);
-static int gt9896s_polling_flag;
-
 struct gt9896s_module gt9896s_modules;
 
-#if IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI)
-struct gt9896s_ts_core *ts_core_for_tui;
-EXPORT_SYMBOL_GPL(ts_core_for_tui);
-#endif
 
-//disp_notify_reg_flag is used when gt9896s_ts_core_release
-//disp_notify_reg_flag is used only in gt9896s_later_init_thread
-static bool disp_notify_reg_flag;
+/*put resume in workqueue to screen on*/
+static struct gt9896s_ts_core *resume_core_data;
+static struct work_struct touch_resume_work;
+static struct workqueue_struct *touch_resume_workqueue;
+static int touch_suspend_flag;
 
 /**
  * __do_register_ext_module - register external module
  * to register into touch core modules structure
  */
-static void  __do_register_ext_module(struct gt9896s_ext_module *gt_module)
+static void  __do_register_ext_module(struct work_struct *work)
 {
-	struct gt9896s_ext_module *module = gt_module;
+	struct gt9896s_ext_module *module =
+			container_of(work, struct gt9896s_ext_module, work);
 	struct gt9896s_ext_module *ext_module, *next;
 	struct list_head *insert_point = &gt9896s_modules.head;
 
@@ -164,7 +145,8 @@ int gt9896s_register_ext_module(struct gt9896s_ext_module *module)
 
 	ts_info("gt9896s_register_ext_module IN");
 
-	__do_register_ext_module(module);
+	INIT_WORK(&module->work, __do_register_ext_module);
+	schedule_work(&module->work);
 
 	ts_info("gt9896s_register_ext_module OUT");
 
@@ -362,7 +344,7 @@ static void gt9896s_debugfs_exit(void)
 	gt9896s_dbg.dentry = NULL;
 	pr_info("Debugfs module exit\n");
 }
-
+#ifdef GT_SYSFS_ATTR
 /* show external module infomation */
 static ssize_t gt9896s_ts_extmod_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -642,98 +624,14 @@ static ssize_t gt9896s_ts_irq_info_store(struct device *dev,
 					const char *buf, size_t count)
 {
 	struct gt9896s_ts_core *core_data = dev_get_drvdata(dev);
-	int en = 0;
-	int ret = 0;
+	int en;
 
 	if (sscanf(buf, "%d", &en) != 1)
 		return -EINVAL;
 
-	switch (en) {
-	//change to touch polling mode
-	case 0:
-		gt9896s_polling_flag = 1;
-		ts_info("disable irq, polling mode, flag = %d", gt9896s_polling_flag);
-		if (gt9896s_polling_thread == NULL) {
-			gt9896s_polling_thread =
-				kthread_run(gt9896s_ts_event_polling,
-				0, GOODIX_CORE_DRIVER_NAME);
-			ts_info("gt9896s_polling_thread, kthread_run");
-			if (IS_ERR(gt9896s_polling_thread)) {
-				ret = PTR_ERR(gt9896s_polling_thread);
-				ts_err(" failed to create kernel thread: %d\n",
-					ret);
-			}
-		}
-		break;
-	//change to touch irq mode
-	case 1:
-		gt9896s_polling_flag = 0;
-		ts_info("enable irq, irq mode, flag = %d", gt9896s_polling_flag);
-		if (gt9896s_polling_thread) {
-			kthread_stop(gt9896s_polling_thread);
-			gt9896s_polling_thread = NULL;
-		}
-		break;
-	//use cmd to make touch power off
-	case 2:
-		ret = gt9896s_ts_power_off(core_data);
-		if (ret < 0) {
-			ts_err("Failed to disable analog power: %d", ret);
-			return ret;
-		}
-		ts_info("touch power off");
-		break;
-	//use cmd to make touch power on
-	case 3:
-		ret = gt9896s_ts_power_on(core_data);
-		if (ret < 0) {
-			ts_err("Failed to enable analog power: %d", ret);
-			return ret;
-		}
-		ts_info("touch power on");
-		break;
-	default:
-		break;
-	}
-
 	gt9896s_ts_irq_enable(core_data, en);
 	return count;
 }
-
-/**
- * gt9896s_ts_event_polling used for bring up
- */
-static int gt9896s_ts_event_polling(void *arg)
-{
-	struct gt9896s_ts_event *ts_event = &ts_core->ts_event;
-	struct gt9896s_ts_device *ts_dev =  ts_core->ts_dev;
-	struct sched_param param = { .sched_priority = 4 };
-	int ret;
-	u8 irq_flag = 0;
-
-	sched_setscheduler(current, SCHED_RR, &param);
-
-	ts_info("gt9896s_polling_thread, enter");
-	do {
-		usleep_range(30000, 35100);
-		/* read touch data from touch device */
-		ret = ts_dev->hw_ops->event_handler(ts_dev, ts_event);
-		if (likely(ret >= 0)) {
-			if (ts_event->event_type == EVENT_TOUCH) {
-				/* report touch */
-				gt9896s_ts_report_finger(ts_core->input_dev,
-				&ts_event->touch_data);
-			}
-		}
-
-		// clean irq flag
-		irq_flag = 0;
-		ts_dev->hw_ops->write_trans(ts_dev, ts_dev->reg.coor, &irq_flag, 1);
-	} while (!kthread_should_stop());
-
-	return 0;
-}
-
 
 /*reg read/write */
 static u16 rw_addr;
@@ -797,7 +695,6 @@ static ssize_t gt9896s_ts_reg_rw_store(struct device *dev,
 
 	/* get addr */
 	pos = (char *)buf;
-	pos += 2;
 	token = strsep(&pos, ":");
 	if (!token) {
 		ts_err("invalid address info\n");
@@ -966,6 +863,7 @@ static int gt9896s_ts_sysfs_init(struct gt9896s_ts_core *core_data)
 {
 	int ret;
 
+	ts_info("GT_SYSFS_ATTR start");
 	ret = sysfs_create_bin_file(&core_data->pdev->dev.kobj,
 				    &gt9896s_config_bin_attr);
 	if (ret) {
@@ -990,7 +888,7 @@ static void gt9896s_ts_sysfs_exit(struct gt9896s_ts_core *core_data)
 			      &gt9896s_config_bin_attr);
 	sysfs_remove_group(&core_data->pdev->dev.kobj, &sysfs_group);
 }
-
+#endif
 /* event notifier */
 static BLOCKING_NOTIFIER_HEAD(ts_notifier_list);
 /**
@@ -1058,7 +956,7 @@ static void gt9896s_ts_report_pen(struct input_dev *dev,
 	input_sync(dev);
 }
 
-void gt9896s_ts_report_finger(struct input_dev *dev,
+static void gt9896s_ts_report_finger(struct input_dev *dev,
 		struct gt9896s_touch_data *touch_data)
 {
 	unsigned int touch_num = touch_data->touch_num;
@@ -1505,21 +1403,24 @@ static void gt9896s_ts_set_input_params(struct input_dev *input_dev,
 {
 	int i;
 
-	if (ts_bdata->fake_status == 1) {
+	if (ts_bdata->lcm_max_x && ts_bdata->lcm_max_y) {
 		if (ts_bdata->swap_axis)
-			swap(ts_bdata->input_max_x, ts_bdata->input_max_y);
+			swap(ts_bdata->lcm_max_x, ts_bdata->lcm_max_y);
+
 		input_set_abs_params(input_dev, ABS_MT_POSITION_X,
-					 0, ts_bdata->input_max_x, 0, 0);
+				     0, ts_bdata->lcm_max_x, 0, 0);
 		input_set_abs_params(input_dev, ABS_MT_POSITION_Y,
-					 0, ts_bdata->input_max_y, 0, 0);
+				     0, ts_bdata->lcm_max_y, 0, 0);
 	} else {
 		if (ts_bdata->swap_axis)
-			swap(ts_bdata->panel_max_x, ts_bdata->panel_max_y);
+			swap(ts_bdata->input_max_x, ts_bdata->input_max_y);
+
 		input_set_abs_params(input_dev, ABS_MT_POSITION_X,
-					 0, ts_bdata->panel_max_x, 0, 0);
+				     0, ts_bdata->input_max_x, 0, 0);
 		input_set_abs_params(input_dev, ABS_MT_POSITION_Y,
-					 0, ts_bdata->panel_max_y, 0, 0);
-		}
+				     0, ts_bdata->input_max_y, 0, 0);
+	}
+
 	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR,
 			     0, ts_bdata->panel_max_w, 0, 0);
 
@@ -1628,8 +1529,14 @@ static int gt9896s_ts_pen_dev_config(struct gt9896s_ts_core *core_data)
 	__set_bit(BTN_TOUCH, pen_dev->keybit);
 	__set_bit(BTN_TOOL_PEN, pen_dev->keybit);
 	__set_bit(INPUT_PROP_DIRECT, pen_dev->propbit);
-	input_set_abs_params(pen_dev, ABS_X, 0, ts_bdata->input_max_x, 0, 0);
-	input_set_abs_params(pen_dev, ABS_Y, 0, ts_bdata->input_max_y, 0, 0);
+
+	if (ts_bdata->lcm_max_x && ts_bdata->lcm_max_y) {
+		input_set_abs_params(pen_dev, ABS_X, 0, ts_bdata->lcm_max_x, 0, 0);
+		input_set_abs_params(pen_dev, ABS_Y, 0, ts_bdata->lcm_max_y, 0, 0);
+	} else {
+		input_set_abs_params(pen_dev, ABS_X, 0, ts_bdata->input_max_x, 0, 0);
+		input_set_abs_params(pen_dev, ABS_Y, 0, ts_bdata->input_max_y, 0, 0);
+	}
 	input_set_abs_params(pen_dev, ABS_PRESSURE, 0,
 			     GOODIX_PEN_MAX_PRESSURE, 0, 0);
 
@@ -1646,12 +1553,14 @@ static int gt9896s_ts_pen_dev_config(struct gt9896s_ts_core *core_data)
 void gt9896s_ts_input_dev_remove(struct gt9896s_ts_core *core_data)
 {
 	input_unregister_device(core_data->input_dev);
+	input_free_device(core_data->input_dev);
 	core_data->input_dev = NULL;
 }
 
 void gt9896s_ts_pen_dev_remove(struct gt9896s_ts_core *core_data)
 {
 	input_unregister_device(core_data->pen_dev);
+	input_free_device(core_data->pen_dev);
 	core_data->pen_dev = NULL;
 }
 
@@ -1669,6 +1578,7 @@ static void gt9896s_ts_esd_work(struct work_struct *work)
 	const struct gt9896s_ts_hw_ops *hw_ops = ts_hw_ops(core);
 	u8 data = GOODIX_ESD_TICK_WRITE_DATA;
 	int r = 0;
+
 	if (!hw_ops) {
 		ts_info("hw_ops is NULL");
 		return;
@@ -1798,44 +1708,25 @@ int gt9896s_ts_esd_init(struct gt9896s_ts_core *core)
 
 	return 0;
 }
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-static int gt9896s_ts_power_on_reinit(void)
+
+void gt9896s_ts_release_connects(struct gt9896s_ts_core *core_data)
 {
-	int r;
+	struct input_dev *input_dev = core_data->input_dev;
+	struct input_mt *mt = input_dev->mt;
+	int i;
 
-	ts_info("%s start!\n", __func__);
-
-	if (ts_core == NULL) {
-		ts_err("ts_core is NULL");
-		return -EINVAL;
+	if (mt) {
+		for (i = 0; i < mt->num_slots; i++) {
+			input_mt_slot(input_dev, i);
+			input_mt_report_slot_state(input_dev,
+					MT_TOOL_FINGER,
+					false);
+		}
+		input_report_key(input_dev, BTN_TOUCH, 0);
+		input_mt_sync_frame(input_dev);
+		input_sync(input_dev);
 	}
-
-	/* disable irq */
-	gt9896s_ts_irq_enable(ts_core, false);
-
-	r = gt9896s_ts_power_off(ts_core);
-	if (r < 0) {
-		ts_err("Failed to enable analog power: %d", r);
-		return r;
-	}
-
-	ts_core->ts_event.touch_data.touch_num = 0;
-	gt9896s_ts_report_finger(ts_core->input_dev,
-		&ts_core->ts_event.touch_data);
-
-	r = gt9896s_ts_power_on(ts_core);
-	if (r < 0) {
-		ts_err("Failed to enable analog power: %d", r);
-		return r;
-	}
-
-	gt9896s_ts_irq_enable(ts_core, true);
-
-	ts_info("%s end!\n", __func__);
-
-	return 0;
 }
-#endif
 
 /**
  * gt9896s_ts_suspend - Touchscreen suspend function
@@ -2002,51 +1893,81 @@ out:
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
+/* resume work queue callback */
+static void resume_workqueue_callback(struct work_struct *work)
+{
+	gt9896s_ts_resume(resume_core_data);
+}
+
+#ifdef CONFIG_FB
 /**
- * gt9896s_ts_disp_notifier_callback - mtk display notifier callback
+ * gt9896s_ts_fb_notifier_callback - Framebuffer notifier callback
  * Called by kernel during framebuffer blanck/unblank phrase
  */
-static int gt9896s_ts_disp_notifier_callback(struct notifier_block *nb,
-	unsigned long value, void *v)
+int gt9896s_ts_fb_notifier_callback(struct notifier_block *self,
+	unsigned long event, void *data)
 {
 	struct gt9896s_ts_core *core_data =
-		container_of(nb, struct gt9896s_ts_core, disp_notifier);
-	int *data = (int *)v;
+		container_of(self, struct gt9896s_ts_core, fb_notifier);
+	struct fb_event *fb_event = data;
+	int err = 0;
 
-	if (core_data && v) {
-		if (value == MTK_DISP_EVENT_BLANK) {
-//resume: touch power on is after display to avoid display disturb
-			ts_info("%s IN", __func__);
-			if (*data == MTK_DISP_BLANK_UNBLANK) {
-#if IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI)
-				if (!atomic_read(&gt9896s_tui_flag))
-#endif
-					gt9896s_ts_resume(core_data);
-			}
-			ts_info("%s OUT", __func__);
-		} else if (value == MTK_DISP_EARLY_EVENT_BLANK) {
-//suspend: touch power off is before display to avoid touch report event
-//after screen is off
-			ts_info("%s IN", __func__);
-			if (*data == MTK_DISP_BLANK_POWERDOWN) {
-
-#if IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI)
-				if (!atomic_read(&gt9896s_tui_flag))
-#endif
+	if (fb_event && fb_event->data && core_data) {
+		if (event == FB_EARLY_EVENT_BLANK) {
+			/* before fb blank */
+		} else if (event == FB_EVENT_BLANK) {
+			int *blank = fb_event->data;
+			if (*blank == FB_BLANK_UNBLANK) {
+				if (touch_suspend_flag) {
+					queue_work(touch_resume_workqueue, &touch_resume_work);
+					touch_suspend_flag = 0;
+				}
+			} else if (*blank == FB_BLANK_POWERDOWN) {
+				if (!touch_suspend_flag) {
+					err = cancel_work_sync(
+						&touch_resume_work);
+					if (!err)
+						ts_err("cancel resume_workqueue failed\n");
 					gt9896s_ts_suspend(core_data);
+				}
+				touch_suspend_flag = 1;
 			}
-			ts_info("%s OUT", __func__);
 		}
-	} else {
-		ts_info("gt9896s touch IC can not suspend or resume");
-		return -1;
 	}
+
 	return 0;
 }
 #endif
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+/**
+ * gt9896s_ts_earlysuspend - Early suspend function
+ * Called by kernel during system suspend phrase
+ */
+static void gt9896s_ts_earlysuspend(struct early_suspend *h)
+{
+	struct gt9896s_ts_core *core_data =
+		container_of(h, struct gt9896s_ts_core,
+			 early_suspend);
+
+	gt9896s_ts_suspend(core_data);
+}
+/**
+ * gt9896s_ts_lateresume - Late resume function
+ * Called by kernel during system wakeup
+ */
+static void gt9896s_ts_lateresume(struct early_suspend *h)
+{
+	struct gt9896s_ts_core *core_data =
+		container_of(h, struct gt9896s_ts_core,
+			 early_suspend);
+
+	gt9896s_ts_resume(core_data);
+}
+#endif
+
 #ifdef CONFIG_PM
-#if !IS_ENABLED(CONFIG_DRM_MEDIATEK)
+#if !defined(CONFIG_FB) && !defined(CONFIG_HAS_EARLYSUSPEND)
 /**
  * gt9896s_ts_pm_suspend - PM suspend function
  * Called by kernel during system suspend phrase
@@ -2085,6 +2006,11 @@ static int gt9896s_generic_noti_callback(struct notifier_block *self,
 	const struct gt9896s_ts_hw_ops *hw_ops = ts_hw_ops(ts_core);
 	int r;
 
+	if (!hw_ops) {
+		ts_info("hw_ops is NULL");
+		return -1;
+	}
+
 	ts_info("notify event type 0x%x", (unsigned int)action);
 	switch (action) {
 	case NOTIFY_FWUPDATE_SUCCESS:
@@ -2100,29 +2026,11 @@ static int gt9896s_generic_noti_callback(struct notifier_block *self,
 	return 0;
 }
 
-/*
- *static int gt9896s_start_fwupdate_module(struct gt9896s_ts_core *core_data)
- *{
- *	struct task_struct *init_thrd;
- *
- *	init_thrd = kthread_run(gt9896s_fwu_module_init,
- *				core_data, "gt9896s_fwu_module init thread");
- *	if (IS_ERR_OR_NULL(init_thrd)) {
- *		ts_err("Failed to create update thread:%ld",
- *		       PTR_ERR(init_thrd));
- *		return -EFAULT;
- *	}
- *	return 0;
- *}
- */
-
 int gt9896s_ts_stage2_init(struct gt9896s_ts_core *core_data)
 {
 	int r;
 	struct gt9896s_ts_device *ts_dev = ts_device(core_data);
 
-	if ((!core_data) && (!ts_dev))
-		return -1;
 	/* send normal-cfg to firmware */
 	r = ts_dev->hw_ops->send_config(ts_dev, &(ts_dev->normal_cfg));
 	if (r < 0) {
@@ -2155,24 +2063,22 @@ int gt9896s_ts_stage2_init(struct gt9896s_ts_core *core_data)
 	}
 	ts_info("success register irq");
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	core_data->disp_notifier.notifier_call = gt9896s_ts_disp_notifier_callback;
-	if (mtk_disp_notifier_register("Touch", &core_data->disp_notifier))
-		ts_err("Failed to register disp notifier client:%d", r);
-	else
-		disp_notify_reg_flag = true;
+#ifdef CONFIG_FB
+	core_data->fb_notifier.notifier_call = gt9896s_ts_fb_notifier_callback;
+	if (fb_register_client(&core_data->fb_notifier))
+		ts_err("Failed to register fb notifier client:%d", r);
+#elif defined(CONFIG_HAS_EARLYSUSPEND)
+	core_data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	core_data->early_suspend.resume = gt9896s_ts_lateresume;
+	core_data->early_suspend.suspend = gt9896s_ts_earlysuspend;
+	register_early_suspend(&core_data->early_suspend);
 #endif
+#ifdef GT_SYSFS_ATTR
 	/*create sysfs files*/
 	gt9896s_ts_sysfs_init(core_data);
-
+#endif
 	/* esd protector */
 	gt9896s_ts_esd_init(core_data);
-
-	/*
-	 * r = gt9896s_start_fwupdate_module(core_data);
-	 * if (r)
-	 *	ts_err("gt9896s start fwupdate module failed! ret = %d!\n", r);
-	 */
 	return 0;
 exit:
 	if (ts_dev->board_data.pen_enable) {
@@ -2193,12 +2099,8 @@ static int gt9896s_ts_probe(struct platform_device *pdev)
 	struct gt9896s_ts_device *ts_device;
 
 	int r;
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	void **ret = NULL;
-#endif
-	ts_info("%s IN", __func__);
 
-	disp_notify_reg_flag = false;
+	ts_info("%s IN", __func__);
 
 	ts_device = pdev->dev.platform_data;
 	if (!ts_device || !ts_device->hw_ops) {
@@ -2218,9 +2120,11 @@ static int gt9896s_ts_probe(struct platform_device *pdev)
 	core_data->ts_dev = ts_device;
 	platform_set_drvdata(pdev, core_data);
 
+	resume_core_data = core_data;
+
 	r = gt9896s_ts_power_init(core_data);
 	if (r < 0)
-		goto err_init;
+		goto out;
 
 	r = gt9896s_ts_power_on(core_data);
 	if (r < 0)
@@ -2257,45 +2161,21 @@ static int gt9896s_ts_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-#if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-	ts_info("TP power_on reset!\n");
-	ts_core = core_data;
-	if (mtk_panel_tch_handle_init()) {
-		ret = mtk_panel_tch_handle_init();
-		*ret = (void *)gt9896s_ts_power_on_reinit;
-	}
-#endif
+	/* create work queue for resume */
+	touch_resume_workqueue = create_singlethread_workqueue("touch_resume");
+	INIT_WORK(&touch_resume_work, resume_workqueue_callback);
 
-	/* for tui touch */
-#if IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI)
-	ts_core_for_tui = core_data;
-#endif
-
-	/* generic notifier callback */
-	core_data->ts_notifier.notifier_call = gt9896s_generic_noti_callback;
-	gt9896s_ts_register_notifier(&core_data->ts_notifier);
-
-	core_data->initialized = 1;
-	gt9896s_modules.core_data = core_data;
-	ts_info("core_data->initialized = %d", core_data->initialized);
-	gt9896s_fwu_module_init(NULL);
 	/* Try start a thread to get config-bin info */
 	r = gt9896s_start_later_init(core_data);
 	if (r) {
 		ts_info("Failed start cfg_bin_proc");
 		goto err;
 	}
-	ts_info("core probe OUT");
-	/* wakeup ext module register work */
-	complete_all(&gt9896s_modules.core_comp);
-	#if IS_ENABLED(CONFIG_TOUCHSCREEN_MTK_TUI_COMMON_API)
-	if (of_find_compatible_node(NULL, NULL, "mediatek,tui_common")) {
-		ts_info("%s: %d set tui function\n", __func__, __LINE__);
-		register_tpd_tui_request(gt9896s_tpd_enter_tui, gt9896s_tpd_exit_tui);
-	}
-	#endif
 
-	return 0;
+	/* generic notifier callback */
+	core_data->ts_notifier.notifier_call = gt9896s_generic_noti_callback;
+	gt9896s_ts_register_notifier(&core_data->ts_notifier);
+	goto out;
 
 err:
 	if (core_data->pinctrl)
@@ -2305,7 +2185,7 @@ err:
 regulator_err:
 	gt9896s_ts_power_off(core_data);
 	regulator_put(core_data->avdd);
-err_init:
+out:
 	if (r) {
 		core_data->initialized = 0;
 		core_data = NULL;
@@ -2318,7 +2198,7 @@ err_init:
 	return r;
 }
 
-static int gt9896s_ts_remove(struct platform_device *pdev)
+int gt9896s_ts_remove(struct platform_device *pdev)
 {
 	struct gt9896s_ts_core *core_data = platform_get_drvdata(pdev);
 
@@ -2328,7 +2208,9 @@ static int gt9896s_ts_remove(struct platform_device *pdev)
 	gt9896s_remove_all_ext_modules();
 	gt9896s_ts_power_off(core_data);
 	gt9896s_debugfs_exit();
+#ifdef GT_SYSFS_ATTR
 	gt9896s_ts_sysfs_exit(core_data);
+#endif
 	// can't free the memory for tools or gesture module
 	//kfree(core_data);
 	return 0;
@@ -2336,7 +2218,7 @@ static int gt9896s_ts_remove(struct platform_device *pdev)
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops dev_pm_ops = {
-#if !IS_ENABLED(CONFIG_DRM_MEDIATEK)
+#if !defined(CONFIG_FB) && !defined(CONFIG_HAS_EARLYSUSPEND)
 	.suspend = gt9896s_ts_pm_suspend,
 	.resume = gt9896s_ts_pm_resume,
 #endif
@@ -2382,13 +2264,6 @@ int gt9896s_ts_core_init(void)
 int gt9896s_ts_core_release(struct gt9896s_ts_core *core_data)
 {
 	ts_info("gt9896s core module removed");
-
-	if (disp_notify_reg_flag) {
-		if (mtk_disp_notifier_unregister(&core_data->disp_notifier))
-			ts_info("Error occurred when unregister disp_notifier");
-		else
-			disp_notify_reg_flag = false;
-	}
 
 	platform_driver_unregister(&gt9896s_ts_driver);
 	gt9896s_ts_dev_release();

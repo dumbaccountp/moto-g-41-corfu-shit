@@ -90,15 +90,23 @@ static enum mlx5e_traffic_types arfs_get_tt(enum arfs_type type)
 
 static int arfs_disable(struct mlx5e_priv *priv)
 {
-	int err, i;
+	struct mlx5_flow_destination dest = {};
+	struct mlx5e_tir *tir = priv->indir_tir;
+	int err = 0;
+	int tt;
+	int i;
 
+	dest.type = MLX5_FLOW_DESTINATION_TYPE_TIR;
 	for (i = 0; i < ARFS_NUM_TYPES; i++) {
-		/* Modify ttc rules destination back to their default */
-		err = mlx5e_ttc_fwd_default_dest(priv, arfs_get_tt(i));
+		dest.tir_num = tir[i].tirn;
+		tt = arfs_get_tt(i);
+		/* Modify ttc rules destination to bypass the aRFS tables*/
+		err = mlx5_modify_rule_destination(priv->fs.ttc.rules[tt],
+						   &dest, NULL);
 		if (err) {
 			netdev_err(priv->netdev,
-				   "%s: modify ttc[%d] default destination failed, err(%d)\n",
-				   __func__, arfs_get_tt(i), err);
+				   "%s: modify ttc destination failed\n",
+				   __func__);
 			return err;
 		}
 	}
@@ -117,17 +125,21 @@ int mlx5e_arfs_disable(struct mlx5e_priv *priv)
 int mlx5e_arfs_enable(struct mlx5e_priv *priv)
 {
 	struct mlx5_flow_destination dest = {};
-	int err, i;
+	int err = 0;
+	int tt;
+	int i;
 
 	dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
 	for (i = 0; i < ARFS_NUM_TYPES; i++) {
 		dest.ft = priv->fs.arfs.arfs_tables[i].ft.t;
+		tt = arfs_get_tt(i);
 		/* Modify ttc rules destination to point on the aRFS FTs */
-		err = mlx5e_ttc_fwd_dest(priv, arfs_get_tt(i), &dest);
+		err = mlx5_modify_rule_destination(priv->fs.ttc.rules[tt],
+						   &dest, NULL);
 		if (err) {
 			netdev_err(priv->netdev,
-				   "%s: modify ttc[%d] dest to arfs, failed err(%d)\n",
-				   __func__, arfs_get_tt(i), err);
+				   "%s: modify ttc destination failed err=%d\n",
+				   __func__, err);
 			arfs_disable(priv);
 			return err;
 		}
@@ -163,22 +175,28 @@ static int arfs_add_default_rule(struct mlx5e_priv *priv,
 	struct mlx5e_tir *tir = priv->indir_tir;
 	struct mlx5_flow_destination dest = {};
 	MLX5_DECLARE_FLOW_ACT(flow_act);
+	struct mlx5_flow_spec *spec;
 	enum mlx5e_traffic_types tt;
 	int err = 0;
+
+	spec = kvzalloc(sizeof(*spec), GFP_KERNEL);
+	if (!spec) {
+		err = -ENOMEM;
+		goto out;
+	}
 
 	dest.type = MLX5_FLOW_DESTINATION_TYPE_TIR;
 	tt = arfs_get_tt(type);
 	if (tt == -EINVAL) {
 		netdev_err(priv->netdev, "%s: bad arfs_type: %d\n",
 			   __func__, type);
-		return -EINVAL;
+		err = -EINVAL;
+		goto out;
 	}
 
-	/* FIXME: Must use mlx5e_ttc_get_default_dest(),
-	 * but can't since TTC default is not setup yet !
-	 */
 	dest.tir_num = tir[tt].tirn;
-	arfs_t->default_rule = mlx5_add_flow_rules(arfs_t->ft.t, NULL,
+
+	arfs_t->default_rule = mlx5_add_flow_rules(arfs_t->ft.t, spec,
 						   &flow_act,
 						   &dest, 1);
 	if (IS_ERR(arfs_t->default_rule)) {
@@ -187,7 +205,8 @@ static int arfs_add_default_rule(struct mlx5e_priv *priv,
 		netdev_err(priv->netdev, "%s: add rule failed, arfs type=%d\n",
 			   __func__, type);
 	}
-
+out:
+	kvfree(spec);
 	return err;
 }
 
@@ -210,7 +229,7 @@ static int arfs_create_groups(struct mlx5e_flow_table *ft,
 			sizeof(*ft->g), GFP_KERNEL);
 	in = kvzalloc(inlen, GFP_KERNEL);
 	if  (!in || !ft->g) {
-		kfree(ft->g);
+		kvfree(ft->g);
 		kvfree(in);
 		return -ENOMEM;
 	}
@@ -518,11 +537,8 @@ static struct mlx5_flow_handle *arfs_add_rule(struct mlx5e_priv *priv,
 	rule = mlx5_add_flow_rules(ft, spec, &flow_act, &dest, 1);
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
-		priv->channel_stats[arfs_rule->rxq].rq.arfs_err++;
-		mlx5e_dbg(HW, priv,
-			  "%s: add rule(filter id=%d, rq idx=%d, ip proto=0x%x) failed,err=%d\n",
-			  __func__, arfs_rule->filter_id, arfs_rule->rxq,
-			  tuple->ip_proto, err);
+		netdev_err(priv->netdev, "%s: add rule(filter id=%d, rq idx=%d) failed, err=%d\n",
+			   __func__, arfs_rule->filter_id, arfs_rule->rxq, err);
 	}
 
 out:

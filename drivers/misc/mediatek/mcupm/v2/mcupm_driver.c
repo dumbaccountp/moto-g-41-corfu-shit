@@ -1,106 +1,80 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2021 MediaTek Inc.
+ * Author: Fred-YC Yu <fred-yc.yu@mediatek.com>
  */
-
-#include <linux/delay.h>
-#include <linux/io.h>
-#include <linux/kthread.h>
-#include <linux/module.h>
+#include <linux/module.h>       /* needed by all modules */
+#include <linux/init.h>         /* needed by module macros */
+#include <linux/types.h>
+#include <linux/atomic.h>
+#include <linux/timer.h>
 #include <linux/mutex.h>
+#include <linux/poll.h>
+#include <linux/slab.h>         /* needed by kmalloc */
 #include <linux/of.h>
+#include <linux/io.h>
+#include <linux/miscdevice.h>   /* needed by miscdevice* */
+#include <linux/delay.h>
+#include <linux/kthread.h>
 
-#include "mcupm_driver.h"
-#include "mcupm_plt.h"
-#include "mcupm_ipi_id.h"
-#include "mcupm_ipi_table.h"
-#include "mcupm_timesync.h"
-
-#if IS_ENABLED(CONFIG_MTK_EMI)
-#include <soc/mediatek/emi.h>
+#ifdef CONFIG_MEDIATEK_EMI
+#include <mt-plat/sync_write.h>
+#include <memory/mediatek/emi.h>
 #include "mcupm_emi_mpu.h"
 #endif
+
+#include "mcupm_ipi_id.h"
+#include "mcupm_ipi_table.h"
+#include "mcupm_driver.h"
+#include "mcupm_timesync.h"
 
 #ifdef CONFIG_OF_RESERVED_MEM
 #include <linux/of_reserved_mem.h>
 #define MCUPM_MEM_RESERVED_KEY "mediatek,reserve-memory-mcupm_share"
-bool has_reserved_memory;
-bool skip_logger;
 #endif
 
-/* Todo implement mcupm driver pdata*/
-struct platform_device *mcupm_pdev;
-spinlock_t mcupm_mbox_lock[MCUPM_MBOX_TOTAL];
-
-int mcupm_plt_ackdata;
-
-static int mtk_ipi_init(struct platform_device *pdev)
-{
-	int i = 0;
-	int ret;
-	struct device *dev = &pdev->dev;
-	void __iomem *base;
-	struct resource *res;
-	char name[32];
-
-	mcupm_mbox_table[i].mbdev = &mcupm_mboxdev;
-	ret = mtk_mbox_probe(pdev, mcupm_mbox_table[i].mbdev, i);
-	if (ret) {
-		pr_debug("[MCUPM] mbox(0) probe fail on mbox-0, ret %d\n", ret);
-		return ret;
-	}
-
-	for (i = 1; i < MCUPM_MBOX_TOTAL; i++) {
-		mcupm_mbox_table[i].mbdev = &mcupm_mboxdev;
-		snprintf(name, sizeof(name), "mbox%d_base", i);
-		res = platform_get_resource_byname(pdev,
-					IORESOURCE_MEM, name);
-		base = devm_ioremap_resource(dev, res);
-		if (IS_ERR((void const *) base)) {
-			ret = PTR_ERR(base);
-			pr_debug("mbox-%d can't remap base\n", i);
-			return ret;
-		}
-		ret = mtk_smem_init(pdev, mcupm_mbox_table[i].mbdev, i, base,
-		mcupm_mbox_table[0].mbdev->info_table[0].set_irq_reg,
-		mcupm_mbox_table[0].mbdev->info_table[0].clr_irq_reg,
-		mcupm_mbox_table[0].mbdev->info_table[0].send_status_reg,
-		mcupm_mbox_table[0].mbdev->info_table[0].recv_status_reg);
-		if (ret) {
-			pr_debug("[MCUPM] mbox probe fail on mbox-%d, ret %d\n",
-				i, ret);
-			return ret;
-		}
-	}
-
-	pr_debug("[MCUPM] ipi register\n");
-	ret = mtk_ipi_device_register(&mcupm_ipidev, pdev, &mcupm_mboxdev,
-				      MCUPM_IPI_COUNT);
-	if (ret) {
-		pr_debug("[MCUPM] ipi_dev_register fail, ret %d\n", ret);
-		return ret;
-	}
-
-    /* Initialize mcupm ipi driver. Move to struct mtk_mcupm */
-	ret = mtk_ipi_register(&mcupm_ipidev, CH_S_PLATFORM, NULL, NULL,
-			       (void *) &mcupm_plt_ackdata);
-	if (ret) {
-		pr_debug("[MCUPM] ipi_register fail, ret %d\n", ret);
-		return ret;
-	}
-	return 0;
-}
 /* MCUPM RESERVED MEM */
 static phys_addr_t mcupm_mem_base_phys;
 static phys_addr_t mcupm_mem_base_virt;
 static phys_addr_t mcupm_mem_size;
 
-#if IS_ENABLED(CONFIG_MTK_EMI)
+#ifdef CONFIG_MEDIATEK_EMI
 static unsigned long long mcupm_start;
 static unsigned long long mcupm_end;
 #endif
 
-#ifdef CONFIG_OF_RESERVED_MEM
+/* MCUPM PLT */
+#if MCUPM_PLT_SERV_SUPPORT
+struct plt_ctrl_s {
+	unsigned int magic;
+	unsigned int size;
+	unsigned int mem_sz;
+#if MCUPM_LOGGER_SUPPORT
+	unsigned int logger_ofs;
+#endif
+};
+#endif
+
+extern void mt_irq_dump_status(int irq);
+
+/* MCUPM HELPER */
+struct platform_device *mcupm_pdev;
+int mcupm_plt_ackdata;
+static atomic_t mcupm_inited = ATOMIC_INIT(0);
+static atomic_t mcupm_dev_inited = ATOMIC_INIT(0);
+static unsigned int mcupm_ready;
+spinlock_t mcupm_mbox_lock[MCUPM_MBOX_TOTAL];
+
+/* MCUPM SYSFS */
+static wait_queue_head_t logwait;
+
+/* MCUPM LOGGER */
+static unsigned int mcupm_logger_inited;
+static struct log_ctrl_s *log_ctl;
+static struct buffer_info_s *buf_info, *lbuf_info;
+static struct timer_list mcupm_log_timer;
+static DEFINE_MUTEX(mcupm_log_mutex);
+
 static struct mcupm_reserve_mblock mcupm_reserve_mblock[NUMS_MCUPM_MEM_ID] = {
 	{
 		.num = MCUPM_MEM_ID,
@@ -123,10 +97,45 @@ static struct mcupm_reserve_mblock mcupm_reserve_mblock[NUMS_MCUPM_MEM_ID] = {
 	},
 };
 
+/* MCUPM RESERVED MEM */
+#ifdef CONFIG_OF_RESERVED_MEM
+static int __init mcupm_reserve_mem_of_init(struct reserved_mem *rmem)
+{
+	unsigned int id;
+	phys_addr_t accumlate_memory_size = 0;
+
+	mcupm_mem_base_phys = (phys_addr_t) rmem->base;
+	mcupm_mem_size = (phys_addr_t) rmem->size;
+
+	pr_debug("[MCUPM] phys:0x%llx - 0x%llx (0x%llx)\n",
+		 (unsigned long long)rmem->base,
+		 (unsigned long long)rmem->base +
+		 (unsigned long long)rmem->size,
+		 (unsigned long long)rmem->size);
+	accumlate_memory_size = 0;
+	for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
+		mcupm_reserve_mblock[id].start_phys = mcupm_mem_base_phys +
+			accumlate_memory_size;
+		accumlate_memory_size += mcupm_reserve_mblock[id].size;
+
+		pr_debug("[MCUPM][reserve_mem:%d]: ", id);
+		pr_debug("phys:0x%llx - 0x%llx (0x%llx)\n",
+			 mcupm_reserve_mblock[id].start_phys,
+			 mcupm_reserve_mblock[id].start_phys +
+			 mcupm_reserve_mblock[id].size,
+			 mcupm_reserve_mblock[id].size);
+	}
+	return 0;
+}
+
+RESERVEDMEM_OF_DECLARE(mcupm_reservedmem, MCUPM_MEM_RESERVED_KEY,
+			mcupm_reserve_mem_of_init);
+#endif
+
 phys_addr_t mcupm_reserve_mem_get_phys(unsigned int id)
 {
 	if (id >= NUMS_MCUPM_MEM_ID) {
-		pr_info("[MCUPM] no reserve memory for 0x%x", id);
+		pr_debug("[MCUPM] no reserve memory for 0x%x", id);
 		return 0;
 	} else
 		return mcupm_reserve_mblock[id].start_phys;
@@ -136,176 +145,24 @@ EXPORT_SYMBOL_GPL(mcupm_reserve_mem_get_phys);
 phys_addr_t mcupm_reserve_mem_get_virt(unsigned int id)
 {
 	if (id >= NUMS_MCUPM_MEM_ID) {
-		pr_info("[MCUPM] no reserve memory for 0x%x", id);
+		pr_debug("[MCUPM] no reserve memory for 0x%x", id);
 		return 0;
 	} else
-		return (phys_addr_t)mcupm_reserve_mblock[id].start_virt;
+		return mcupm_reserve_mblock[id].start_virt;
 }
 EXPORT_SYMBOL_GPL(mcupm_reserve_mem_get_virt);
 
 phys_addr_t mcupm_reserve_mem_get_size(unsigned int id)
 {
 	if (id >= NUMS_MCUPM_MEM_ID) {
-		pr_info("[MCUPM] no reserve memory for 0x%x", id);
+		pr_debug("[MCUPM] no reserve memory for 0x%x", id);
 		return 0;
 	} else
 		return mcupm_reserve_mblock[id].size;
 }
 EXPORT_SYMBOL_GPL(mcupm_reserve_mem_get_size);
 
-#if defined(MODULE)
-static int mcupm_assign_memory_block(void)
-{
-	int ret = 0;
-	unsigned int id;
-	phys_addr_t accumlate_memory_size = 0;
-
-    //Todo consider remove global variable
-	WARN_ON(!(mcupm_mem_base_phys && mcupm_mem_size));
-
-	for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
-		mcupm_reserve_mblock[id].start_phys = mcupm_mem_base_phys +
-			accumlate_memory_size;
-		accumlate_memory_size += mcupm_reserve_mblock[id].size;
-
-		pr_debug("[MCUPM][reserve_mem:%d]: ", id);
-		pr_debug("phys:0x%llx - 0x%llx (0x%llx)\n",
-			 mcupm_reserve_mblock[id].start_phys,
-			 mcupm_reserve_mblock[id].start_phys +
-			 mcupm_reserve_mblock[id].size,
-			 mcupm_reserve_mblock[id].size);
-	}
-
-	accumlate_memory_size = 0;
-	for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
-		mcupm_reserve_mblock[id].start_virt = mcupm_mem_base_virt +
-			accumlate_memory_size;
-		accumlate_memory_size += mcupm_reserve_mblock[id].size;
-	}
-
-#ifdef MCUPM_RESERVED_DEBUG
-	for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
-		pr_debug("[MCUPM][mem_reserve-%d] ", id);
-		pr_debug("phys:0x%llx,virt:0x%llx,size:0x%llx\n",
-			 (unsigned long long)mcupm_reserve_mem_get_phys(id),
-			 (unsigned long long)mcupm_reserve_mem_get_virt(id),
-			 (unsigned long long)mcupm_reserve_mem_get_size(id));
-	}
-#endif
-
-	return ret;
-}
-static int mcupm_map_memory_region(void)
-{
-	struct device_node *rmem_node;
-	struct reserved_mem *rmem;
-	unsigned int id;
-
-	/* Get reserved memory */
-	rmem_node = of_find_compatible_node(NULL, NULL, MCUPM_MEM_RESERVED_KEY);
-	if (!rmem_node) {
-		pr_info("[MCUPM] no node for reserved memory\n");
-		has_reserved_memory = false;
-		skip_logger = true;
-		for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
-			mcupm_reserve_mblock[id].start_phys = 0x0;
-			mcupm_reserve_mblock[id].start_virt = 0x0;
-		}
-		return 0;
-	}
-
-	has_reserved_memory = true;
-
-	rmem = of_reserved_mem_lookup(rmem_node);
-	if (!rmem) {
-		pr_info("[MCUPM] cannot lookup reserved memory\n");
-		return -EINVAL;
-	}
-
-	mcupm_mem_base_phys = (phys_addr_t) rmem->base;
-	mcupm_mem_size = (phys_addr_t) rmem->size;
-
-	WARN_ON(!(mcupm_mem_base_phys && mcupm_mem_size));
-
-    /* Mapping the MCUPM's SRAM address /
-     * DMEM (Data Extended Memory) memory address /
-     * Working buffer memory address to
-     * kernel virtual address.
-     */
-	mcupm_mem_base_virt = (phys_addr_t)(uintptr_t)
-		ioremap_wc(mcupm_mem_base_phys, mcupm_mem_size);
-
-	if (!mcupm_mem_base_virt)
-		return -ENOMEM;
-
-	pr_info("[MCUPM]reserve mem: virt:0x%llx - 0x%llx (0x%llx)\n",
-		 (unsigned long long)mcupm_mem_base_virt,
-		 (unsigned long long)mcupm_mem_base_virt +
-		 (unsigned long long)mcupm_mem_size,
-		 (unsigned long long)mcupm_mem_size);
-
-	if (mcupm_assign_memory_block()) {
-		pr_info("[MCUPM] assign phys, virt address and size Failed\n");
-		return -ENOMEM;
-	}
-
-	return 0;
-}
-#else
-static int __init mcupm_reserve_mem_of_init(struct reserved_mem *rmem)
-{
-	unsigned int id;
-	phys_addr_t accumlate_memory_size = 0;
-
-	mcupm_mem_base_phys = (phys_addr_t) rmem->base;
-	mcupm_mem_size = (phys_addr_t) rmem->size;
-
-	WARN_ON(!(mcupm_mem_base_phys && mcupm_mem_size));
-
-	pr_debug("[MCUPM] phys:0x%llx - 0x%llx (0x%llx)\n",
-		 (unsigned long long)rmem->base,
-		 (unsigned long long)rmem->base +
-		 (unsigned long long)rmem->size,
-		 (unsigned long long)rmem->size);
-
-	for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
-		mcupm_reserve_mblock[id].start_phys = mcupm_mem_base_phys +
-			accumlate_memory_size;
-		accumlate_memory_size += mcupm_reserve_mblock[id].size;
-
-		pr_debug("[MCUPM][reserve_mem:%d]: ", id);
-		pr_debug("phys:0x%llx - 0x%llx (0x%llx)\n",
-			 mcupm_reserve_mblock[id].start_phys,
-			 mcupm_reserve_mblock[id].start_phys +
-			 mcupm_reserve_mblock[id].size,
-			 mcupm_reserve_mblock[id].size);
-	}
-
-    //Todo: combin mcupm_reserve_mblock start_phys, start_virt
-    //    and size in same loop
-	accumlate_memory_size = 0;
-	for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
-		mcupm_reserve_mblock[id].start_virt = mcupm_mem_base_virt +
-			accumlate_memory_size;
-		accumlate_memory_size += mcupm_reserve_mblock[id].size;
-	}
-
-	WARN_ON(accumlate_memory_size > mcupm_mem_size);
-#ifdef MCUPM_RESERVED_DEBUG
-	for (id = 0; id < NUMS_MCUPM_MEM_ID; id++) {
-		pr_debug("[MCUPM][mem_reserve-%d] ", id);
-		pr_debug("phys:0x%llx,virt:0x%llx,size:0x%llx\n",
-			 (unsigned long long)mcupm_reserve_mem_get_phys(id),
-			 (unsigned long long)mcupm_reserve_mem_get_virt(id),
-			 (unsigned long long)mcupm_reserve_mem_get_size(id));
-	}
-#endif
-	return 0;
-}
-RESERVEDMEM_OF_DECLARE(mcupm_reservedmem, MCUPM_MEM_RESERVED_KEY,
-	mcupm_reserve_mem_of_init);
-
-static int mcupm_reserve_memory_init(void)
+int mcupm_reserve_memory_init(void)
 {
 	unsigned int id;
 	phys_addr_t accumlate_memory_size;
@@ -314,14 +171,11 @@ static int mcupm_reserve_memory_init(void)
 		return 0;
 
 	if (mcupm_mem_base_phys == 0)
-		return -ENOMEM;
+		return -1;
 
 	accumlate_memory_size = 0;
 	mcupm_mem_base_virt = (phys_addr_t)(uintptr_t)
 		ioremap_wc(mcupm_mem_base_phys, mcupm_mem_size);
-
-	if (!mcupm_mem_base_virt)
-		return -ENOMEM;
 
 	pr_debug("[MCUPM]reserve mem: virt:0x%llx - 0x%llx (0x%llx)\n",
 		 (unsigned long long)mcupm_mem_base_virt,
@@ -349,10 +203,419 @@ static int mcupm_reserve_memory_init(void)
 	return 0;
 }
 
+/* MCUPM SYSFS */
+static ssize_t mcupm_log_if_read(struct file *file, char __user *data,
+				 size_t len, loff_t *ppos)
+{
+	ssize_t ret;
+
+	/* pr_debug("[MCUPM] mcupm_log_if_read\n"); */
+
+	ret = 0;
+
+	if (access_ok(VERIFY_WRITE, data, len))
+		ret = mcupm_log_read(data, len);
+
+	return ret;
+}
+
+static int mcupm_log_if_open(struct inode *inode, struct file *file)
+{
+	/* pr_debug("[MCUPM] mcupm_log_if_open\n"); */
+	return nonseekable_open(inode, file);
+}
+
+static unsigned int mcupm_log_if_poll(struct file *file, poll_table *wait)
+{
+	unsigned int ret = 0;
+
+	/* pr_debug("[MCUPM] mcupm_log_if_poll\n"); */
+
+	if (!(file->f_mode & FMODE_READ))
+		return ret;
+
+	poll_wait(file, &logwait, wait);
+
+	ret = mcupm_log_poll();
+
+	return ret;
+}
+
+void mcupm_log_if_wake(void)
+{
+	wake_up(&logwait);
+}
+
+static const struct file_operations mcupm_log_file_ops = {
+	.owner = THIS_MODULE,
+	.read = mcupm_log_if_read,
+	.open = mcupm_log_if_open,
+	.poll = mcupm_log_if_poll,
+};
+
+static struct miscdevice mcupm_log_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "mcupm",
+	.fops = &mcupm_log_file_ops
+};
+
+int __init mcupm_sysfs_init(void)
+{
+	int ret;
+
+	init_waitqueue_head(&logwait);
+
+	ret = misc_register(&mcupm_log_device);
+
+	if (unlikely(ret != 0))
+		return ret;
+
+	return 0;
+}
+
+int mcupm_sysfs_create_file(const struct device_attribute *attr)
+{
+	return device_create_file(mcupm_log_device.this_device, attr);
+}
+
+/* MCUPM LOGGER */
+static inline void mcupm_log_timer_add(void)
+{
+	if (mcupm_log_timer.expires == 0) {
+		mcupm_log_timer.expires = jiffies + MCUPM_TIMER_TIMEOUT;
+		add_timer(&mcupm_log_timer);
+	}
+}
+
+static void mcupm_log_timeout(struct timer_list *timer)
+{
+	if (buf_info->r_pos != buf_info->w_pos) {
+		mcupm_log_if_wake();
+		mcupm_log_timer.expires = 0;
+	} else {
+		mcupm_log_timer_add();
+	}
+}
+
+ssize_t mcupm_log_read(char __user *data, size_t len)
+{
+	unsigned long w_pos, r_pos, datalen;
+	char *buf, *tmp_buf;
+
+	if (!mcupm_logger_inited)
+		return 0;
+
+	datalen = 0;
+
+	mutex_lock(&mcupm_log_mutex);
+
+	r_pos = buf_info->r_pos;
+	w_pos = buf_info->w_pos;
+
+	if (r_pos == w_pos)
+		goto error;
+
+	if (r_pos > w_pos)
+		datalen = BUF_LEN - r_pos; /* not wrap */
+	else
+		datalen = w_pos - r_pos;
+
+	if (datalen > len)
+		datalen = len;
+
+	buf = ((char *) log_ctl) + log_ctl->buff_ofs + r_pos;
+	tmp_buf = kmalloc((size_t)len, GFP_KERNEL);
+	len = datalen;
+
+	if (tmp_buf) {
+		memcpy_fromio(tmp_buf, buf, len);
+		if (copy_to_user(data, tmp_buf, len))
+
+			pr_debug("mcupm logger: copy data failed !!!\n");
+
+		kfree(tmp_buf);
+	} else {
+		pr_debug("mcupm logger: create log buffer failed !!!\n");
+		goto error;
+	}
+
+	r_pos += datalen;
+	if (r_pos >= BUF_LEN)
+		r_pos -= BUF_LEN;
+
+	buf_info->r_pos = r_pos;
+
+error:
+	mutex_unlock(&mcupm_log_mutex);
+
+	return datalen;
+}
+
+unsigned int mcupm_log_poll(void)
+{
+	if (!mcupm_logger_inited)
+		return 0;
+
+	if (buf_info->r_pos != buf_info->w_pos)
+		return POLLIN | POLLRDNORM;
+
+	mcupm_log_timer_add();
+
+	return 0;
+}
+
+static unsigned int mcupm_log_enable_set(unsigned int enable)
+{
+	struct mcupm_ipi_data_s ipi_data;
+	int ret;
+
+	if (mcupm_logger_inited) {
+		ipi_data.cmd = MCUPM_PLT_LOG_ENABLE;
+		ipi_data.u.logger.enable = enable ? ENABLE : DISABLE;
+		mcupm_plt_ackdata = -1;
+
+		ret = mtk_ipi_send_compl(&mcupm_ipidev, CH_S_PLATFORM,
+			IPI_SEND_WAIT, &ipi_data,
+			sizeof(struct mcupm_ipi_data_s) / MCUPM_MBOX_SLOT_SIZE,
+			2000);
+		if (ret) {
+			pr_debug("MCUPM: logger IPI fail ret=%d\n", ret);
+			goto error;
+		}
+
+		if (enable != mcupm_plt_ackdata) {
+			pr_debug("MCUPM: %s fail enable=%d ackdata=%d\n",
+				__func__, enable, mcupm_plt_ackdata);
+			goto error;
+		}
+
+		log_ctl->enable = enable;
+		pr_info("MCUPM: logger IPI success ret=%d, ackdata = %d\n",
+			ret, mcupm_plt_ackdata);
+	}
+
+error:
+	return 0;
+}
+
+static ssize_t mcupm_mobile_log_show(struct device *kobj,
+	struct device_attribute *attr, char *buf)
+{
+	unsigned int stat;
+
+	stat = (mcupm_logger_inited && log_ctl->enable) ? 1 : 0;
+
+	return snprintf(buf, PAGE_SIZE, "MCUPM mobile log is %s\n",
+		(stat == 0x1) ? "enabled" : "disabled");
+}
+
+static ssize_t mcupm_mobile_log_store(struct device *kobj,
+	struct device_attribute *attr, const char *buf, size_t n)
+{
+	unsigned int enable = 0;
+
+
+	if (kstrtouint(buf, 0, &enable) != 0)
+		return -EINVAL;
+
+	mutex_lock(&mcupm_log_mutex);
+	mcupm_log_enable_set(enable);
+	mutex_unlock(&mcupm_log_mutex);
+
+	return n;
+}
+
+DEVICE_ATTR_RW(mcupm_mobile_log);
+
+unsigned int __init mcupm_logger_init(phys_addr_t start, phys_addr_t limit)
+{
+	unsigned int last_ofs;
+
+	last_ofs = 0;
+
+	log_ctl = (struct log_ctrl_s *)(uintptr_t) start;
+	log_ctl->base = MCUPM_PLT_LOG_ENABLE; /* magic */
+	log_ctl->enable = 0;
+	log_ctl->size = sizeof(*log_ctl);
+
+	last_ofs += log_ctl->size;
+	log_ctl->info_ofs = last_ofs;
+
+	last_ofs += sizeof(*buf_info);
+	last_ofs = ROUNDUP(last_ofs, 4);
+	log_ctl->buff_ofs = last_ofs;
+	log_ctl->buff_size = BUF_LEN;
+
+	buf_info = (struct buffer_info_s *) (((unsigned char *) log_ctl) +
+					     log_ctl->info_ofs);
+	buf_info->r_pos = 0;
+	buf_info->w_pos = 0;
+
+	last_ofs += log_ctl->buff_size;
+
+	if (last_ofs >= limit) {
+		pr_debug("MCUPM:%s() initial fail, last_ofs=%u, limit=%u\n",
+		       __func__, last_ofs, (unsigned int) limit);
+		goto error;
+	}
+
+	return last_ofs;
+
+error:
+	mcupm_logger_inited = 0;
+	log_ctl = NULL;
+	buf_info = lbuf_info = NULL;
+	return 0;
+}
+
+int __init mcupm_logger_init_done(void)
+{
+	int ret;
+
+	if (log_ctl) {
+		ret = mcupm_sysfs_create_file(&dev_attr_mcupm_mobile_log);
+
+		if (unlikely(ret != 0))
+			return ret;
+
+		timer_setup(&mcupm_log_timer, &mcupm_log_timeout, 0);
+		mcupm_log_timer.expires = 0;
+
+		mcupm_logger_inited = 1;
+	}
+
+	return 0;
+}
+
+/* MCUPM PLT */
+#if MCUPM_PLT_SERV_SUPPORT
+static ssize_t mcupm_alive_show(struct device *kobj,
+				struct device_attribute *attr, char *buf)
+{
+
+	struct  mcupm_ipi_data_s ipi_data;
+	int ret;
+
+	ipi_data.cmd = 0xDEAD;
+	mcupm_plt_ackdata = 0;
+
+	ret = mtk_ipi_send_compl(&mcupm_ipidev, CH_S_PLATFORM, IPI_SEND_WAIT,
+		&ipi_data,
+		sizeof(struct mcupm_ipi_data_s) / MCUPM_MBOX_SLOT_SIZE,
+		2000);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n",
+			mcupm_plt_ackdata ? "Alive" : "Dead");
+}
+DEVICE_ATTR_RO(mcupm_alive);
+
+int __init mcupm_plt_init(void)
+{
+	phys_addr_t phys_addr, virt_addr, mem_sz;
+	struct mcupm_ipi_data_s ipi_data;
+	struct plt_ctrl_s *plt_ctl;
+	int ret, i;
+	unsigned int last_ofs;
+#if MCUPM_LOGGER_SUPPORT
+	unsigned int last_sz;
 #endif
+	unsigned int *mark;
+	unsigned char *b;
+
+	ret = mcupm_sysfs_create_file(&dev_attr_mcupm_alive);
+	if (unlikely(ret != 0))
+		goto error;
+
+	phys_addr = mcupm_reserve_mem_get_phys(MCUPM_MEM_ID);
+	if (phys_addr == 0) {
+		pr_debug("MCUPM: Can't get logger phys mem\n");
+		goto error;
+	}
+
+	virt_addr = mcupm_reserve_mem_get_virt(MCUPM_MEM_ID);
+	if (virt_addr == 0) {
+		pr_debug("MCUPM: Can't get logger virt mem\n");
+		goto error;
+	}
+
+	mem_sz = mcupm_reserve_mem_get_size(MCUPM_MEM_ID);
+	if (mem_sz == 0) {
+		pr_debug("MCUPM: Can't get logger mem size\n");
+		goto error;
+	}
+
+	b = (unsigned char *) (uintptr_t)virt_addr;
+	for (last_ofs = 0; last_ofs < sizeof(*plt_ctl); last_ofs++)
+		b[last_ofs] = 0x0;
+
+	mark = (unsigned int *) (uintptr_t)virt_addr;
+	*mark = MCUPM_PLT_INIT;
+	mark = (unsigned int *) ((unsigned char *) (uintptr_t)
+				 virt_addr + mem_sz - 4);
+	*mark = MCUPM_PLT_INIT;
+
+	plt_ctl = (struct plt_ctrl_s *) (uintptr_t)virt_addr;
+	plt_ctl->magic = MCUPM_PLT_INIT;
+	plt_ctl->size = sizeof(*plt_ctl);
+	plt_ctl->mem_sz = mem_sz;
+
+	last_ofs = plt_ctl->size;
+
+
+	pr_debug("MCUPM: %s(): after plt, ofs=0x%x\n", __func__, last_ofs);
+
+#if MCUPM_LOGGER_SUPPORT
+	plt_ctl->logger_ofs = last_ofs;
+	last_sz = mcupm_logger_init(virt_addr + last_ofs, mem_sz - last_ofs);
+
+
+	if (last_sz == 0) {
+		pr_debug("MCUPM: mcupm_logger_init return fail\n");
+		goto error;
+	}
+
+	last_ofs += last_sz;
+	pr_debug("MCUPM: %s(): after logger, ofs=0x%x\n", __func__, last_ofs);
 #endif
 
-/* MCUPM HELPER. User is apmcu_sspm_mailbox_read/write*/
+	ipi_data.cmd = MCUPM_PLT_INIT;
+	ipi_data.u.ctrl.phys = phys_addr;
+	ipi_data.u.ctrl.size = mem_sz;
+	mcupm_plt_ackdata = 0;
+
+	ret = mtk_ipi_send_compl(&mcupm_ipidev, CH_S_PLATFORM, IPI_SEND_POLLING,
+		&ipi_data,
+		sizeof(struct mcupm_ipi_data_s) / MCUPM_MBOX_SLOT_SIZE,
+		2000);
+	if (ret) {
+		pr_debug("MCUPM: plt IPI fail ret=%d, ackdata=%d\n",
+			ret, mcupm_plt_ackdata);
+		goto error;
+	}
+
+	if (!mcupm_plt_ackdata) {
+		pr_debug("MCUPM: plt IPI init fail, ackdata=%d\n",
+		       mcupm_plt_ackdata);
+		goto error;
+	}
+
+	pr_info("MCUPM: plt IPI success ret=%d, ackdata=%d\n",
+		ret, mcupm_plt_ackdata);
+
+#if MCUPM_LOGGER_SUPPORT
+	mcupm_logger_init_done();
+#endif
+
+	for (i = 0; i < MCUPM_MBOX_TOTAL; i++)
+		spin_lock_init(&mcupm_mbox_lock[i]);
+
+	return 0;
+error:
+	return -1;
+}
+#endif
+
+/* MCUPM HELPER */
 int mcupm_mbox_read(unsigned int mbox, unsigned int slot, void *buf,
 			unsigned int len)
 {
@@ -364,7 +627,6 @@ int mcupm_mbox_read(unsigned int mbox, unsigned int slot, void *buf,
 	return mtk_mbox_read(&mcupm_mboxdev, mbox, slot,
 				buf, len * MBOX_SLOT_SIZE);
 }
-EXPORT_SYMBOL_GPL(mcupm_mbox_read);
 
 int mcupm_mbox_write(unsigned int mbox, unsigned int slot, void *buf,
 			unsigned int len)
@@ -397,182 +659,136 @@ int mcupm_mbox_write(unsigned int mbox, unsigned int slot, void *buf,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mcupm_mbox_write);
-
-void *get_mcupm_ipidev(void)
+static void mcupm_ipi_timeout(int id)
 {
-	return &mcupm_ipidev;
-}
-EXPORT_SYMBOL_GPL(get_mcupm_ipidev);
-
-static struct task_struct *mcupm_task;
-#define UBUS_BASE   0x0C800000
-#define CLUSTER_MPAM_BASE   0X10000
-#define MPAMCFG_PART_SEL_OFS    0x100
-#define MPAMCFG_CPBM_NS_OFS 0x1000
-#define MPAMCFG_PART_SEL    (UBUS_BASE+CLUSTER_MPAM_BASE+MPAMCFG_PART_SEL_OFS)
-#define MPAMCFG_CPBM    (UBUS_BASE+CLUSTER_MPAM_BASE+MPAMCFG_CPBM_NS_OFS)
-#define UBUS_MPAM_SIZE  0x1100
-static phys_addr_t mpam_base_virt;
-
-int mcupm_thread(void *data)
-{
-	int ipi_recv_d = 0, ret = 0, i;
-	struct mcupm_ipi_data_s ipi_data;
-	unsigned int cmd, partid, cache_por;
-
-	ipi_data.cmd = MCUPM_PLT_SERV_READY;
-	mcupm_plt_ackdata = 0;
-
-	ret = mtk_ipi_send_compl(&mcupm_ipidev, CH_S_PLATFORM, IPI_SEND_POLLING,
-			&ipi_data,
-			sizeof(struct mcupm_ipi_data_s) / MCUPM_MBOX_SLOT_SIZE,
-			2000);
-
-	if (ret) {
-		pr_info("MCUPM: plt IPI fail ret=%d, ackdata=%d\n",
-				ret, mcupm_plt_ackdata);
+	if (mcupm_ipidev.mbdev == NULL) {
+		pr_debug("[mcupm] %s: mbox=%d no mbox dev", __func__, id);
+		return;
 	}
 
-	if (mcupm_plt_ackdata < 0) {
-		pr_info("MCUPM: plt IPI init fail, ackdata=%d\n",
-				mcupm_plt_ackdata);
+	if (id >= MCUPM_MBOX_TOTAL || id < 0) {
+		pr_debug("[mcupm] %s: mbox=%d out of info table dev",
+		__func__, id);
+		return;
 	}
 
-	//mmap utility bus
-	mpam_base_virt =
-		(phys_addr_t)(uintptr_t)ioremap(UBUS_BASE+CLUSTER_MPAM_BASE, UBUS_MPAM_SIZE);
+	pr_debug("[mcupm]mbox=%d irq num=%d",
+		id,
+		mcupm_ipidev.mbdev->info_table[id].irq_num);
+	mt_irq_dump_status(mcupm_ipidev.mbdev->info_table[id].irq_num);
 
-	if (!mpam_base_virt)
-		return -ENOMEM;
+	pr_debug("[mcupm]mbox=%d timeout setreg(%p)=%x clrreg(%p)=%x sendreg(%p)=%x recvreg(%p)=%x\n",
+		id,
+		mcupm_ipidev.mbdev->info_table[id].set_irq_reg,
+		readl(mcupm_ipidev.mbdev->info_table[id].set_irq_reg),
+		mcupm_ipidev.mbdev->info_table[id].clr_irq_reg,
+		readl(mcupm_ipidev.mbdev->info_table[id].clr_irq_reg),
+		mcupm_ipidev.mbdev->info_table[id].send_status_reg,
+		readl(mcupm_ipidev.mbdev->info_table[id].send_status_reg),
+		mcupm_ipidev.mbdev->info_table[id].recv_status_reg,
+		readl(mcupm_ipidev.mbdev->info_table[id].recv_status_reg));
 
-	do {
-		mtk_ipi_recv(&mcupm_ipidev, CH_S_PLATFORM);
-		ipi_recv_d = mcupm_plt_ackdata;
-
-		cmd = (ipi_recv_d >> 28) & 0xF;
-		partid = (ipi_recv_d >> 16) & 0xFFF;
-		cache_por = ipi_recv_d & 0xFFFF;
-
-		if (cmd != 0)
-			continue;
-		//part sel
-		iowrite32(partid, (void __iomem *)(mpam_base_virt+MPAMCFG_PART_SEL_OFS));
-		//set cpbm
-		ret = 0;
-		for (i = 0; i < cache_por; i++)
-			ret = (ret << 1) + 1;
-		iowrite32(ret, (void __iomem *)(mpam_base_virt+MPAMCFG_CPBM_NS_OFS));
-	} while (!kthread_should_stop());
-
-	return 0;
+	ipi_monitor_dump(&mcupm_ipidev);
+	mtk_mbox_dump_all(mcupm_ipidev.mbdev);
 }
-#if IS_ENABLED(CONFIG_MTK_EMI)
-static void mcupm_set_emi_mpu(phys_addr_t base, phys_addr_t size)
-{
-	mcupm_start = base;
-	mcupm_end = base + size - 1;
-}
-
-static void mcupm_lock_emi_mpu(void)
-{
-	if (mcupm_mem_size > 0)
-		mcupm_set_emi_mpu(mcupm_mem_base_phys, mcupm_mem_size);
-}
-
-static int mcupm_init_emi_mpu(void)
-{
-	struct emimpu_region_t rg_info;
-
-	mtk_emimpu_init_region(&rg_info, MUCPM_MPU_REGION_ID);
-
-	mtk_emimpu_set_addr(&rg_info, mcupm_start, mcupm_end);
-
-	mtk_emimpu_set_apc(&rg_info, 0, MTK_EMIMPU_NO_PROTECTION);
-
-	mtk_emimpu_set_apc(&rg_info, MUCPM_MPU_DOMAIN_ID,
-						MTK_EMIMPU_NO_PROTECTION);
-
-	mtk_emimpu_set_protection(&rg_info);
-
-	mtk_emimpu_free_region(&rg_info);
-
-	return 0;
-}
-#endif
 
 static int mcupm_device_probe(struct platform_device *pdev)
 {
 	int i, ret;
+	void __iomem *base;
 	struct device *dev = &pdev->dev;
+	struct resource *res;
+	char name[32];
+
+	if (atomic_inc_return(&mcupm_dev_inited) != 1)
+		return -1;
 
 	mcupm_pdev = pdev;
 
 	pr_debug("[MCUPM] mbox probe\n");
 
-	if (of_property_read_bool(dev->of_node, "skip-logger"))
-		skip_logger = true;
-	else
-		skip_logger = false;
-
-#ifdef CONFIG_OF_RESERVED_MEM
-#if defined(MODULE)
-	if (mcupm_map_memory_region()) {
-		pr_info("[MCUPM] Reserved Memory Failed\n");
-		return -ENOMEM;
+	for (i = 0; i < MCUPM_MBOX_TOTAL; i++) {
+		pr_info("[MCUPM]  mbox-%d, probe\n", i);
+		mcupm_mbox_table[i].mbdev = &mcupm_mboxdev;
+		if (i == 0) {
+			ret = mtk_mbox_probe(pdev, mcupm_mbox_table[i].mbdev,
+						i);
+			if (ret) {
+				pr_debug("[MCUPM] mbox(%d) probe fail on mbox-0, ret %d\n",
+					i, ret);
+				return -1;
+			}
+			continue;
+		}
+		snprintf(name, sizeof(name), "mbox%d_base", i);
+		res = platform_get_resource_byname(pdev,
+					IORESOURCE_MEM, name);
+		base = devm_ioremap_resource(dev, res);
+		if (IS_ERR((void const *) base))
+			pr_debug("mbox-%d can't remap base\n", i);
+		ret = mtk_smem_init(pdev, mcupm_mbox_table[i].mbdev, i, base,
+		mcupm_mbox_table[0].mbdev->info_table[0].set_irq_reg,
+		mcupm_mbox_table[0].mbdev->info_table[0].clr_irq_reg,
+		mcupm_mbox_table[0].mbdev->info_table[0].send_status_reg,
+		mcupm_mbox_table[0].mbdev->info_table[0].recv_status_reg);
+		if (ret) {
+			pr_debug("[MCUPM] mbox probe fail on mbox-%d, ret %d\n",
+				i, ret);
+			return -1;
+		}
 	}
-#else
-	if (mcupm_reserve_memory_init()) {
-		pr_info("[MCUPM] Reserved Memory Failed\n");
-		return -ENOMEM;
-	}
-#endif
-#endif
 
-	ret = mtk_ipi_init(pdev);
+	pr_debug("[MCUPM] ipi register\n");
+	ret = mtk_ipi_device_register(&mcupm_ipidev, pdev, &mcupm_mboxdev,
+				      MCUPM_IPI_COUNT);
 	if (ret) {
-		pr_debug("[MCUPM] ipi interface init fail, ret %d\n", ret);
-		return ret;
+		pr_debug("[MCUPM] ipi_dev_register fail, ret %d\n", ret);
+		return -1;
 	}
 
-	/* Initialize spin_lock for MCUPM HELPER for internal use. */
-	for (i = 0; i < MCUPM_MBOX_TOTAL; i++)
-		spin_lock_init(&mcupm_mbox_lock[i]);
+	ret = mtk_ipi_register(&mcupm_ipidev, CH_S_PLATFORM, NULL, NULL,
+			       (void *) &mcupm_plt_ackdata);
+	if (ret) {
+		pr_debug("[MCUPM] ipi_register fail, ret %d\n", ret);
+		return -1;
+	}
+
+	mcupm_ipidev.timeout_handler = mcupm_ipi_timeout;
 
 	pr_info("MCUPM is ready to service IPI\n");
 
-#if IS_ENABLED(CONFIG_MTK_EMI)
-	if (has_reserved_memory == true) {
-		mcupm_lock_emi_mpu();
-		mcupm_init_emi_mpu();
-	} else
-		pr_debug("[MCUPM] no need to set emi mpu\n");
-#endif
-
-	ret = mcupm_plt_module_init();
-	if (ret) {
-		pr_info("[MCUPM] plt module init fail, ret %d\n", ret);
-		return ret;
-	}
-
-	ret = mcupm_timesync_init();
-	if (ret) {
-		pr_info("MCUPM timesync init fail\n");
-		return ret;
-	}
-
-	mcupm_task = kthread_run(mcupm_thread, NULL, "mcupm_task");
-
 	return 0;
 }
-static int mcupm_device_remove(struct platform_device *pdev)
+
+#if MCUPM_ALIVE_THREAD
+static struct task_struct *mcupm_task;
+int mcupm_thread(void *data)
 {
-	//Todo implement remove ipi interface and memory
-	mcupm_plt_module_exit();
+	struct  mcupm_ipi_data_s ipi_data;
+	int ret;
+
+	ipi_data.cmd = 0xDEAD;
+	mcupm_plt_ackdata = 0;
+
+	/* an endless loop in which we are doing our work */
+	do {
+		ret = mtk_ipi_send_compl(&mcupm_ipidev, CH_S_PLATFORM,
+			IPI_SEND_WAIT, &ipi_data,
+			sizeof(struct mcupm_ipi_data_s) / MCUPM_MBOX_SLOT_SIZE,
+			2000);
+		if (ret) {
+			pr_info("MCUPM: alive ret=%d, ackdata=%d\n",
+				ret, mcupm_plt_ackdata);
+		} else {
+			pr_info("MCUPM is %s\n",
+				mcupm_plt_ackdata ? "Alive" : "Dead");
+		}
+		msleep(20000);
+	} while (!kthread_should_stop());
 	return 0;
 }
-
-#if IS_ENABLED(CONFIG_PM)
+#endif
+#ifdef CONFIG_PM
 static int mt6779_mcupm_suspend(struct device *dev)
 {
 	mcupm_timesync_suspend();
@@ -602,16 +818,16 @@ static const struct platform_device_id mcupm_id_table[] = {
 };
 
 static struct platform_driver mtk_mcupm_driver = {
+	.remove = NULL,
 	.shutdown = NULL,
 	.suspend = NULL,
 	.resume = NULL,
 	.probe = mcupm_device_probe,
-	.remove = mcupm_device_remove,
 	.driver = {
 		.name = "mcupm",
 		.owner = THIS_MODULE,
 		.of_match_table = mcupm_of_match,
-#if IS_ENABLED(CONFIG_PM)
+#ifdef CONFIG_PM
 		.pm = &mt6779_mcupm_dev_pm_ops,
 #endif
 
@@ -619,28 +835,110 @@ static struct platform_driver mtk_mcupm_driver = {
 	.id_table = mcupm_id_table,
 };
 
-/*
- * driver initialization entry point
- */
+static int __init mcupm_init(void)
+{
+	if (atomic_inc_return(&mcupm_inited) != 1)
+		return 0;
+
+	/* static initialise */
+	mcupm_ready = 0;
+
+	if (platform_driver_register(&mtk_mcupm_driver)) {
+		pr_debug("[MCUPM] Device Init Failed\n");
+		goto error;
+	}
+
+#ifdef CONFIG_OF_RESERVED_MEM
+	if (mcupm_reserve_memory_init()) {
+		pr_debug("[MCUPM] Reserved Memory Failed\n");
+		goto error;
+	}
+#endif
+
+#if MCUPM_ALIVE_THREAD
+	mcupm_task = kthread_run(mcupm_thread, NULL,
+					"mcupm_task");
+#endif
+
+	pr_debug("[MCUPM] Helper Init\n");
+
+	mcupm_ready = 1;
+
+	atomic_set(&mcupm_inited, 1);
+	return 0;
+
+error:
+	atomic_set(&mcupm_inited, 1);
+	return -1;
+}
+
+#ifdef CONFIG_MEDIATEK_EMI
+static void mcupm_set_emi_mpu(phys_addr_t base, phys_addr_t size)
+{
+	mcupm_start = base;
+	mcupm_end = base + size - 1;
+}
+
+static void mcupm_lock_emi_mpu(void)
+{
+	if (mcupm_mem_size > 0)
+		mcupm_set_emi_mpu(mcupm_mem_base_phys, mcupm_mem_size);
+}
+#endif
+
 static int __init mcupm_module_init(void)
 {
-	int ret = 0;
+	if (mcupm_sysfs_init()) {
+		pr_debug("[MCUPM] Sysfs Init Failed\n");
+		return -1;
+	}
 
-	pr_info("[MCUPM] mcupm module init.\n");
+#if MCUPM_PLT_SERV_SUPPORT
+	if (mcupm_plt_init()) {
+		pr_debug("[MCUPM] Platform Init Failed\n");
+		return -1;
+	}
+	pr_info("MCUPM platform service is ready\n");
+#endif
 
-	ret = platform_driver_register(&mtk_mcupm_driver);
+#ifdef CONFIG_MEDIATEK_EMI
+	mcupm_lock_emi_mpu();
+#endif
+	if (mcupm_timesync_init()) {
+		pr_info("MCUPM timesync init fail\n");
+		return -1;
+	}
 
-	return ret;
+	return 0;
 }
 
-static void __exit mcupm_module_exit(void)
+
+#ifdef CONFIG_MEDIATEK_EMI
+static int __init post_mcupm_set_emi_mpu(void)
 {
-    //Todo release resource
-	pr_info("[MCUPM] mcupm module exit.\n");
+	struct emimpu_region_t rg_info;
+
+	mtk_emimpu_init_region(&rg_info, MUCPM_MPU_REGION_ID);
+
+	mtk_emimpu_set_addr(&rg_info, mcupm_start, mcupm_end);
+
+	mtk_emimpu_set_apc(&rg_info, 0, MTK_EMIMPU_NO_PROTECTION);
+
+	mtk_emimpu_set_apc(&rg_info, MUCPM_MPU_DOMAIN_ID,
+						MTK_EMIMPU_NO_PROTECTION);
+
+	mtk_emimpu_set_protection(&rg_info);
+
+	mtk_emimpu_free_region(&rg_info);
+
+	return 0;
 }
+#endif
 
-MODULE_DESCRIPTION("MEDIATEK Module MCUPM driver");
-MODULE_LICENSE("GPL v2");
-
+arch_initcall(mcupm_init);
 module_init(mcupm_module_init);
-module_exit(mcupm_module_exit);
+
+#ifdef CONFIG_MEDIATEK_EMI
+late_initcall(post_mcupm_set_emi_mpu);
+#endif
+

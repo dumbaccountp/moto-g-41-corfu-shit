@@ -17,7 +17,7 @@
 /*
  * This is IPC driver
  *
- * For communication between client OS and hypervisor-TEE OS, saddIPC driver
+ * For communication between client OS and hypervisor-TEE OS, IPC driver
  * is provided, including:
  * 1. standard call interface for communication and entering hypervisor-TEE
  * 2. virtio for message/command passing by shared memory
@@ -41,14 +41,13 @@
 #include <gz-trusty/smcall.h>
 #include <gz-trusty/sm_err.h>
 #include <gz-trusty/trusty.h>
-#include <linux/arm-smccc.h>
 #include <uapi/linux/sched/types.h>
 #include <linux/string.h>
 
 #define enable_code 0 /*replace #if 0*/
 
 #if enable_code /*#if 0*/
-#if IS_ENABLED(CONFIG_MTK_AEE_IPANIC)
+#if IS_ENABLED(CONFIG_MTK_RAM_CONSOLE)
 #include "trusty-ramconsole.h"
 #endif
 #endif
@@ -87,11 +86,20 @@ static inline ulong smc_asm(ulong r0, ulong r1, ulong r2, ulong r3)
 	register ulong _r1 asm(SMC_ARG1) = r1;
 	register ulong _r2 asm(SMC_ARG2) = r2;
 	register ulong _r3 asm(SMC_ARG3) = r3;
-	struct arm_smccc_res res;
 
-	arm_smccc_smc(_r0, _r1, _r2, _r3, _r0, _r1, _r2, _r3, &res);
-
-	return res.a0;
+	asm volatile (__asmeq("%0", SMC_ARG0)
+		      __asmeq("%1", SMC_ARG1)
+		      __asmeq("%2", SMC_ARG2)
+		      __asmeq("%3", SMC_ARG3)
+		      __asmeq("%4", SMC_ARG0)
+		      __asmeq("%5", SMC_ARG1)
+		      __asmeq("%6", SMC_ARG2)
+		      __asmeq("%7", SMC_ARG3)
+		      SMC_ARCH_EXTENSION "smc	#0" /* switch to secure world */
+		      : "=r"(_r0), "=r"(_r1), "=r"(_r2), "=r"(_r3)
+		      : "r"(_r0), "r"(_r1), "r"(_r2), "r"(_r3)
+		      : SMC_REGISTERS_TRASHED);
+	return _r0;
 }
 
 s32 trusty_fast_call32(struct device *dev, u32 smcnr, u32 a0, u32 a1, u32 a2)
@@ -441,7 +449,7 @@ static ssize_t trusty_version_store(struct device *dev,
 DEVICE_ATTR_RW(trusty_version);
 
 #if enable_code /*#if 0*/
-#if IS_ENABLED(CONFIG_MTK_AEE_IPANIC)
+#if IS_ENABLED(CONFIG_MTK_RAM_CONSOLE)
 static void init_gz_ramconsole(struct device *dev)
 {
 	u32 low, high;
@@ -991,7 +999,7 @@ static int trusty_probe(struct platform_device *pdev)
 #endif
 
 #if enable_code /*#if 0*/
-#if IS_ENABLED(CONFIG_MTK_AEE_IPANIC)
+#if IS_ENABLED(CONFIG_MTK_RAM_CONSOLE)
 	init_gz_ramconsole(&pdev->dev);
 #endif
 #endif

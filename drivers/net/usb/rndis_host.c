@@ -1,7 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Host Side support for RNDIS Networking Links
  * Copyright (C) 2005 by David Brownell
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 #include <linux/module.h>
 #include <linux/netdevice.h>
@@ -255,8 +267,7 @@ static int rndis_query(struct usbnet *dev, struct usb_interface *intf,
 
 	off = le32_to_cpu(u.get_c->offset);
 	len = le32_to_cpu(u.get_c->len);
-	if (unlikely((off > CONTROL_BUFFER_SIZE - 8) ||
-		     (len > CONTROL_BUFFER_SIZE - 8 - off)))
+	if (unlikely((8 + off + len) > CONTROL_BUFFER_SIZE))
 		goto response_error;
 
 	if (*reply_len != -1 && len != *reply_len)
@@ -609,11 +620,6 @@ static const struct usb_device_id	products [] = {
 	USB_DEVICE_AND_INTERFACE_INFO(0x1630, 0x0042,
 				      USB_CLASS_COMM, 2 /* ACM */, 0x0ff),
 	.driver_info = (unsigned long) &rndis_poll_status_info,
-}, {
-	/* Hytera Communications DMR radios' "Radio to PC Network" */
-	USB_VENDOR_AND_INTERFACE_INFO(0x238b,
-				      USB_CLASS_COMM, 2 /* ACM */, 0x0ff),
-	.driver_info = (unsigned long)&rndis_info,
 }, {
 	/* RNDIS is MSFT's un-official variant of CDC ACM */
 	USB_INTERFACE_INFO(USB_CLASS_COMM, 2 /* ACM */, 0x0ff),

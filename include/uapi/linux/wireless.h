@@ -74,6 +74,7 @@
 #include <linux/socket.h>		/* for "struct sockaddr" et al	*/
 #include <linux/if.h>			/* for IFNAMSIZ and co... */
 
+#include <stddef.h>                     /* for offsetof */
 #ifdef __KERNEL__
 #	include <linux/stddef.h>	/* for offsetof */
 #else
@@ -914,7 +915,7 @@ union iwreq_data {
 	struct iw_param	sens;		/* signal level threshold */
 	struct iw_param	bitrate;	/* default bit rate */
 	struct iw_param	txpower;	/* default transmit power */
-	struct iw_param	rts;		/* RTS threshold */
+	struct iw_param	rts;		/* RTS threshold threshold */
 	struct iw_param	frag;		/* Fragmentation threshold */
 	__u32		mode;		/* Operation mode */
 	struct iw_param	retry;		/* Retry limits & lifetime */

@@ -10,11 +10,6 @@
  */
 #define BSS_FIRST_SECTIONS *(.bss..swapper_pg_dir)
 
-/* Cavium Octeon should not have a separate PT_NOTE Program Header. */
-#ifndef CONFIG_CAVIUM_OCTEON_SOC
-#define EMITS_PT_NOTE
-#endif
-
 #include <asm-generic/vmlinux.lds.h>
 
 #undef mips
@@ -77,12 +72,20 @@ SECTIONS
 	/* Exception table for data bus errors */
 	__dbe_table : {
 		__start___dbe_table = .;
-		KEEP(*(__dbe_table))
+		*(__dbe_table)
 		__stop___dbe_table = .;
 	}
 
+#ifdef CONFIG_CAVIUM_OCTEON_SOC
+#define NOTES_HEADER
+#else /* CONFIG_CAVIUM_OCTEON_SOC */
+#define NOTES_HEADER :note
+#endif /* CONFIG_CAVIUM_OCTEON_SOC */
+	NOTES :text NOTES_HEADER
+	.dummy : { *(.dummy) } :text
+
 	_sdata = .;			/* Start of data section */
-	RO_DATA(4096)
+	RODATA
 
 	/* writeable */
 	.data : {	/* Data */
@@ -121,7 +124,7 @@ SECTIONS
 	. = ALIGN(4);
 	.mips.machines.init : AT(ADDR(.mips.machines.init) - LOAD_OFFSET) {
 		__mips_machines_start = .;
-		KEEP(*(.mips.machines.init))
+		*(.mips.machines.init)
 		__mips_machines_end = .;
 	}
 
@@ -203,7 +206,6 @@ SECTIONS
 
 	STABS_DEBUG
 	DWARF_DEBUG
-	ELF_DETAILS
 
 	/* These must appear regardless of  .  */
 	.gptab.sdata : {
@@ -224,5 +226,6 @@ SECTIONS
 		*(.options)
 		*(.pdr)
 		*(.reginfo)
+		*(.eh_frame)
 	}
 }

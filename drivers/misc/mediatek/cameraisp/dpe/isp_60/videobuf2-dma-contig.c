@@ -3,7 +3,6 @@
  * Copyright (c) 2015 MediaTek Inc.
  */
 
-
 #include <linux/dma-buf.h>
 #include <linux/module.h>
 #include <linux/refcount.h>
@@ -37,9 +36,6 @@ struct vb2_dc_buf {
 	struct dma_buf_attachment	*db_attach;
 };
 
-//#define vb2_dc_mmap_en
-//#vb2_dc_put_userptr_en
-//#ifdef vb2_dc_get_userptr_en
 /*********************************************/
 /*        scatterlist table functions        */
 /*********************************************/
@@ -120,7 +116,6 @@ static void vb2_dc_finish(void *buf_priv)
 void vb2_dc_put(void *buf_priv)
 {
 	struct vb2_dc_buf *buf = buf_priv;
-
 	pr_debug("kernel_dpebuf refcount before = %d\n", buf->refcount);
 	if (!refcount_dec_and_test(&buf->refcount))
 		return;
@@ -175,8 +170,7 @@ void *vb2_dc_alloc(struct device *dev, unsigned long attrs,
 	return buf;
 }
 
-
-#ifdef vb2_dc_mmap_en
+#if 0
 static int vb2_dc_mmap(void *buf_priv, struct vm_area_struct *vma)
 {
 	struct vb2_dc_buf *buf = buf_priv;
@@ -192,6 +186,7 @@ static int vb2_dc_mmap(void *buf_priv, struct vm_area_struct *vma)
 	 * map whole buffer
 	 */
 	vma->vm_pgoff = 0;
+
 	ret = dma_mmap_attrs(buf->dev, vma, buf->cookie,
 		buf->dma_addr, buf->size, buf->attrs);
 
@@ -213,7 +208,6 @@ static int vb2_dc_mmap(void *buf_priv, struct vm_area_struct *vma)
 	return 0;
 }
 #endif
-
 
 /*********************************************/
 /*         DMABUF ops for exporters          */
@@ -239,9 +233,9 @@ static int vb2_dc_dmabuf_ops_attach(struct dma_buf *dbuf,
 		return -ENOMEM;
 
 	sgt = &attach->sgt;
-	/* Copy the buf->base_sgt scatter list to the attachment, as we can't
-	 * map the same scatter list to multiple attachments at the same time.
-	 */
+	// Copy the buf->base_sgt scatter list to the attachment, as we can't
+	// map the same scatter list to multiple attachments at the same time.
+
 	ret = sg_alloc_table(sgt, buf->sgt_base->orig_nents, GFP_KERNEL);
 	if (ret) {
 		kfree(attach);
@@ -334,6 +328,13 @@ static void vb2_dc_dmabuf_ops_release(struct dma_buf *dbuf)
 	vb2_dc_put(dbuf->priv);
 }
 
+static void *vb2_dc_dmabuf_ops_kmap(struct dma_buf *dbuf, unsigned long pgnum)
+{
+	struct vb2_dc_buf *buf = dbuf->priv;
+
+	return buf->vaddr ? buf->vaddr + pgnum * PAGE_SIZE : NULL;
+}
+
 static void *vb2_dc_dmabuf_ops_vmap(struct dma_buf *dbuf)
 {
 	struct vb2_dc_buf *buf = dbuf->priv;
@@ -353,6 +354,7 @@ static const struct dma_buf_ops vb2_dc_dmabuf_ops = {
 	.detach = vb2_dc_dmabuf_ops_detach,
 	.map_dma_buf = vb2_dc_dmabuf_ops_map,
 	.unmap_dma_buf = vb2_dc_dmabuf_ops_unmap,
+	.map = vb2_dc_dmabuf_ops_kmap,
 	//!.map_atomic = vb2_dc_dmabuf_ops_kmap,
 	.vmap = vb2_dc_dmabuf_ops_vmap,
 	.mmap = vb2_dc_dmabuf_ops_mmap,
@@ -411,7 +413,7 @@ struct dma_buf *vb2_dc_get_dmabuf(void *buf_priv, unsigned long flags)
 /*********************************************/
 /*       callbacks for USERPTR buffers       */
 /*********************************************/
-#ifdef vb2_dc_put_userptr_en
+#if 0
 static void vb2_dc_put_userptr(void *buf_priv)
 {
 	struct vb2_dc_buf *buf = buf_priv;
@@ -420,11 +422,14 @@ static void vb2_dc_put_userptr(void *buf_priv)
 	struct page **pages;
 
 	if (sgt) {
-
+		/*
+		 * No need to sync to CPU, it's already synced to the CPU
+		 * since the finish() memop will have been called before this.
+		 */
 		dma_unmap_sg_attrs(buf->dev, sgt->sgl, sgt->orig_nents,
 				   buf->dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
 		pages = frame_vector_pages(buf->vec);
-
+		/* sgt should exist only if vector contains pages... */
 		//BUG_ON(IS_ERR(pages));
 		WARN_ON(IS_ERR(pages));
 		for (i = 0; i < frame_vector_count(buf->vec); i++)
@@ -470,7 +475,7 @@ static inline dma_addr_t vb2_dc_pfn_to_dma(struct device *dev,
 	return (dma_addr_t)(pfn) << PAGE_SHIFT;
 }
 #endif
-#ifdef vb2_dc_get_userptr_en
+#if 0
 static void *vb2_dc_get_userptr(struct device *dev, unsigned long vaddr,
 	unsigned long size, enum dma_data_direction dma_dir)
 {
@@ -483,7 +488,7 @@ static void *vb2_dc_get_userptr(struct device *dev, unsigned long vaddr,
 	unsigned long contig_size;
 	unsigned long dma_align = dma_get_cache_alignment();
 
-
+	/* Only cache aligned DMA transfers are reliable */
 	if (!IS_ALIGNED(vaddr | size, dma_align)) {
 		pr_debug("user data must be aligned to %lu bytes\n", dma_align);
 		return ERR_PTR(-EINVAL);
@@ -517,7 +522,10 @@ static void *vb2_dc_get_userptr(struct device *dev, unsigned long vaddr,
 	if (ret < 0) {
 		unsigned long *nums = frame_vector_pfns(vec);
 
-
+		/*
+		 * Failed to convert to pages... Check the memory is physically
+		 * contiguous and use direct mapping
+		 */
 		for (i = 1; i < n_pages; i++)
 			if (nums[i-1] + 1 != nums[i])
 				goto fail_pfnvec;
@@ -539,7 +547,10 @@ static void *vb2_dc_get_userptr(struct device *dev, unsigned long vaddr,
 		goto fail_sgt;
 	}
 
-
+	/*
+	 * No need to sync to the device, this will happen later when the
+	 * prepare() memop is called.
+	 */
 	sgt->nents = dma_map_sg_attrs(buf->dev, sgt->sgl, sgt->orig_nents,
 				      buf->dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
 	if (sgt->nents <= 0) {
@@ -707,7 +718,7 @@ void *vb2_dc_attach_dmabuf(struct device *dev, struct dma_buf *dbuf,
 /*       DMA CONTIG exported functions       */
 /*********************************************/
 
-const struct vb2_mem_ops vb2_dpe_dma_contig_memops_isp6 = {
+const struct vb2_mem_ops vb2_dpe_dma_contig_memops = {
 	.alloc		= vb2_dc_alloc,
 	.put		= vb2_dc_put,
 	.get_dmabuf	= vb2_dc_get_dmabuf,
@@ -724,7 +735,7 @@ const struct vb2_mem_ops vb2_dpe_dma_contig_memops_isp6 = {
 	.detach_dmabuf	= vb2_dc_detach_dmabuf,
 	.num_users	= vb2_dc_num_users,
 };
-EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_memops_isp6);
+EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_memops);
 
 /**
  * vb2_dpe_dma_contig_set_max_seg_size() - configure DMA max segment size
@@ -750,7 +761,7 @@ EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_memops_isp6);
  * (either USERPTR or DMABUF). This should be done before initializing
  * videobuf2 queue.
  */
-int vb2_dpe_dma_contig_set_max_seg_size_isp6(struct device *dev, unsigned int size)
+int vb2_dpe_dma_contig_set_max_seg_size(struct device *dev, unsigned int size)
 {
 	if (!dev->dma_parms) {
 		dev->dma_parms = kzalloc(sizeof(*dev->dma_parms), GFP_KERNEL);
@@ -762,7 +773,7 @@ int vb2_dpe_dma_contig_set_max_seg_size_isp6(struct device *dev, unsigned int si
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_set_max_seg_size_isp6);
+EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_set_max_seg_size);
 
 /*
  * vb2_dpe_dma_contig_clear_max_seg_size() -
@@ -773,12 +784,12 @@ EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_set_max_seg_size_isp6);
  * (see vb2_dpe_dma_contig_set_max_seg_size() function).
  * It should be called from device drivers on driver remove.
  */
-void vb2_dpe_dma_contig_clear_max_seg_size_isp6(struct device *dev)
+void vb2_dpe_dma_contig_clear_max_seg_size(struct device *dev)
 {
 	kfree(dev->dma_parms);
 	dev->dma_parms = NULL;
 }
-EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_clear_max_seg_size_isp6);
+EXPORT_SYMBOL_GPL(vb2_dpe_dma_contig_clear_max_seg_size);
 
 MODULE_DESCRIPTION("DMA-contig memory handling routines for videobuf2");
 MODULE_AUTHOR("Pawel Osciak <pawel@osciak.com>");

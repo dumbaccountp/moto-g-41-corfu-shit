@@ -63,6 +63,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/inst.h>
 
 #define VMOVDQ		vmovdqu
 
@@ -525,7 +526,7 @@ ddq_add_8:
 	/* return updated IV */
 	vpshufb	xbyteswap, xcounter, xcounter
 	vmovdqu	xcounter, (p_iv)
-	RET
+	ret
 .endm
 
 /*
@@ -535,11 +536,11 @@ ddq_add_8:
  * aes_ctr_enc_128_avx_by8(void *in, void *iv, void *keys, void *out,
  *			unsigned int num_bytes)
  */
-SYM_FUNC_START(aes_ctr_enc_128_avx_by8)
+ENTRY(aes_ctr_enc_128_avx_by8)
 	/* call the aes main loop */
 	do_aes_ctrmain KEY_128
 
-SYM_FUNC_END(aes_ctr_enc_128_avx_by8)
+ENDPROC(aes_ctr_enc_128_avx_by8)
 
 /*
  * routine to do AES192 CTR enc/decrypt "by8"
@@ -548,11 +549,11 @@ SYM_FUNC_END(aes_ctr_enc_128_avx_by8)
  * aes_ctr_enc_192_avx_by8(void *in, void *iv, void *keys, void *out,
  *			unsigned int num_bytes)
  */
-SYM_FUNC_START(aes_ctr_enc_192_avx_by8)
+ENTRY(aes_ctr_enc_192_avx_by8)
 	/* call the aes main loop */
 	do_aes_ctrmain KEY_192
 
-SYM_FUNC_END(aes_ctr_enc_192_avx_by8)
+ENDPROC(aes_ctr_enc_192_avx_by8)
 
 /*
  * routine to do AES256 CTR enc/decrypt "by8"
@@ -561,8 +562,8 @@ SYM_FUNC_END(aes_ctr_enc_192_avx_by8)
  * aes_ctr_enc_256_avx_by8(void *in, void *iv, void *keys, void *out,
  *			unsigned int num_bytes)
  */
-SYM_FUNC_START(aes_ctr_enc_256_avx_by8)
+ENTRY(aes_ctr_enc_256_avx_by8)
 	/* call the aes main loop */
 	do_aes_ctrmain KEY_256
 
-SYM_FUNC_END(aes_ctr_enc_256_avx_by8)
+ENDPROC(aes_ctr_enc_256_avx_by8)

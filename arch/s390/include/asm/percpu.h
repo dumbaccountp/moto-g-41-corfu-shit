@@ -16,7 +16,7 @@
  * per cpu area, use weak definitions to force the compiler to
  * generate external references.
  */
-#if defined(MODULE)
+#if defined(CONFIG_SMP) && defined(MODULE)
 #define ARCH_NEEDS_WEAK_PER_CPU
 #endif
 
@@ -31,7 +31,7 @@
 	pcp_op_T__ *ptr__;						\
 	preempt_disable_notrace();					\
 	ptr__ = raw_cpu_ptr(&(pcp));					\
-	prev__ = READ_ONCE(*ptr__);					\
+	prev__ = *ptr__;						\
 	do {								\
 		old__ = prev__;						\
 		new__ = old__ op (val);					\

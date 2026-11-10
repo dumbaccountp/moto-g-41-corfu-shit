@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2021 MediaTek Inc.
- */
+ * Copyright (c) 2019 MediaTek Inc.
+*/
 
 #ifndef PANEL_R66451_FHDP_DSI_CMD_120HZ_TIANMA
 #define PANEL_R66451_FHDP_DSI_CMD_120HZ_TIANMA
@@ -37,7 +37,7 @@
 #define MODE_1_FPS                  90
 #define MODE_1_VFP                  20
 #define MODE_1_HFP                  40
-#define MODE_1_DATA_RATE            600
+#define MODE_1_DATA_RATE            570
 /*Parameter setting for mode 1 End*/
 
 /*Parameter setting for mode 2 Start*/

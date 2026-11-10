@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
+/**
  * USB Type-C Multiplexer/DeMultiplexer Switch support
  *
  * Copyright (C) 2018 Intel Corporation
@@ -16,6 +16,11 @@
 #include <linux/usb/typec_mux.h>
 
 #include "bus.h"
+
+static int name_match(struct device *dev, const void *name)
+{
+	return !strcmp((const char *)name, dev_name(dev));
+}
 
 static bool dev_name_ends_with(struct device *dev, const char *suffix)
 {
@@ -34,44 +39,49 @@ static int switch_fwnode_match(struct device *dev, const void *fwnode)
 	return dev_fwnode(dev) == fwnode && dev_name_ends_with(dev, "-switch");
 }
 
-static void *typec_switch_match(struct fwnode_handle *fwnode, const char *id,
+static void *typec_switch_match(struct device_connection *con, int ep,
 				void *data)
 {
 	struct device *dev;
 
-	if (id && !fwnode_property_present(fwnode, id))
-		return NULL;
+	if (con->fwnode) {
+		if (con->id && !fwnode_property_present(con->fwnode, con->id))
+			return NULL;
 
-	dev = class_find_device(&typec_mux_class, NULL, fwnode,
-				switch_fwnode_match);
+		dev = class_find_device(&typec_mux_class, NULL, con->fwnode,
+					switch_fwnode_match);
+	} else {
+		dev = class_find_device(&typec_mux_class, NULL,
+					con->endpoint[ep], name_match);
+	}
 
 	return dev ? to_typec_switch(dev) : ERR_PTR(-EPROBE_DEFER);
 }
 
 /**
- * fwnode_typec_switch_get - Find USB Type-C orientation switch
- * @fwnode: The caller device node
+ * typec_switch_get - Find USB Type-C orientation switch
+ * @dev: The caller device
  *
  * Finds a switch linked with @dev. Returns a reference to the switch on
  * success, NULL if no matching connection was found, or
  * ERR_PTR(-EPROBE_DEFER) when a connection was found but the switch
  * has not been enumerated yet.
  */
-struct typec_switch *fwnode_typec_switch_get(struct fwnode_handle *fwnode)
+struct typec_switch *typec_switch_get(struct device *dev)
 {
 	struct typec_switch *sw;
 
-	sw = fwnode_connection_find_match(fwnode, "orientation-switch", NULL,
+	sw = device_connection_find_match(dev, "orientation-switch", NULL,
 					  typec_switch_match);
 	if (!IS_ERR_OR_NULL(sw))
 		WARN_ON(!try_module_get(sw->dev.parent->driver->owner));
 
 	return sw;
 }
-EXPORT_SYMBOL_GPL(fwnode_typec_switch_get);
+EXPORT_SYMBOL_GPL(typec_switch_get);
 
 /**
- * typec_switch_put - Release USB Type-C orientation switch
+ * typec_put_switch - Release USB Type-C orientation switch
  * @sw: USB Type-C orientation switch
  *
  * Decrement reference count for @sw.
@@ -127,11 +137,7 @@ typec_switch_register(struct device *parent,
 	sw->dev.class = &typec_mux_class;
 	sw->dev.type = &typec_switch_dev_type;
 	sw->dev.driver_data = desc->drvdata;
-	ret = dev_set_name(&sw->dev, "%s-switch", desc->name ? desc->name : dev_name(parent));
-	if (ret) {
-		put_device(&sw->dev);
-		return ERR_PTR(ret);
-	}
+	dev_set_name(&sw->dev, "%s-switch", dev_name(parent));
 
 	ret = device_add(&sw->dev);
 	if (ret) {
@@ -143,16 +149,6 @@ typec_switch_register(struct device *parent,
 	return sw;
 }
 EXPORT_SYMBOL_GPL(typec_switch_register);
-
-int typec_switch_set(struct typec_switch *sw,
-		     enum typec_orientation orientation)
-{
-	if (IS_ERR_OR_NULL(sw))
-		return 0;
-
-	return sw->set(sw, orientation);
-}
-EXPORT_SYMBOL_GPL(typec_switch_set);
 
 /**
  * typec_switch_unregister - Unregister USB Type-C orientation switch
@@ -186,35 +182,40 @@ static int mux_fwnode_match(struct device *dev, const void *fwnode)
 	return dev_fwnode(dev) == fwnode && dev_name_ends_with(dev, "-mux");
 }
 
-static void *typec_mux_match(struct fwnode_handle *fwnode, const char *id,
-			     void *data)
+static void *typec_mux_match(struct device_connection *con, int ep, void *data)
 {
 	const struct typec_altmode_desc *desc = data;
 	struct device *dev;
 	bool match;
 	int nval;
 	u16 *val;
-	int ret;
 	int i;
+
+	if (!con->fwnode) {
+		dev = class_find_device(&typec_mux_class, NULL,
+					con->endpoint[ep], name_match);
+
+		return dev ? to_typec_switch(dev) : ERR_PTR(-EPROBE_DEFER);
+	}
 
 	/*
 	 * Check has the identifier already been "consumed". If it
 	 * has, no need to do any extra connection identification.
 	 */
-	match = !id;
+	match = !con->id;
 	if (match)
 		goto find_mux;
 
 	/* Accessory Mode muxes */
 	if (!desc) {
-		match = fwnode_property_present(fwnode, "accessory");
+		match = fwnode_property_present(con->fwnode, "accessory");
 		if (match)
 			goto find_mux;
 		return NULL;
 	}
 
 	/* Alternate Mode muxes */
-	nval = fwnode_property_count_u16(fwnode, "svid");
+	nval = fwnode_property_count_u16(con->fwnode, "svid");
 	if (nval <= 0)
 		return NULL;
 
@@ -222,10 +223,10 @@ static void *typec_mux_match(struct fwnode_handle *fwnode, const char *id,
 	if (!val)
 		return ERR_PTR(-ENOMEM);
 
-	ret = fwnode_property_read_u16_array(fwnode, "svid", val, nval);
-	if (ret < 0) {
+	nval = fwnode_property_read_u16_array(con->fwnode, "svid", val, nval);
+	if (nval < 0) {
 		kfree(val);
-		return ERR_PTR(ret);
+		return ERR_PTR(nval);
 	}
 
 	for (i = 0; i < nval; i++) {
@@ -239,15 +240,15 @@ static void *typec_mux_match(struct fwnode_handle *fwnode, const char *id,
 	return NULL;
 
 find_mux:
-	dev = class_find_device(&typec_mux_class, NULL, fwnode,
+	dev = class_find_device(&typec_mux_class, NULL, con->fwnode,
 				mux_fwnode_match);
 
-	return dev ? to_typec_mux(dev) : ERR_PTR(-EPROBE_DEFER);
+	return dev ? to_typec_switch(dev) : ERR_PTR(-EPROBE_DEFER);
 }
 
 /**
- * fwnode_typec_mux_get - Find USB Type-C Multiplexer
- * @fwnode: The caller device node
+ * typec_mux_get - Find USB Type-C Multiplexer
+ * @dev: The caller device
  * @desc: Alt Mode description
  *
  * Finds a mux linked to the caller. This function is primarily meant for the
@@ -255,19 +256,19 @@ find_mux:
  * matching connection was found, or ERR_PTR(-EPROBE_DEFER) when a connection
  * was found but the mux has not been enumerated yet.
  */
-struct typec_mux *fwnode_typec_mux_get(struct fwnode_handle *fwnode,
-				       const struct typec_altmode_desc *desc)
+struct typec_mux *typec_mux_get(struct device *dev,
+				const struct typec_altmode_desc *desc)
 {
 	struct typec_mux *mux;
 
-	mux = fwnode_connection_find_match(fwnode, "mode-switch", (void *)desc,
+	mux = device_connection_find_match(dev, "mode-switch", (void *)desc,
 					   typec_mux_match);
 	if (!IS_ERR_OR_NULL(mux))
 		WARN_ON(!try_module_get(mux->dev.parent->driver->owner));
 
 	return mux;
 }
-EXPORT_SYMBOL_GPL(fwnode_typec_mux_get);
+EXPORT_SYMBOL_GPL(typec_mux_get);
 
 /**
  * typec_mux_put - Release handle to a Multiplexer
@@ -283,15 +284,6 @@ void typec_mux_put(struct typec_mux *mux)
 	}
 }
 EXPORT_SYMBOL_GPL(typec_mux_put);
-
-int typec_mux_set(struct typec_mux *mux, struct typec_mux_state *state)
-{
-	if (IS_ERR_OR_NULL(mux))
-		return 0;
-
-	return mux->set(mux, state);
-}
-EXPORT_SYMBOL_GPL(typec_mux_set);
 
 static void typec_mux_release(struct device *dev)
 {
@@ -334,11 +326,7 @@ typec_mux_register(struct device *parent, const struct typec_mux_desc *desc)
 	mux->dev.class = &typec_mux_class;
 	mux->dev.type = &typec_mux_dev_type;
 	mux->dev.driver_data = desc->drvdata;
-	ret = dev_set_name(&mux->dev, "%s-mux", desc->name ? desc->name : dev_name(parent));
-	if (ret) {
-		put_device(&mux->dev);
-		return ERR_PTR(ret);
-	}
+	dev_set_name(&mux->dev, "%s-mux", dev_name(parent));
 
 	ret = device_add(&mux->dev);
 	if (ret) {

@@ -14,4 +14,4 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-obj-$(CONFIG_MTK_LOAD_TRACKER) += load_track.o
+obj-y += load_track.o

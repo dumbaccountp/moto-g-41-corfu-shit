@@ -13,9 +13,17 @@
 #include "xfs_mount.h"
 #include "xfs_inode.h"
 #include "xfs_bmap.h"
-#include "xfs_trans.h"
-#include "xfs_rtalloc.h"
+#include "xfs_bmap_util.h"
+#include "xfs_bmap_btree.h"
+#include "xfs_alloc.h"
 #include "xfs_error.h"
+#include "xfs_trans.h"
+#include "xfs_trans_space.h"
+#include "xfs_trace.h"
+#include "xfs_buf.h"
+#include "xfs_icache.h"
+#include "xfs_rtalloc.h"
+
 
 /*
  * Realtime allocator bitmap functions shared with userspace.
@@ -66,11 +74,11 @@ xfs_rtbuf_get(
 
 	ip = issum ? mp->m_rsumip : mp->m_rbmip;
 
-	error = xfs_bmapi_read(ip, block, 1, &map, &nmap, 0);
+	error = xfs_bmapi_read(ip, block, 1, &map, &nmap, XFS_DATA_FORK);
 	if (error)
 		return error;
 
-	if (XFS_IS_CORRUPT(mp, nmap == 0 || !xfs_bmap_is_written_extent(&map)))
+	if (nmap == 0 || !xfs_bmap_is_real_extent(&map))
 		return -EFSCORRUPTED;
 
 	ASSERT(map.br_startblock != NULLFSBLOCK);
@@ -497,12 +505,6 @@ xfs_rtmodify_summary_int(
 		uint first = (uint)((char *)sp - (char *)bp->b_addr);
 
 		*sp += delta;
-		if (mp->m_rsum_cache) {
-			if (*sp == 0 && log == mp->m_rsum_cache[bbno])
-				mp->m_rsum_cache[bbno]++;
-			if (*sp != 0 && log < mp->m_rsum_cache[bbno])
-				mp->m_rsum_cache[bbno] = log;
-		}
 		xfs_trans_log_buf(tp, bp, first, first + sizeof(*sp) - 1);
 	}
 	if (sum)
