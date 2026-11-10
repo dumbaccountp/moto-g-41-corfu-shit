@@ -21,6 +21,10 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_KSU
+#include <linux/ksu_manual_hooks.h>
+#endif /* CONFIG_KSU */
+
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
  * @inode: Inode to use as the source
@@ -144,6 +148,16 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
 				    request_mask, query_flags);
 		fdput(f);
 	}
+
+#ifdef CONFIG_KSU
+	/*
+	 * KernelSU: hide the init.rc lines injected by the kernel by reporting
+	 * the virtual file size instead of the on-disk one.
+	 */
+	if (!error)
+		ksu_handle_vfs_fstat(fd, (loff_t *)&stat->size);
+#endif /* CONFIG_KSU */
+
 	return error;
 }
 EXPORT_SYMBOL(vfs_statx_fd);
@@ -169,6 +183,10 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 	struct path path;
 	int error = -EINVAL;
 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
+
+#ifdef CONFIG_KSU
+	ksu_handle_stat(&dfd, &filename, &flags);
+#endif /* CONFIG_KSU */
 
 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
 		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)

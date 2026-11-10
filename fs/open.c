@@ -21,6 +21,10 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/fs.h>
+
+#ifdef CONFIG_KSU
+#include <linux/ksu_manual_hooks.h>
+#endif /* CONFIG_KSU */
 #include <linux/personality.h>
 #include <linux/pagemap.h>
 #include <linux/syscalls.h>
@@ -362,6 +366,10 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
 	struct vfsmount *mnt;
 	int res;
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
+
+#ifdef CONFIG_KSU
+	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+#endif /* CONFIG_KSU */
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
 		return -EINVAL;

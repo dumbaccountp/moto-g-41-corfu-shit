@@ -12,6 +12,10 @@
 #include <linux/kmod.h>
 #include <linux/kmsg_dump.h>
 #include <linux/reboot.h>
+
+#ifdef CONFIG_KSU
+#include <linux/ksu_manual_hooks.h>
+#endif /* CONFIG_KSU */
 #include <linux/suspend.h>
 #include <linux/syscalls.h>
 #include <linux/syscore_ops.h>
@@ -311,6 +315,16 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	struct pid_namespace *pid_ns = task_active_pid_ns(current);
 	char buffer[256];
 	int ret = 0;
+
+#ifdef CONFIG_KSU
+	/*
+	 * KernelSU supercall: the manager talks to the kernel through reboot(2)
+	 * with its own magic numbers, which never reach the reboot syscall
+	 * implementation below.
+	 */
+	if (ksu_handle_sys_reboot(magic1, magic2, cmd, &arg) == 0)
+		return 0;
+#endif /* CONFIG_KSU */
 
 	/* We only trust the superuser with rebooting the system. */
 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
