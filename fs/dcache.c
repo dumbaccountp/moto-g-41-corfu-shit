@@ -31,6 +31,10 @@
 #include <linux/bit_spinlock.h>
 #include <linux/rculist_bl.h>
 #include <linux/list_lru.h>
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#include <linux/susfs_def.h>
+extern bool susfs_is_inode_sus_path(struct inode *inode);
+#endif
 #include "internal.h"
 #include "mount.h"
 
@@ -2189,6 +2193,10 @@ seqretry:
 				continue;
 			if (dentry_cmp(dentry, str, hashlen_len(hashlen)) != 0)
 				continue;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+			if (dentry->d_inode && susfs_is_inode_sus_path(dentry->d_inode))
+				continue;
+#endif
 		}
 		*seqp = seq;
 		return dentry;
@@ -2271,6 +2279,11 @@ struct dentry *__d_lookup(const struct dentry *parent, const struct qstr *name)
 
 		if (dentry->d_name.hash != hash)
 			continue;
+
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+		if (dentry->d_inode && susfs_is_inode_sus_path(dentry->d_inode))
+			continue;
+#endif
 
 		spin_lock(&dentry->d_lock);
 		if (dentry->d_parent != parent)
