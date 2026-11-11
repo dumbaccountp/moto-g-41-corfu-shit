@@ -31,27 +31,41 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install build dependencies
-        timeout-minutes: 20
+      # apt is unreliable on these runners right now (it has been hanging on
+      # the mirrors), so this step is strictly best-effort: it never fails the
+      # job. The runner image already ships bison/flex/dtc/openssl/elf, and the
+      # kernel proper is compiled with the AOSP clang prebuilt below, so the
+      # only genuinely optional piece is the aarch64 binutils used for a few host
+      # tools and the 32-bit vDSO.
+      - name: Install build dependencies (best effort)
+        timeout-minutes: 8
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          set -euo pipefail
+          set -u
           need=()
-          for p in bc bison build-essential ca-certificates cpio curl device-tree-compiler \
-                   file flex gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu git kmod \
-                   libelf-dev libncurses-dev libssl-dev lz4 openssl perl python3 rsync \
-                   unzip xz-utils zip zstd; do
+          for p in bc bison flex libssl-dev libelf-dev cpio kmod rsync \
+                   device-tree-compiler gcc-aarch64-linux-gnu \
+                   binutils-aarch64-linux-gnu lz4 zstd unzip xz-utils; do
             dpkg -s "$p" >/dev/null 2>&1 || need+=("$p")
           done
-          if [ ${#need[@]} -eq 0 ]; then
-            echo "All build dependencies already present."
-            exit 0
+          if [ ${#need[@]} -gt 0 ]; then
+            echo "Missing packages: ${need[*]}"
+            timeout 240 sudo apt-get update -o Acquire::Retries=1 \
+              -o Acquire::http::Timeout=15 -o Acquire::ForceIPv4=true || \
+              echo "::warning::apt-get update failed or timed out"
+            timeout 240 sudo apt-get install -y --no-install-recommends \
+              -o Acquire::Retries=1 -o Acquire::http::Timeout=15 \
+              -o Acquire::ForceIPv4=true "${need[@]}" || \
+              echo "::warning::apt-get install failed or timed out"
+          else
+            echo "All probed packages already present."
           fi
-          echo "Installing: ${need[*]}"
-          sudo apt-get update -o Acquire::Retries=5 -o Acquire::ForceIPv4=true
-          sudo apt-get install -y --no-install-recommends \
-            -o Acquire::Retries=5 -o Acquire::ForceIPv4=true "${need[@]}"
+          echo "--- availability after install attempt ---"
+          for b in bison flex dtc bc cpio openssl aarch64-linux-gnu-gcc aarch64-linux-gnu-objcopy arm-linux-gnueabi-gcc; do
+            printf '%-28s %s\n' "$b" "$(command -v $b || echo MISSING)"
+          done
+          exit 0
 
       - name: Fetch AOSP Clang r383902 (stock corfu toolchain)
         run: |
