@@ -1,0 +1,42 @@
+name: toolchain probe
+
+# Diagnostic helper: reports which cross toolchains the runner image already
+# has and whether the usual download hosts are reachable, without checking out
+# this (very large) repository. Run manually from the Actions tab.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: OS
+        run: |
+          . /etc/os-release; echo "$PRETTY_NAME"; uname -a; nproc; df -h / | tail -1
+
+      - name: Cross compilers present in the image
+        run: |
+          echo "--- aarch64 binaries on PATH ---"
+          compgen -c | grep -E '^aarch64' | sort -u || true
+          echo "--- dpkg cross/llvm packages ---"
+          dpkg -l | awk '/aarch64|llvm|clang|lld|bison|flex|libelf|libssl|dtc|device-tree/{print $2, $3}' || true
+
+      - name: Build tools
+        run: |
+          for b in gcc clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-strip lld bison flex dtc bc cpio rsync make python3 openssl; do
+            printf '%-14s %s\n' "$b" "$(command -v $b || echo MISSING)"
+          done
+          clang --version 2>/dev/null | head -2 || true
+
+      - name: Network reachability
+        run: |
+          for u in http://archive.ubuntu.com/ubuntu/ https://esm.ubuntu.com/ \
+                   https://github.com/ https://objects.githubusercontent.com/ \
+                   https://raw.githubusercontent.com/ https://dl.google.com/ ; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$u" || echo ERR)
+            printf '%-45s %s\n' "$u" "$code"
+          done
+
+      - name: apt dry run
+        run: |
+          timeout 120 sudo apt-get update -o Acquire::Retries=1 2>&1 | tail -20 || echo "apt-get update failed/timed out"
