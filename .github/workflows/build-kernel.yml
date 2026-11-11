@@ -38,7 +38,8 @@ jobs:
       # only genuinely optional piece is the aarch64 binutils used for a few host
       # tools and the 32-bit vDSO.
       - name: Install build dependencies (best effort)
-        timeout-minutes: 8
+        continue-on-error: true
+        timeout-minutes: 10
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -51,10 +52,10 @@ jobs:
           done
           if [ ${#need[@]} -gt 0 ]; then
             echo "Missing packages: ${need[*]}"
-            timeout 240 sudo apt-get update -o Acquire::Retries=1 \
+            timeout 150 sudo apt-get update -o Acquire::Retries=1 \
               -o Acquire::http::Timeout=15 -o Acquire::ForceIPv4=true || \
               echo "::warning::apt-get update failed or timed out"
-            timeout 240 sudo apt-get install -y --no-install-recommends \
+            timeout 150 sudo apt-get install -y --no-install-recommends \
               -o Acquire::Retries=1 -o Acquire::http::Timeout=15 \
               -o Acquire::ForceIPv4=true "${need[@]}" || \
               echo "::warning::apt-get install failed or timed out"
