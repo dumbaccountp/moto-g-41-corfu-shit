@@ -188,7 +188,20 @@ jobs:
               || { echo "::error title=MissingSymbol::${sym} missing from vmlinux"; exit 1; }
             echo "  found ${sym}"
           done
-          echo "  adbroot symbols (expected absent): $(grep -c ksu_adb_root out/vmlinux.syms || true)"
+          adb=$(grep -c ' ksu_adb_root' out/vmlinux.syms || true)
+          echo "  adbroot symbols present: ${adb} (0 expected)"
+
+          {
+            echo "## Kernel build summary"
+            echo "| item | value |"
+            echo "|---|---|"
+            echo "| kernel release | $(cat out/include/config/kernel.release) |"
+            echo "| Image.gz | $(stat -c%s out/arch/arm64/boot/Image.gz) bytes |"
+            echo "| SUSFS version | $(grep -m1 SUSFS_VERSION include/linux/susfs.h) |"
+            echo "| SukiSU version | $(grep -m1 'KSU_VERSION_FULL' drivers/kernelsu/Makefile || echo v4.3.0-r2) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          { echo; echo '### Enabled KSU / SUSFS options'; echo '```'
+            grep -E '^CONFIG_(KSU|KALLSYMS_ALL|KPM)' out/.config; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Collect artifacts
         run: |

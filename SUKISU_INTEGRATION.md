@@ -59,6 +59,15 @@ signatures):
   3. extension/cpu_spoof.c — `struct clocksource` only grew `vdso_clock_mode`
      in 5.2 and `vdso_default` in 5.7; both probes are skipped below 5.7. The
      vDSO datapage write that 4.19 actually needs is kept.
+  4. sulog/event.c — called `strncpy_from_user_nofault()` directly, which only
+     exists from 5.8. It now uses the existing
+     `ksu_strncpy_from_user_nofault()` compat wrapper (which falls back to
+     `strncpy_from_user()` + `pagefault_disable()`), like every other call
+     site. Found by the CI build as `-Wimplicit-function-declaration`.
+  5. feature/sucompat.c — `ksu_handle_devpts()` was defined *inside* the
+     `CONFIG_COMPAT` branch, while `fs/devpts/inode.c#devpts_get_priv()` calls
+     it unconditionally under `CONFIG_KSU`, so non-COMPAT builds failed to
+     link. The definition (a stub) is now unconditional.
 
 Everything else in the tree already had 4.19 branches (SELinux accessors,
 `task_work_add`, proc_ops, path_umount fallback, etc.).
@@ -176,10 +185,15 @@ Verification performed here
     entire SukiSU kernel tree — compiles clean against this 4.19 tree with the
     compat flags the Makefile auto-detects.
 
-  Not verified here: a full vmlinux link and on-device boot. This sandbox has
-  no aarch64 gcc/clang toolchain and no bison, so only per-file compilation was
-  possible (zig's clang cross target was used). The real build runs in GitHub
-  Actions — see below.
+  * **Full build verified in GitHub Actions** — run
+    [#43082356704](https://github.com/dumbaccountp/moto-g-41-corfu-shit/actions/runs/43082356704)
+    on `15efbfc50` is green in 12m41s: `make defoldconfig`, the config gate,
+    `Image.gz` + `dtbs`, the vmlinux symbol check and the artifact upload all
+    pass. The `corfu-Image` artifact is ~149 MB and contains `Image.gz`,
+    `vmlinux`, `System.map`, `kernel.config` and the `mt6768*.dtb` files.
+
+  Not verified: on-device boot (no device here) and the AOSP boot-image
+  packaging step.
 
 Building with GitHub Actions
 ----------------------------
@@ -210,11 +224,20 @@ Building with GitHub Actions
     4. upload `Image`, `vmlinux`, `System.map` and the resolved `kernel.config`
        as the `corfu-Image` artifact, plus `build.log`.
 
-  DTBs are *not* built by this workflow: this tree generates its device trees
-  through AOSP's out-of-tree `device/mediatek/build/core/build_dtbimage.mk`
-  (`PLATFORM_DTB_NAME` / `PROJECT_DTB_NAMES`), which is not part of the kernel
-  repo. Use the AOSP build for a flashable boot image; this workflow's job is
-  to prove — and hand you — a kernel `Image` with KSU/KPM/SUSFS compiled in.
+  The workflow builds `Image.gz dtbs`. Assembling a flashable boot image still
+  needs AOSP's out-of-tree packaging
+  (`device/mediatek/build/core/build_dtbimage.mk`, `PLATFORM_DTB_NAME` /
+  `PROJECT_DTB_NAMES`, `mkbootimg`), which is not part of this repo.
+
+  Toolchain: AOSP clang r383902 (the stock corfu compiler), fetched as a
+  prebuilt from the crdroidandroid mirror — the same recipe this repo's
+  upstream `build.yml` uses for this board. `apt-get` is *not* required: the
+  dependency step is best-effort (`continue-on-error`) because apt has been
+  hanging on these runners; the runner image already provides the host tools.
+
+  Failures are reported through check-run annotations, the job summary and a
+  commit comment containing `build.log`, so a red build is diagnosable without
+  downloading the Actions log/artifact blobs.
 
 Using it
 --------
