@@ -42,18 +42,41 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      # The runner image already ships most of the kernel build deps; the
+      # aarch64 cross gcc is the one thing it reliably lacks. Install only
+      # what is missing, with retries and a hard timeout so a flaky mirror
+      # cannot stall the job for half an hour.
       - name: Install host build dependencies
+        timeout-minutes: 15
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
         run: |
-          sudo apt-get update
+          set -euo pipefail
+          need=()
+          if ! command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+            need+=(gcc-aarch64-linux-gnu)
+          fi
+          for p in bc bison flex libssl-dev libelf-dev cpio kmod rsync device-tree-compiler; do
+            dpkg -s "$p" >/dev/null 2>&1 || need+=("$p")
+          done
+          if [ ${#need[@]} -eq 0 ]; then
+            echo "All build dependencies already present."
+            exit 0
+          fi
+          echo "Installing: ${need[*]}"
+          sudo apt-get update -o Acquire::Retries=5 -o Acquire::ForceIPv4=true
           sudo apt-get install -y --no-install-recommends \
-            bc bison flex libssl-dev libelf-dev cpio kmod rsync \
-            gcc-aarch64-linux-gnu device-tree-compiler python3
+            -o Acquire::Retries=5 -o Acquire::ForceIPv4=true "${need[@]}"
 
       - name: Show toolchain versions
         run: |
+          set -euo pipefail
           aarch64-linux-gnu-gcc --version | head -1
           aarch64-linux-gnu-ld --version | head -1
           make --version | head -1
+          bison --version | head -1
+          flex --version
 
       # AOSP's defconfig.mk concatenates the base defconfig with the product
       # ext_config (and the shared moto-mt6768.config) into $(KERNEL_OUT) and
