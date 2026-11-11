@@ -1,5 +1,12 @@
 name: Build corfu kernel (SukiSU-Ultra + SUSFS)
 
+permissions:
+  contents: write   # to attach the failure log as a commit comment
+
+concurrency:
+  group: kernel-build-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: ['arena/a9b14fe3-moto-g-41-corfu-shit', 'MMI-S3SG32.39-191R2']
@@ -52,10 +59,10 @@ jobs:
           done
           if [ ${#need[@]} -gt 0 ]; then
             echo "Missing packages: ${need[*]}"
-            timeout 150 sudo apt-get update -o Acquire::Retries=1 \
+            timeout 90 sudo apt-get update -o Acquire::Retries=1 \
               -o Acquire::http::Timeout=15 -o Acquire::ForceIPv4=true || \
               echo "::warning::apt-get update failed or timed out"
-            timeout 150 sudo apt-get install -y --no-install-recommends \
+            timeout 90 sudo apt-get install -y --no-install-recommends \
               -o Acquire::Retries=1 -o Acquire::http::Timeout=15 \
               -o Acquire::ForceIPv4=true "${need[@]}" || \
               echo "::warning::apt-get install failed or timed out"
@@ -126,6 +133,8 @@ jobs:
           exit "$fail"
 
       - name: Compile kernel (Image.gz + dtbs)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           CLANG_DIR="${RUNNER_TEMP}/clang-r383902"
@@ -140,9 +149,25 @@ jobs:
               CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION=+ \
               Image.gz dtbs 2>&1 | tee build.log; then
             echo "=== COMPILER / LINKER ERRORS ==="
-            grep -E "error:|undefined|No rule to make|Error " build.log | tail -n 40 || true
+            grep -E "error:|Error [0-9]|undefined reference|No rule to make" build.log | tail -n 40 || true
             echo "=== LOG TAIL ==="
-            tail -n 50 build.log || true
+            tail -n 80 build.log || true
+            # Report through channels that do not depend on the Actions log or
+            # artifact blobs: check-run annotations, job summary, commit comment.
+            grep -E "error:|Error [0-9]|undefined reference|No rule to make" build.log \
+              | tail -n 20 | cut -c1-900 \
+              | sed 's/^/::error title=build error::/' || true
+            {
+              echo "## Kernel build failed"
+              echo '```'
+              grep -E "error:|Error [0-9]|undefined reference|No rule to make" build.log | tail -n 80 || true
+              echo "--- tail ---"
+              tail -n 60 build.log || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            python3 .github/scripts/post_build_log.py \
+              "$GITHUB_REPOSITORY" "$GITHUB_SHA" build.log \
+              "Kernel build failed (${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER})" || true
             exit 1
           fi
 
