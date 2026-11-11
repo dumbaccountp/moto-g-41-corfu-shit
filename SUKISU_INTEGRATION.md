@@ -25,9 +25,14 @@ What was added
                                     point used by the patched core files
   drivers/Kconfig                   source "drivers/kernelsu/Kconfig"
   drivers/Makefile                  obj-$(CONFIG_KSU) += kernelsu/
+  fs/susfs.c                        SUSFS v2.3.0 kernel side (see below)
+  include/linux/susfs.h             SUSFS userspace-shared ABI
+  include/linux/susfs_def.h         SUSFS flags, CMD_* ids, helpers
+  .github/workflows/build-kernel.yml CI build (see below)
   arch/arm64/configs/ext_config/moto-k69v1_64-corfu.config
                                     CONFIG_KSU / CONFIG_KPM /
-                                    CONFIG_KALLSYMS_ALL enablement
+                                    CONFIG_KALLSYMS_ALL / CONFIG_KSU_SUSFS*
+                                    enablement
 
   (`moto-k69v1_64_k419-corfu.config` is a symlink to that file, so both the
   4.19 and k419 corfu builds pick the same fragment.)
@@ -61,11 +66,11 @@ Everything else in the tree already had 4.19 branches (SELinux accessors,
 Config
 ------
   CONFIG_KSU=y
-  CONFIG_KSU_FEATURE_ADBROOT=y
+  # CONFIG_KSU_FEATURE_ADBROOT is not set   # adbroot deliberately disabled
   CONFIG_KPM=y                  # selects KALLSYMS + KALLSYMS_ALL
   CONFIG_KALLSYMS_ALL=y         # explicitly set as well (KPM needs it on
                                 # non-GKI to resolve symbols for KPM modules)
-  CONFIG_KSU_SUSFS is not set
+  CONFIG_KSU_SUSFS=y            # + all sub-options, see below
 
   `CONFIG_KALLSYMS_ALL` upstream depends on `DEBUG_KERNEL && KALLSYMS`. In this
   tree DEBUG_KERNEL already resolves to y and KALLSYMS is default y, so the
@@ -77,15 +82,73 @@ Config
   `arch/arm64/configs/ext_config/moto-$(DEFCONFIG_BASENAME).config` last, so
   the MTK base defconfigs stay untouched.
 
-SUSFS is off on purpose
------------------------
-`CONFIG_KSU_SUSFS` expects the susfs4ksu kernel side to be present in the tree
-(`fs/susfs.c`, `include/linux/susfs.h`, `include/linux/susfs_def.h`); the
-SukiSU repo only ships the *glue*. This tree does not carry susfs4ksu, so
-enabling it fails to build. To turn it on: apply susfs4ksu branch
-`kernel-4.19` (gitlab.com/simonpunk/susfs4ksu) to this tree, then flip
-`CONFIG_KSU_SUSFS` and its sub-options in
-`arch/arm64/configs/ext_config/moto-k69v1_64-corfu.config`.
+SUSFS (v2.3.0)
+-------------
+`CONFIG_KSU_SUSFS` only holds the SukiSU *glue* (`extension/susfs_extension/`,
+the `susfs_*_sid` helpers in `selinux/selinux.c`, the `SUSFS_MAGIC` command
+dispatcher in `supercall/dispatch.c`); the kernel side has to be patched in.
+
+SukiSU v4.3.0-r2 calls the **SUSFS v2.x** API — `susfs_add_sus_path_loop(void
+__user **)`, `susfs_enable_log(void __user **)`, `susfs_show_variant()`,
+`susfs_parse_priority_app_strings()`, `susfs_set_priority_uid_filter()`,
+`susfs_set_avc_log_spoofing()`, ... The susfs4ksu `kernel-4.19` mirrors (the
+original GitLab repo is gone; ShirkNeko/midori01/Trijal08/... all mirror the
+same branch) ship **v1.5.5/v1.5.9**, whose signatures are incompatible with
+this driver and will not link.
+
+Applied patch: `50_add_susfs_in_kernel-4.19.patch` from a 4.19 device tree that
+carries SUSFS **v2.3.0** (TALPAD-BOOM-Developers/TALIH-PD2-Kernel, branch
+`susfs+resukisu`). It is self-contained: it adds `fs/susfs.c`,
+`include/linux/susfs.h` and `include/linux/susfs_def.h` and touches 20 existing
+files.
+
+  Applied verbatim (20 files): block/ioprio.c, fs/Makefile, fs/dcache.c,
+  fs/namei.c, fs/namespace.c, fs/notify/fdinfo.c, fs/proc/base.c,
+  fs/proc/cmdline.c, fs/proc/fd.c, fs/proc/task_mmu.c, fs/proc_namespace.c,
+  fs/readdir.c, fs/statfs.c, fs/super.c, kernel/kallsyms.c, kernel/sys.c,
+  mm/memory.c, security/selinux/avc.c, security/selinux/ss/services.c,
+  security/selinux/ss/status.c
+  New files: fs/susfs.c, include/linux/susfs.h, include/linux/susfs_def.h
+
+  Hand-merged (1 file): **fs/stat.c** — the patch's `vfs_getattr_nosec()` hunk
+  collides with our KernelSU include block and with the
+  `ksu_handle_stat()`/`ksu_handle_vfs_fstat()` hooks. Both sides were kept: the
+  SUS_KSTAT result-mask spoofing in `vfs_getattr_nosec()` and the result-mask
+  cleanup in `vfs_statx()`, next to the untouched KernelSU hooks.
+
+  Not applied: `KernelSU/10_enable_susfs_for_ksu.patch` from the same tree. It
+  targets the old flat KernelSU layout (`kernel/core_hook.c`,
+  `kernel/allowlist.c`) and would not apply to `drivers/kernelsu/`; SukiSU
+  already ships that glue natively.
+
+  Symbol audit (`susfs_*` referenced from `drivers/kernelsu` vs. defined by
+  `fs/susfs.c` + the two headers): every reference resolves.
+  `susfs_starts_with()`/`susfs_ends_with()` — used by `feature/adb_root.c` and
+  `kernel/kallsyms.c` — are `static inline` in `susfs_def.h`. The sid helpers
+  (`susfs_get_sid_from_name`, `susfs_set_batch_sid`, `susfs_is_sid_equal`,
+  `susfs_extra_works`, ...) stay owned by `drivers/kernelsu`; the three
+  genuinely shared hooks (`susfs_add_sus_type`,
+  `susfs_add_sus_avd_allowed_by_type`, `susfs_is_current_ksu_domain`) are
+  declared `extern` on the driver side, so each has exactly one definition.
+
+Enabled sub-options:
+
+  CONFIG_KSU_SUSFS=y
+  CONFIG_KSU_SUSFS_SUS_PATH=y
+  CONFIG_KSU_SUSFS_SUS_MOUNT=y
+  CONFIG_KSU_SUSFS_SUS_KSTAT=y
+  CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+  CONFIG_KSU_SUSFS_ENABLE_LOG=y
+  CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+  CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+  CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+  CONFIG_KSU_SUSFS_SUS_MAP=y
+
+`CONFIG_KSU_SUSFS` has `depends on THREAD_INFO_IN_TASK`; arm64 selects that
+unconditionally in `arch/arm64/Kconfig`. SUSFS v2.x keeps its state in high
+`TIF_*` bits (33/34/35) of `task_struct`, which is why `THREAD_INFO_IN_TASK`
+is required — do not backport this to a tree where those flags still live in
+the 32-bit `thread_info.flags`.
 
 ksud preinit blob is disabled automatically
 -------------------------------------------
@@ -102,7 +165,11 @@ alone. If you want the preinit path, run
 
 Verification performed here
 ---------------------------
-  * kconfiglib + merge_config.sh: KSU=y, KPM=y, KALLSYMS=y, KALLSYMS_ALL=y.
+  * kconfiglib: KSU=y, KPM=y, KALLSYMS=y, KALLSYMS_ALL=y, all ten
+    `CONFIG_KSU_SUSFS*` = y, `KSU_FEATURE_ADBROOT` = n.
+  * All 21 SUSFS-touched files compile clean with SUSFS enabled (`fs/susfs.c`
+    included) and `drivers/kernelsu/ksu_main.c` still compiles clean against
+    the v2.3.0 API.
   * Every patched core file compiles clean with CONFIG_KSU=y **and** with
     CONFIG_KSU undefined (so turning the feature off is safe).
   * `drivers/kernelsu/ksu_main.c` — which is a unity build that pulls in the
@@ -111,9 +178,43 @@ Verification performed here
 
   Not verified here: a full vmlinux link and on-device boot. This sandbox has
   no aarch64 gcc/clang toolchain and no bison, so only per-file compilation was
-  possible (zig's clang cross target was used). Build the real kernel with the
-  MTK toolchain and check `CONFIG_KSU`, `CONFIG_KPM` and `CONFIG_KALLSYMS_ALL`
-  in the resulting `.config`.
+  possible (zig's clang cross target was used). The real build runs in GitHub
+  Actions — see below.
+
+Building with GitHub Actions
+----------------------------
+  `.github/workflows/build-kernel.yml`. The repo's `.gitignore` ignored every
+  dotfile, so `.github/` is now explicitly un-ignored there.
+
+  Triggers: push to this branch, pull requests, and `workflow_dispatch` with
+  optional `defconfig` / `ext_config` / `make_targets` inputs.
+
+  Steps, mirroring AOSP's `defconfig.mk` without the AOSP tree:
+
+    1. concatenate, in this order,
+         arch/arm64/configs/k69v1_64_k419_defconfig
+         arch/arm64/configs/ext_config/moto-mt6768.config
+         arch/arm64/configs/ext_config/moto-k69v1_64-corfu.config
+       into `out/.config` (+ `out/mapphone_defconfig`) and run
+       `make defoldconfig` (MTK's own target; AOSP's Android.mk uses it too).
+    2. grep the resolved `.config` and **fail the job** unless every
+       `CONFIG_KSU*` / `CONFIG_KSU_SUSFS*` / `CONFIG_KALLSYMS_ALL` above is `y`
+       and `CONFIG_KSU_FEATURE_ADBROOT` is unset, so a silently dropped option
+       (e.g. a `depends on` that stopped being satisfied) can never yield a
+       "successful" build with the features missing.
+    3. build `Image` with `gcc-aarch64-linux-gnu` from Ubuntu 22.04's archives
+       (`CROSS_COMPILE=aarch64-linux-gnu-`, `KCFLAGS=-fcommon` because gcc 12
+       defaults to `-fno-common`, which this pre-5.6 MTK tree does not expect),
+       with `fetch-depth: 0` because `CONFIG_LOCALVERSION_AUTO=y` needs the tags
+       to compute the `+g<sha>` suffix.
+    4. upload `Image`, `vmlinux`, `System.map` and the resolved `kernel.config`
+       as the `corfu-Image` artifact, plus `build.log`.
+
+  DTBs are *not* built by this workflow: this tree generates its device trees
+  through AOSP's out-of-tree `device/mediatek/build/core/build_dtbimage.mk`
+  (`PLATFORM_DTB_NAME` / `PROJECT_DTB_NAMES`), which is not part of the kernel
+  repo. Use the AOSP build for a flashable boot image; this workflow's job is
+  to prove — and hand you — a kernel `Image` with KSU/KPM/SUSFS compiled in.
 
 Using it
 --------
